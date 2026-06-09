@@ -46,7 +46,7 @@
 		"@vitejs/plugin-react": "^4.1.0",
 		"gulp": "^5.0.0",
 		"gulp-zip": "^6.0.0",
-		"happy-dom": "^20.4.0",
+		"happy-dom": "^20.10.2",
 		"typescript": "^5.2.2",
 		"vite": "^5.4.10"
 	}
