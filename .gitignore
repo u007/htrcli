@@ -27,4 +27,4 @@ CHANGELOG.txt
 *.log
 
 # secrets
-secrets.*.js
+secrets.*.jshtcli/htcli
