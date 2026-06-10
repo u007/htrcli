@@ -558,4 +558,303 @@ Scroll:   0, 0
 
 ---
 
-*Spec version: 1.1 — 2026-06-10*
+## Snapshot, Screenshot & Annotate — Detailed Implementation
+
+These three features require both **extension changes** (new actions in command executor) and **CLI flags** (formatting options).
+
+### Feature 1: Snapshot (Accessibility Tree)
+
+**What it is:** A TEXT-based representation of the page's accessibility tree with `@eN` refs for interactive elements. NOT a visual screenshot.
+
+**Output example:**
+```
+@e1 heading "Login Form" [level=1]
+@e2 textbox "Email" [required]
+  @e3 placeholder="Enter your email"
+@e4 textbox "Password" [required]
+  @e5 placeholder="Enter your password"
+@e6 button "Submit" [enabled]
+```
+
+**CLI usage:**
+```bash
+htcli snapshot                              # Full page accessibility tree
+htcli snapshot --interactive                # Only interactive elements
+htcli snapshot --compact                    # Compact output
+htcli snapshot --depth 3                    # Limit tree depth
+htcli snapshot --selector "#login-form"     # Scope to element
+htcli snapshot --urls                       # Show URLs in links
+htcli snapshot --json                       # Raw JSON output
+```
+
+**Extension implementation (`snapshot` action in command executor):**
+
+The extension needs a new `snapshot` action that:
+
+1. Walks the DOM tree and builds an accessibility tree
+2. Assigns `@eN` refs to interactive elements (buttons, links, inputs, selects, checkboxes, etc.)
+3. Returns the tree as structured JSON
+
+**Options for building the tree:**
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **axe-core library** | Battle-tested, handles edge cases | ~300KB added to extension |
+| **Custom DOM walker** | Lightweight, full control | Must handle all ARIA roles manually |
+| **CDP Accessibility.getFullAXTree** | Most accurate, Chrome-native | Requires background script, more complex |
+
+**Recommended:** Use **axe-core** for Phase 4. It's the industry standard for accessibility tree generation and handles all the edge cases (ARIA roles, states, relationships).
+
+**Extension changes needed:**
+1. Add `axe-core` as a dependency
+2. Add `snapshot` action to `src/contentScript/commandExecutor.ts`
+3. Return structured tree with refs, roles, names, states
+
+**Server types to add:**
+```typescript
+// In src/types/commands.ts
+interface SnapshotNode {
+  ref: string;          // @e1, @e2, etc.
+  role: string;         // heading, button, textbox, etc.
+  name: string;         // Accessible name
+  level?: number;       // Heading level
+  checked?: string;     // Checkbox state
+  disabled?: boolean;
+  required?: boolean;
+  value?: string;       // Current value
+  children: SnapshotNode[];
+}
+
+interface SnapshotResult {
+  tree: SnapshotNode[];
+  refCount: number;     // Total number of refs assigned
+}
+```
+
+---
+
+### Feature 2: Screenshot (Viewport + Full Page)
+
+**What it is:** A VISUAL screenshot (PNG/JPEG image) of the page.
+
+**CLI usage:**
+```bash
+htcli screenshot                              # Viewport screenshot (default)
+htcli screenshot --full                       # Full page screenshot
+htcli screenshot --format jpeg --quality 80   # JPEG format
+htcli screenshot --selector "#login-form"     # Capture specific element
+htcli screenshot output.png                   # Save to specific path
+htcli screenshot --json                       # Return base64 only
+```
+
+**Extension implementation:**
+
+| Mode | How it works | Extension API |
+|------|--------------|---------------|
+| **Viewport** | Capture visible area only | `chrome.tabs.captureVisibleTab()` (already exists) |
+| **Full page** | Scroll + capture + stitch | Need to add: scroll logic + multiple captures |
+| **Element** | Capture specific element bounds | Need to add: element rect + clip capture |
+
+**Viewport screenshot (already supported):**
+```typescript
+// Already in background/index.ts
+chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' })
+```
+
+**Full page screenshot (new):**
+```typescript
+// New action in command executor
+case "screenshot":
+  const options = command.options || {};
+  if (options.full) {
+    return await captureFullPageScreenshot();
+  } else if (options.selector) {
+    return await captureElementScreenshot(options.selector);
+  } else {
+    return await captureViewportScreenshot();
+  }
+```
+
+**Full page capture algorithm:**
+1. Get document dimensions: `document.documentElement.scrollHeight/Width`
+2. Get viewport dimensions: `window.innerHeight/Width`
+3. Calculate number of captures needed
+4. Scroll to each position, capture viewport
+5. Stitch images together (can be done in background script or CLI)
+
+**Extension changes needed:**
+1. Add `screenshot` action to `src/contentScript/commandExecutor.ts`
+2. For full page: implement scroll + capture loop in background script
+3. For element: implement element rect capture
+
+---
+
+### Feature 3: Annotated Screenshot
+
+**What it is:** A visual screenshot with numbered element overlays (like agent-browser's `--annotate`).
+
+**Output:** PNG image with colored numbered circles overlaid on interactive elements.
+
+**CLI usage:**
+```bash
+htcli screenshot --annotate                    # Annotated screenshot
+htcli screenshot --annotate --full             # Full page + annotated
+htcli screenshot --annotate --selector "#form" # Annotate specific element
+htcli screenshot --annotate output.png         # Save annotated screenshot
+```
+
+**Extension implementation:**
+
+The annotated screenshot works by:
+
+1. **Collecting annotations** — Find all interactive elements, get their bounding boxes
+2. **Injecting overlay** — Create positioned HTML/CSS elements with numbered labels
+3. **Capturing screenshot** — Take screenshot with overlay visible
+4. **Removing overlay** — Clean up injected elements
+5. **Returning metadata** — Return both image and annotation positions
+
+**Step-by-step:**
+
+```typescript
+// 1. Collect annotations
+const annotations = collectAnnotations(); // Find all interactive elements
+// Returns: [{ ref: "@e1", number: 1, role: "button", name: "Submit", box: {x, y, w, h} }]
+
+// 2. Inject overlay
+injectAnnotationOverlay(annotations); // Create positioned div elements
+// Creates: <div class="ht-annotation" style="top:100px;left:200px">1</div>
+
+// 3. Capture screenshot
+const screenshot = await captureVisibleTab(); // Or full page
+
+// 4. Remove overlay
+removeAnnotationOverlay(); // Clean up
+
+// 5. Return result
+return { screenshot, annotations };
+```
+
+**Overlay CSS:**
+```css
+.ht-annotation {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  background: #ff4444;
+  color: white;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2147483647;
+  pointer-events: none;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+```
+
+**Extension changes needed:**
+1. Add `collectAnnotations()` function in content script
+2. Add `injectAnnotationOverlay()` / `removeAnnotationOverlay()` functions
+3. Add `screenshot` action with `annotate` option to command executor
+4. Return both image and annotation metadata
+
+---
+
+### Go CLI Implementation
+
+**Types to add (`internal/api/types.go`):**
+```go
+type SnapshotOptions struct {
+    Interactive bool   `json:"interactive,omitempty"`
+    Compact     bool   `json:"compact,omitempty"`
+    Depth       *int   `json:"maxDepth,omitempty"`
+    Selector    string `json:"selector,omitempty"`
+    URLs        bool   `json:"urls,omitempty"`
+}
+
+type ScreenshotOptions struct {
+    Full     bool   `json:"full,omitempty"`
+    Format   string `json:"format,omitempty"`    // png, jpeg
+    Quality  *int   `json:"quality,omitempty"`
+    Selector string `json:"selector,omitempty"`
+    Annotate bool   `json:"annotate,omitempty"`
+}
+
+type SnapshotNode struct {
+    Ref      string         `json:"ref"`
+    Role     string         `json:"role"`
+    Name     string         `json:"name"`
+    Level    *int           `json:"level,omitempty"`
+    Checked  string         `json:"checked,omitempty"`
+    Disabled bool           `json:"disabled,omitempty"`
+    Required bool           `json:"required,omitempty"`
+    Value    string         `json:"value,omitempty"`
+    Children []SnapshotNode `json:"children,omitempty"`
+}
+
+type Annotation struct {
+    Ref    string    `json:"ref"`
+    Number int       `json:"number"`
+    Role   string    `json:"role"`
+    Name   string    `json:"name,omitempty"`
+    Box    BoundingBox `json:"box"`
+}
+
+type BoundingBox struct {
+    X      float64 `json:"x"`
+    Y      float64 `json:"y"`
+    Width  float64 `json:"width"`
+    Height float64 `json:"height"`
+}
+
+type ScreenshotResult struct {
+    Path        string       `json:"path,omitempty"`
+    Base64      string       `json:"base64"`
+    Annotations []Annotation `json:"annotations,omitempty"`
+}
+```
+
+**CLI commands (`internal/commands/inspect.go`):**
+```go
+// snapshot command
+var snapshotCmd = &cobra.Command{
+    Use:   "snapshot",
+    Short: "Get page accessibility tree with @eN refs",
+    RunE: func(cmd *cobra.Command, args []string) error {
+        client := getAPIClient()
+        // Build command with options
+        // Call POST /api/command with action: "snapshot"
+        // Format output as text tree or JSON
+    },
+}
+
+// screenshot command
+var screenshotCmd = &cobra.Command{
+    Use:   "screenshot [path]",
+    Short: "Take screenshot (viewport, full page, or annotated)",
+    Args:  cobra.MaximumNArgs(1),
+    RunE: func(cmd *cobra.Command, args []string) error {
+        client := getAPIClient()
+        // If no flags, use GET /api/screenshot
+        // If --full or --annotate, use POST /api/command with options
+        // Save to file or print path
+    },
+}
+```
+
+---
+
+### Implementation Timeline
+
+| Phase | Feature | Files to Change |
+|-------|---------|-----------------|
+| Phase 4a | Snapshot | Extension: add axe-core, new action. CLI: snapshot command |
+| Phase 4b | Screenshot (viewport) | Already works. CLI: screenshot command |
+| Phase 4c | Screenshot (full page) | Extension: scroll + capture. CLI: --full flag |
+| Phase 4d | Annotated screenshot | Extension: overlay inject/remove. CLI: --annotate flag |
+
+---
+
+*Spec version: 1.2 — 2026-06-10*
