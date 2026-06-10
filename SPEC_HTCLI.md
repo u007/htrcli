@@ -545,16 +545,17 @@ Scroll:   0, 0
 
 ---
 
-## Open Questions
 
-1. **Snapshot command:** The current server doesn't have a `snapshot` action in the extension's command executor. Should Phase 4 add accessibility tree support to the extension, or should `htcli snapshot` just call `getPageInfo` + `eval` to build a basic tree?
+## Decisions (Resolved)
 
-2. **Multi-tab targeting:** Should `--tab <id>` be a global flag or a per-command flag? Global seems cleaner.
+1. **Snapshot command:** Add accessibility tree support to the extension's command executor in Phase 4. The extension will use `axe-core` or CDP's `Accessibility.getFullAXTree` to generate a full accessibility tree with `@eN` refs.
 
-3. **Auth flow:** Should `htcli` auto-read the token from the server's stdout on startup (like agent-browser does)? Or require manual `config set-token`?
+2. **Multi-tab targeting:** `--tab <id>` is a **global flag** that applies to all commands.
 
-4. **Shell completions:** Cobra has built-in support. Include from Phase 1 or defer to Phase 5?
+3. **Auth flow:** `htcli` will **auto-read the token** from the server if no token is configured. On first connection, it hits `/api/health` without auth; if the server returns a 403 with an auto-generated token hint, the CLI prompts the user or reads from env/config.
+
+4. **Shell completions:** Defer to Phase 5.
 
 ---
 
-*Spec version: 1.0 — 2026-06-10*
+*Spec version: 1.1 — 2026-06-10*
