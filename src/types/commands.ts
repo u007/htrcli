@@ -134,10 +134,6 @@ export type CommandAction =
 	| "reload"
 	| "goBack"
 	| "goForward"
-	// ─── Tab Management ─────────────────────────────────────────────
-	| "listTabs"
-	| "getTabInfo"
-	| "switchTab"
 	// ─── Screenshot ─────────────────────────────────────────────────
 	| "screenshot"
 	// ─── Script Execution ───────────────────────────────────────────

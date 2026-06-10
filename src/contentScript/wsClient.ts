@@ -279,21 +279,19 @@ function scheduleReconnect(): void {
 
 // ─── Auto-connect ──────────────────────────────────────────────────
 
-// Check if remote control is enabled via URL parameter or storage
+// Check if remote control is enabled via storage
 async function checkAutoConnect(): Promise<void> {
 	try {
-		// Check storage for server URL
-		const result = await chrome.storage.local.get("remoteControlServer");
+		const result = await chrome.storage.local.get([
+			"remoteControlServer",
+			"remoteControlToken",
+		]);
 		if (result.remoteControlServer) {
-			connectToServer(result.remoteControlServer);
-			return;
-		}
-
-		// Check URL parameter
-		const urlParams = new URLSearchParams(window.location.search);
-		const serverParam = urlParams.get("htr-server");
-		if (serverParam) {
-			connectToServer(serverParam);
+			const token: string | undefined = result.remoteControlToken;
+			const url = token
+				? `${result.remoteControlServer as string}?token=${encodeURIComponent(token)}`
+				: (result.remoteControlServer as string);
+			connectToServer(url);
 		}
 	} catch {
 		// Storage might not be available

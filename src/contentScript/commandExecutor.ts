@@ -337,21 +337,27 @@ function handleClick(target: TargetSelector, button = "left", count = 1): void {
 		clientY: y,
 	};
 
-	// Dispatch mouseover, mouseenter, mousedown, mouseup, click events
-	for (const eventType of [
+	// Dispatch the full mouse event sequence (matching browser event order)
+	const singleClickSequence = [
 		"mouseover",
 		"mouseenter",
 		"mousedown",
 		"mouseup",
 		"click",
-	]) {
-		if (eventType === "click" && count === 2) {
+	];
+
+	for (let i = 0; i < count; i++) {
+		for (const eventType of singleClickSequence) {
 			(element as HTMLElement).dispatchEvent(
-				new MouseEvent("dblclick", eventInit),
+				new MouseEvent(eventType, eventInit),
 			);
 		}
+	}
+
+	// dblclick fires after both click sequences, matching the DOM Level 3 event order
+	if (count === 2) {
 		(element as HTMLElement).dispatchEvent(
-			new MouseEvent(eventType, eventInit),
+			new MouseEvent("dblclick", eventInit),
 		);
 	}
 
@@ -518,7 +524,17 @@ function handleSelect(target: TargetSelector, value: string): void {
 
 	if (element instanceof HTMLSelectElement) {
 		(element as HTMLSelectElement).focus();
-		element.value = value;
+		// Use native setter to bypass React's synthetic event system
+		const nativeSetter = Object.getOwnPropertyDescriptor(
+			HTMLSelectElement.prototype,
+			"value",
+		)?.set;
+		if (nativeSetter) {
+			nativeSetter.call(element, value);
+		} else {
+			element.value = value;
+		}
+		element.dispatchEvent(new Event("input", { bubbles: true }));
 		element.dispatchEvent(new Event("change", { bubbles: true }));
 	} else {
 		throw new Error("Element is not a select");
@@ -531,7 +547,16 @@ function handleCheck(target: TargetSelector, checked: boolean): void {
 
 	if (element instanceof HTMLInputElement) {
 		(element as HTMLInputElement).focus();
-		element.checked = checked;
+		// Use native setter to bypass React's synthetic event system
+		const nativeSetter = Object.getOwnPropertyDescriptor(
+			HTMLInputElement.prototype,
+			"checked",
+		)?.set;
+		if (nativeSetter) {
+			nativeSetter.call(element, checked);
+		} else {
+			element.checked = checked;
+		}
 		element.dispatchEvent(new Event("change", { bubbles: true }));
 	} else {
 		throw new Error("Element is not a checkbox/radio input");

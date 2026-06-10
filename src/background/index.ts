@@ -43,13 +43,6 @@ async function migrateFromChromeStorage(): Promise<void> {
 		const { sessionIndex = [] } =
 			await chrome.storage.local.get("sessionIndex");
 
-		// Import db functions dynamically to avoid circular dependency
-		const {
-			createSession: dbCreateSession,
-			addStep: dbAddStep,
-			addAnnotation: dbAddAnnotation,
-		} = await import("../db/index");
-
 		// Migrate each session
 		for (const meta of sessionIndex) {
 			const result = await chrome.storage.local.get(`session_${meta.id}`);

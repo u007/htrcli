@@ -30,8 +30,8 @@
 		"postinstall:list": "bun run scripts/postinstall.ts list",
 		"postinstall:run": "bun run scripts/postinstall.ts postinstall",
 		"postinstall:all": "bun run scripts/postinstall.ts all",
-		"server": "cd server && npm run start",
-		"server:dev": "cd server && npm run dev"
+		"server": "cd server && bun run start",
+		"server:dev": "cd server && bun run dev"
 	},
 	"dependencies": {
 		"idb": "^8.0.3",

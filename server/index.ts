@@ -18,7 +18,7 @@
  *   HTR_BEARER_TOKEN      - Required bearer token (auto-generated if not set)
  */
 
-import { type WebSocket, WebSocketServer } from "ws";
+import type { ServerWebSocket } from "bun";
 import {
 	type AuthConfig,
 	authorize,
@@ -40,13 +40,20 @@ import type {
 
 const PORT = Number(process.env.HTR_PORT) || 3845;
 const HOST = process.env.HTR_HOST || "127.0.0.1";
+
+// ─── Types ─────────────────────────────────────────────────────────
+
+interface WebSocketData {
+	ip: string;
+}
+
 // ─── State ─────────────────────────────────────────────────────────
 
 /** Connected extension tabs */
 const connectedTabs = new Map<
 	number,
 	{
-		ws: WebSocket;
+		ws: ServerWebSocket<WebSocketData>;
 		tabInfo: TabInfo;
 		lastHeartbeat: number;
 	}
@@ -71,65 +78,49 @@ if (!process.env.HTR_BEARER_TOKEN && authConfig.enableBearerToken) {
 	console.log(`   Set HTR_BEARER_TOKEN env var to use a custom token`);
 }
 
-// ─── WebSocket Handler ─────────────────────────────────────────────
+// ─── WebSocket Handlers (Bun native) ──────────────────────────────
 
-function handleWsConnection(
-	ws: WebSocket,
-	req: import("http").IncomingMessage,
-): void {
-	const ip = extractClientIp(req);
-	const url = req.url || "/";
-
-	// Authorize WebSocket connection
-	const authResult = authorizeWs(ip, url, req.headers, authConfig);
-	if (!authResult.ok) {
-		console.log(`❌ WebSocket rejected: ${authResult.error}`);
-		ws.close(4001, authResult.error);
-		return;
-	}
-
-	console.log(`🔌 Extension connected from ${ip}`);
-
-	ws.on("message", (data) => {
-		try {
-			const message = JSON.parse(data.toString()) as ExtensionMessage;
-			handleExtensionMessage(ws, message);
-		} catch (error) {
-			console.error("Failed to parse extension message:", error);
-		}
-	});
-
-	ws.on("close", () => {
-		// Find and remove the tab
-		for (const [tabId, conn] of connectedTabs.entries()) {
-			if (conn.ws === ws) {
-				connectedTabs.delete(tabId);
-				console.log(`🔌 Tab ${tabId} disconnected`);
-				break;
-			}
-		}
-	});
-
-	ws.on("error", (error) => {
-		console.error("WebSocket error:", error);
-	});
-
-	// Send ping to keep connection alive
-	const pingInterval = setInterval(() => {
-		if (ws.readyState === ws.OPEN) {
-			const pingMsg: ServerMessage = {
-				type: "ping",
-				timestamp: Date.now(),
-			};
-			ws.send(JSON.stringify(pingMsg));
-		} else {
-			clearInterval(pingInterval);
-		}
-	}, 30000);
+function handleWsOpen(ws: ServerWebSocket<WebSocketData>): void {
+	console.log(`🔌 Extension connected from ${ws.data.ip}`);
 }
 
+function handleWsMessage(
+	ws: ServerWebSocket<WebSocketData>,
+	data: string | Buffer,
+): void {
+	try {
+		const message = JSON.parse(data.toString()) as ExtensionMessage;
+		handleExtensionMessage(ws, message);
+	} catch (error) {
+		console.error("Failed to parse extension message:", error);
+	}
+}
+
+function handleWsClose(ws: ServerWebSocket<WebSocketData>): void {
+	for (const [tabId, conn] of connectedTabs.entries()) {
+		if (conn.ws === ws) {
+			connectedTabs.delete(tabId);
+			console.log(`🔌 Tab ${tabId} disconnected`);
+			// Resolve pending commands for this tab so callers don't wait for the timeout
+			for (const [cmdId, pending] of pendingCommands.entries()) {
+				if (pending.tabId === tabId) {
+					clearTimeout(pending.timeout);
+					pending.resolve({
+						id: cmdId,
+						success: false,
+						error: "Tab disconnected",
+					});
+					pendingCommands.delete(cmdId);
+				}
+			}
+			break;
+		}
+	}
+}
+
+
 function handleExtensionMessage(
-	ws: WebSocket,
+	ws: ServerWebSocket<WebSocketData>,
 	message: ExtensionMessage,
 ): void {
 	switch (message.type) {
@@ -181,30 +172,6 @@ function handleExtensionMessage(
 
 // ─── IP Extraction ─────────────────────────────────────────────────
 
-/**
- * Extract the real client IP from an HTTP request.
- * Checks X-Forwarded-For, X-Real-IP, then falls back to socket remoteAddress.
- */
-function extractClientIp(
-	req: import("http").IncomingMessage | import("ws").IncomingMessage,
-): string {
-	const forwarded = req.headers["x-forwarded-for"];
-	if (forwarded) {
-		const firstIp = Array.isArray(forwarded)
-			? forwarded[0]
-			: forwarded.split(",")[0]?.trim();
-		if (firstIp) return firstIp;
-	}
-
-	const realIp = req.headers["x-real-ip"];
-	if (realIp) {
-		return Array.isArray(realIp) ? realIp[0] : realIp;
-	}
-
-	const socket = "socket" in req ? req.socket : undefined;
-	return socket?.remoteAddress || "127.0.0.1";
-}
-
 // ─── HTTP Handlers ─────────────────────────────────────────────────
 
 function jsonResponse<T>(
@@ -243,11 +210,14 @@ function handleCorsHeaders(): Record<string, string> {
 	};
 }
 
-async function handleRequest(req: Request): Promise<Response> {
+async function handleRequest(
+	req: Request,
+	server: ReturnType<typeof Bun.serve>,
+): Promise<Response> {
 	const url = new URL(req.url);
 	const path = url.pathname;
 	const method = req.method;
-	const clientIp = extractClientIpFromRequest(req);
+	const clientIp = extractClientIpFromRequest(req, server);
 
 	// Handle CORS preflight
 	if (method === "OPTIONS") {
@@ -395,8 +365,16 @@ async function handleRequest(req: Request): Promise<Response> {
 	return errorResponse("Not found", 404);
 }
 
-/** Extract client IP from a Web API Request object */
-function extractClientIpFromRequest(req: Request): string {
+/** Extract client IP from a Bun HTTP request, using the real socket address as authoritative source */
+function extractClientIpFromRequest(
+	req: Request,
+	server: ReturnType<typeof Bun.serve>,
+): string {
+	// Use Bun's API for the authoritative remote address
+	const socketAddr = server.requestIP(req);
+	if (socketAddr?.address) return socketAddr.address;
+
+	// Proxied requests may carry the original IP in standard headers
 	const forwarded = req.headers.get("x-forwarded-for");
 	if (forwarded) {
 		const firstIp = forwarded.split(",")[0]?.trim();
@@ -456,57 +434,57 @@ function getFirstTabId(): number | null {
 }
 
 function generateCommandId(): string {
-	return `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+	return `cmd_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 }
 
-// ─── Stale Connection Cleanup ──────────────────────────────────────
+// ─── Stale Connection Cleanup + Ping ──────────────────────────────
 
 setInterval(() => {
 	const now = Date.now();
 	const staleThreshold = 60000; // 60 seconds
+	const pingMsg = JSON.stringify({ type: "ping", timestamp: now } satisfies ServerMessage);
 
 	for (const [tabId, conn] of connectedTabs.entries()) {
 		if (now - conn.lastHeartbeat > staleThreshold) {
 			console.log(`⚠️  Tab ${tabId} stale, disconnecting`);
 			conn.ws.close(4002, "Stale connection");
 			connectedTabs.delete(tabId);
+		} else {
+			conn.ws.send(pingMsg);
 		}
 	}
 }, 30000);
 
 // ─── Start Server ──────────────────────────────────────────────────
 
-const wss = new WebSocketServer({ noServer: true });
-
-const server = Bun.serve({
+const server = Bun.serve<WebSocketData>({
 	port: PORT,
 	hostname: HOST,
-	fetch: handleRequest,
-	// Handle WebSocket upgrade via Bun's built-in support
-	upgrade: (req) => {
+	fetch(req, server) {
 		if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
-			return {
-				headers: {},
-				data: {},
-			};
+			const ip = server.requestIP(req)?.address ?? "127.0.0.1";
+			const reqUrl = new URL(req.url);
+			const authResult = authorizeWs(
+				ip,
+				reqUrl.pathname + reqUrl.search,
+				req.headers,
+				authConfig,
+			);
+			if (!authResult.ok) {
+				console.log(`❌ WebSocket rejected: ${authResult.error}`);
+				return new Response(authResult.error, { status: 401 });
+			}
+			server.upgrade(req, { data: { ip } });
+			return undefined;
 		}
-		return undefined;
+		return handleRequest(req, server);
+	},
+	websocket: {
+		open: handleWsOpen,
+		message: handleWsMessage,
+		close: handleWsClose,
 	},
 });
-
-// Override upgrade to use ws library for proper WebSocket handling
-// This allows ws to handle the protocol negotiation and framing
-const originalFetch = server.fetch;
-server.fetch = async (req, server) => {
-	if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
-		// Let Bun handle the upgrade and we'll use ws for the connection
-		server.upgrade(req);
-		return new Response(null);
-	}
-	return originalFetch(req, server);
-};
-
-wss.on("connection", handleWsConnection);
 
 console.log(`
 ╔══════════════════════════════════════════════════════════╗
