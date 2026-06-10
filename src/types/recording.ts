@@ -1,268 +1,268 @@
 // Element information captured during interactions
 export interface ElementInfo {
-  tag: string
-  text: string // Button/link text content
-  selector: string // Unique CSS selector
-  type?: string // For inputs: text, password, email, etc.
-  name?: string // Field name attribute
-  id?: string // Element ID if present
-  className?: string // Element class names
-  ariaLabel?: string // Accessibility label
+	tag: string;
+	text: string; // Button/link text content
+	selector: string; // Unique CSS selector
+	type?: string; // For inputs: text, password, email, etc.
+	name?: string; // Field name attribute
+	id?: string; // Element ID if present
+	className?: string; // Element class names
+	ariaLabel?: string; // Accessibility label
 }
 
 // Individual recording step
 export interface RecordingStep {
-  id: string
-  timestamp: number // ms from recording start
-  type: 'click' | 'input' | 'navigation'
-  tabId: number
-  tabTitle: string
-  url: string
-  screenshotData?: string // base64 (internal storage)
-  audioData?: string // base64 webm (internal storage)
-  element?: ElementInfo
-  inputValue?: string // Masked if sensitive
-  isSensitive?: boolean
+	id: string;
+	timestamp: number; // ms from recording start
+	type: "click" | "input" | "navigation";
+	tabId: number;
+	tabTitle: string;
+	url: string;
+	screenshotData?: string; // base64 (internal storage)
+	audioData?: string; // base64 webm (internal storage)
+	element?: ElementInfo;
+	inputValue?: string; // Masked if sensitive
+	isSensitive?: boolean;
 }
 
 // User annotation between steps
 export interface Annotation {
-  id: string
-  timestamp: number // Position in timeline (between steps)
-  text: string
-  screenshotData?: string // Optional screenshot
-  audioData?: string // Optional audio note
+	id: string;
+	timestamp: number; // Position in timeline (between steps)
+	text: string;
+	screenshotData?: string; // Optional screenshot
+	audioData?: string; // Optional audio note
 }
 
 // Recording session metadata stored in chrome.storage.local
 export interface SessionMetadata {
-  id: string
-  title: string
-  startTime: number
-  endTime?: number
-  hasAudio: boolean
-  stepCount: number
-  annotationCount: number
+	id: string;
+	title: string;
+	startTime: number;
+	endTime?: number;
+	hasAudio: boolean;
+	stepCount: number;
+	annotationCount: number;
 }
 
 // Full recording session
 export interface RecordingSession {
-  id: string
-  title: string
-  startTime: number
-  endTime?: number
-  isRecording: boolean
-  hasAudio: boolean
-  steps: RecordingStep[]
-  annotations: Annotation[]
-  trackedTabIds: number[]
+	id: string;
+	title: string;
+	startTime: number;
+	endTime?: number;
+	isRecording: boolean;
+	hasAudio: boolean;
+	steps: RecordingStep[];
+	annotations: Annotation[];
+	trackedTabIds: number[];
 }
 
 // Message types for communication between components
 export type MessageType =
-  | 'START_RECORDING'
-  | 'STOP_RECORDING'
-  | 'RECORDING_STARTED'
-  | 'RECORDING_STOPPED'
-  | 'CLICK_EVENT'
-  | 'INPUT_EVENT'
-  | 'NAVIGATION_EVENT'
-  | 'NEW_STEP'
-  | 'ADD_ANNOTATION'
-  | 'UPDATE_ANNOTATION'
-  | 'DELETE_ANNOTATION'
-  | 'GET_RECORDING_STATE'
-  | 'RECORDING_STATE'
-  | 'CAPTURE_SCREENSHOT'
-  | 'SCREENSHOT_CAPTURED'
-  | 'ENABLE_RECORDING'
-  | 'DISABLE_RECORDING'
-  | 'CONTENT_SCRIPT_READY'
-  | 'HIGHLIGHT_ELEMENT'
-  | 'HIDE_HIGHLIGHT'
+	| "START_RECORDING"
+	| "STOP_RECORDING"
+	| "RECORDING_STARTED"
+	| "RECORDING_STOPPED"
+	| "CLICK_EVENT"
+	| "INPUT_EVENT"
+	| "NAVIGATION_EVENT"
+	| "NEW_STEP"
+	| "ADD_ANNOTATION"
+	| "UPDATE_ANNOTATION"
+	| "DELETE_ANNOTATION"
+	| "GET_RECORDING_STATE"
+	| "RECORDING_STATE"
+	| "CAPTURE_SCREENSHOT"
+	| "SCREENSHOT_CAPTURED"
+	| "ENABLE_RECORDING"
+	| "DISABLE_RECORDING"
+	| "CONTENT_SCRIPT_READY"
+	| "HIGHLIGHT_ELEMENT"
+	| "HIDE_HIGHLIGHT";
 
 // Base message structure
 export interface BaseMessage {
-  type: MessageType
+	type: MessageType;
 }
 
 // Start recording message
 export interface StartRecordingMessage extends BaseMessage {
-  type: 'START_RECORDING'
-  title: string
-  hasAudio: boolean
+	type: "START_RECORDING";
+	title: string;
+	hasAudio: boolean;
 }
 
 // Stop recording message
 export interface StopRecordingMessage extends BaseMessage {
-  type: 'STOP_RECORDING'
+	type: "STOP_RECORDING";
 }
 
 // Recording started response
 export interface RecordingStartedMessage extends BaseMessage {
-  type: 'RECORDING_STARTED'
-  sessionId: string
+	type: "RECORDING_STARTED";
+	sessionId: string;
 }
 
 // Recording stopped response
 export interface RecordingStoppedMessage extends BaseMessage {
-  type: 'RECORDING_STOPPED'
-  sessionId: string
+	type: "RECORDING_STOPPED";
+	sessionId: string;
 }
 
 // Click event from content script
 export interface ClickEventMessage extends BaseMessage {
-  type: 'CLICK_EVENT'
-  element: ElementInfo
-  url: string
-  timestamp: number
+	type: "CLICK_EVENT";
+	element: ElementInfo;
+	url: string;
+	timestamp: number;
 }
 
 // Input event from content script
 export interface InputEventMessage extends BaseMessage {
-  type: 'INPUT_EVENT'
-  element: ElementInfo
-  value: string
-  isSensitive: boolean
-  url: string
-  timestamp: number
+	type: "INPUT_EVENT";
+	element: ElementInfo;
+	value: string;
+	isSensitive: boolean;
+	url: string;
+	timestamp: number;
 }
 
 // Navigation event
 export interface NavigationEventMessage extends BaseMessage {
-  type: 'NAVIGATION_EVENT'
-  url: string
-  title: string
-  tabId: number
-  timestamp: number
+	type: "NAVIGATION_EVENT";
+	url: string;
+	title: string;
+	tabId: number;
+	timestamp: number;
 }
 
 // New step notification to side panel
 export interface NewStepMessage extends BaseMessage {
-  type: 'NEW_STEP'
-  step: RecordingStep
+	type: "NEW_STEP";
+	step: RecordingStep;
 }
 
 // Add annotation message
 export interface AddAnnotationMessage extends BaseMessage {
-  type: 'ADD_ANNOTATION'
-  text: string
-  timestamp: number
-  screenshotData?: string
-  audioData?: string
+	type: "ADD_ANNOTATION";
+	text: string;
+	timestamp: number;
+	screenshotData?: string;
+	audioData?: string;
 }
 
 // Update annotation message
 export interface UpdateAnnotationMessage extends BaseMessage {
-  type: 'UPDATE_ANNOTATION'
-  annotationId: string
-  text: string
+	type: "UPDATE_ANNOTATION";
+	annotationId: string;
+	text: string;
 }
 
 // Delete annotation message
 export interface DeleteAnnotationMessage extends BaseMessage {
-  type: 'DELETE_ANNOTATION'
-  annotationId: string
+	type: "DELETE_ANNOTATION";
+	annotationId: string;
 }
 
 // Get recording state message
 export interface GetRecordingStateMessage extends BaseMessage {
-  type: 'GET_RECORDING_STATE'
+	type: "GET_RECORDING_STATE";
 }
 
 // Recording state response
 export interface RecordingStateMessage extends BaseMessage {
-  type: 'RECORDING_STATE'
-  isRecording: boolean
-  session?: RecordingSession
+	type: "RECORDING_STATE";
+	isRecording: boolean;
+	session?: RecordingSession;
 }
 
 // Enable recording in content script
 export interface EnableRecordingMessage extends BaseMessage {
-  type: 'ENABLE_RECORDING'
+	type: "ENABLE_RECORDING";
 }
 
 // Disable recording in content script
 export interface DisableRecordingMessage extends BaseMessage {
-  type: 'DISABLE_RECORDING'
+	type: "DISABLE_RECORDING";
 }
 
 // Content script ready notification
 export interface ContentScriptReadyMessage extends BaseMessage {
-  type: 'CONTENT_SCRIPT_READY'
-  url: string
+	type: "CONTENT_SCRIPT_READY";
+	url: string;
 }
 
 // Highlight element message (for screenshot capture)
 export interface HighlightElementMessage extends BaseMessage {
-  type: 'HIGHLIGHT_ELEMENT'
-  selector: string
+	type: "HIGHLIGHT_ELEMENT";
+	selector: string;
 }
 
 // Hide highlight message
 export interface HideHighlightMessage extends BaseMessage {
-  type: 'HIDE_HIGHLIGHT'
+	type: "HIDE_HIGHLIGHT";
 }
 
 // Union type for all messages
 export type RecordingMessage =
-  | StartRecordingMessage
-  | StopRecordingMessage
-  | RecordingStartedMessage
-  | RecordingStoppedMessage
-  | ClickEventMessage
-  | InputEventMessage
-  | NavigationEventMessage
-  | NewStepMessage
-  | AddAnnotationMessage
-  | UpdateAnnotationMessage
-  | DeleteAnnotationMessage
-  | GetRecordingStateMessage
-  | RecordingStateMessage
-  | EnableRecordingMessage
-  | DisableRecordingMessage
-  | ContentScriptReadyMessage
-  | HighlightElementMessage
-  | HideHighlightMessage
+	| StartRecordingMessage
+	| StopRecordingMessage
+	| RecordingStartedMessage
+	| RecordingStoppedMessage
+	| ClickEventMessage
+	| InputEventMessage
+	| NavigationEventMessage
+	| NewStepMessage
+	| AddAnnotationMessage
+	| UpdateAnnotationMessage
+	| DeleteAnnotationMessage
+	| GetRecordingStateMessage
+	| RecordingStateMessage
+	| EnableRecordingMessage
+	| DisableRecordingMessage
+	| ContentScriptReadyMessage
+	| HighlightElementMessage
+	| HideHighlightMessage;
 
 // Export format types
 export interface ExportedStep {
-  id: string
-  timestamp: number
-  type: 'click' | 'input' | 'navigation'
-  url: string
-  tabTitle: string
-  screenshotPath?: string
-  audioPath?: string
-  element?: ElementInfo
-  inputValue?: string
-  isSensitive?: boolean
+	id: string;
+	timestamp: number;
+	type: "click" | "input" | "navigation";
+	url: string;
+	tabTitle: string;
+	screenshotPath?: string;
+	audioPath?: string;
+	element?: ElementInfo;
+	inputValue?: string;
+	isSensitive?: boolean;
 }
 
 export interface ExportedAnnotation {
-  id: string
-  timestamp: number
-  text: string
-  screenshotPath?: string
-  audioPath?: string
+	id: string;
+	timestamp: number;
+	text: string;
+	screenshotPath?: string;
+	audioPath?: string;
 }
 
 export interface ExportedRecording {
-  id: string
-  title: string
-  startTime: number
-  endTime?: number
-  hasAudio: boolean
-  steps: ExportedStep[]
-  annotations: ExportedAnnotation[]
+	id: string;
+	title: string;
+	startTime: number;
+	endTime?: number;
+	hasAudio: boolean;
+	steps: ExportedStep[];
+	annotations: ExportedAnnotation[];
 }
 
 // Timeline item for unified rendering (step or annotation)
 export type TimelineItem =
-  | { type: 'step'; data: RecordingStep }
-  | { type: 'annotation'; data: Annotation }
+	| { type: "step"; data: RecordingStep }
+	| { type: "annotation"; data: Annotation };
 
 // Utility function to generate unique IDs
-export function generateId(prefix: string = ''): string {
-  return `${prefix}${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+export function generateId(prefix: string = ""): string {
+	return `${prefix}${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }

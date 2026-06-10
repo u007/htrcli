@@ -13,7 +13,7 @@ A Chrome extension that records user interactions (clicks, inputs, navigation) w
 
 ## Installation
 
-### For Development
+### Build & Load Locally
 
 1. **Clone the repository**
    ```bash
@@ -26,16 +26,23 @@ A Chrome extension that records user interactions (clicks, inputs, navigation) w
    bun install
    ```
 
-3. **Build the extension**
+3. **Start the dev server** (with hot reload)
    ```bash
-   bun run build
+   bun run dev
    ```
 
 4. **Load in Chrome**
    - Open `chrome://extensions/`
-   - Enable "Developer mode" (top right)
-   - Click "Load unpacked"
-   - Select the `build/` directory
+   - Enable **Developer mode** (toggle in top right)
+   - Click **Load unpacked**
+   - Select the `build/` directory from this project
+   - The extension icon should appear in your toolbar
+
+5. **(Optional) Start the remote control server**
+   ```bash
+   bun run server
+   ```
+   The server will display a bearer token on startup — use this for API authentication.
 
 ### From Release
 
@@ -61,6 +68,151 @@ A Chrome extension that records user interactions (clicks, inputs, navigation) w
    - Choose from JSON, Markdown, or ZIP formats
    - Review and download your documentation
 
+## Remote Control
+
+How-To Recorder includes a built-in remote control system that allows external tools (like AI agents) to control browser tabs via an HTTP/WebSocket API.
+
+### Quick Start
+
+```bash
+# 1. Start the API server
+bun run server
+
+# 2. The server displays an auth token on startup:
+#    🔑 Auto-generated bearer token: abc123...
+
+# 3. Connect the extension (enable remote control via message or URL parameter)
+
+# 4. Send commands
+curl -H "Authorization: Bearer abc123..." http://127.0.0.1:3845/api/tabs
+```
+
+### Architecture
+
+```
+┌─────────────────┐     HTTP      ┌─────────────────┐     WebSocket     ┌─────────────────┐
+│   External Tool  │ ◄───────────► │   API Server     │ ◄───────────────► │   Extension     │
+│   (AI Agent)     │               │   (port 3845)    │                   │   (Content)     │
+└─────────────────┘               └─────────────────┘                   └─────────────────┘
+```
+
+### Authentication (Enabled by Default)
+
+Both IP whitelist and bearer token are enabled by default:
+
+- **IP Whitelist**: Only `127.0.0.1`, `localhost`, `::1` allowed
+- **Bearer Token**: Auto-generated random 32-char hex token (displayed on server start)
+
+```bash
+# Override with custom token
+HTR_BEARER_TOKEN="my-secret" bun run server
+
+# Disable bearer token (IP whitelist only)
+HTR_ENABLE_BEARER_TOKEN=false bun run server
+
+# Add IPs to whitelist
+HTR_ALLOWED_IPS="127.0.0.1,192.168.1.100" bun run server
+```
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/health` | Health check |
+| `GET` | `/api/tabs` | List connected browser tabs |
+| `GET` | `/api/tabs/:id` | Get specific tab info |
+| `POST` | `/api/tabs/:id/command` | Execute command on specific tab |
+| `POST` | `/api/command` | Execute command on active tab |
+| `GET` | `/api/page` | Get page info (URL, title, dimensions) |
+| `GET` | `/api/screenshot` | Capture screenshot |
+
+### Command Examples
+
+```bash
+# Click an element
+curl -X POST http://127.0.0.1:3845/api/command \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"command":{"id":"1","action":"click","target":{"selector":"#submit-button"}}}'
+
+# Fill a form field by name
+curl -X POST http://127.0.0.1:3845/api/command \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"command":{"id":"2","action":"fill","target":{"name":"email"},"value":"user@example.com"}}'
+
+# Find element by text
+curl -X POST http://127.0.0.1:3845/api/command \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"command":{"id":"3","action":"find","target":{"text":"Submit","tag":"button"}}}'
+
+# Navigate to URL
+curl -X POST http://127.0.0.1:3845/api/command \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"command":{"id":"4","action":"navigate","value":"https://example.com"}}'
+
+# Get page info
+curl -H "Authorization: Bearer YOUR_TOKEN" http://127.0.0.1:3845/api/page
+```
+
+### Element Targeting
+
+Find elements using various strategies:
+
+```json
+{
+  "selector": "#submit-button",        // CSS selector
+  "xpath": "//button[@type='submit']", // XPath
+  "id": "submit-button",               // ID attribute
+  "name": "email",                     // Name attribute
+  "role": "button",                    // ARIA role
+  "label": "Email Address",            // Associated label
+  "placeholder": "Enter email",        // Placeholder text
+  "text": "Submit",                    // Text content
+  "tag": "button",                     // HTML tag
+  "type": "email"                      // Input type
+}
+```
+
+### Available Actions
+
+| Category | Actions |
+|----------|---------|
+| **Finding** | `find`, `findAll`, `wait`, `isVisible`, `isEnabled`, `xpath` |
+| **Inspection** | `getValue`, `getAttribute`, `getText`, `getHTML`, `getBoundingBox`, `getComputedStyle`, `getPageInfo` |
+| **Interaction** | `click`, `dblclick`, `rightclick`, `hover`, `focus`, `blur`, `scrollTo` |
+| **Form Input** | `fill`, `type`, `clear`, `select`, `check`, `uncheck`, `pressKey`, `selectText` |
+| **Navigation** | `navigate`, `reload`, `goBack`, `goForward` |
+| **Visual** | `screenshot`, `highlight`, `unhighlight` |
+| **Script** | `evaluate` (execute JavaScript) |
+
+### WebSocket Protocol
+
+The extension connects to the server via WebSocket for real-time command execution:
+
+```javascript
+// Connect via WebSocket (token as query parameter)
+const ws = new WebSocket('ws://127.0.0.1:3845?token=YOUR_TOKEN');
+
+// Send command
+ws.send(JSON.stringify({
+  type: 'command',
+  command: { id: '1', action: 'click', target: { selector: '#btn' } }
+}));
+
+// Receive result
+ws.onmessage = (event) => {
+  const result = JSON.parse(event.data);
+  console.log(result);
+};
+```
+
+### Full Documentation
+
+See [server/README.md](./server/README.md) for complete API reference and examples in Python, JavaScript, and curl.
+
 ## Development
 
 ### Prerequisites
@@ -78,6 +230,8 @@ bun run test         # Run tests
 bun run check        # Lint and format check
 bun run check:fix    # Auto-fix lint/format issues
 bun run zip          # Build and create distributable ZIP
+bun run server       # Start remote control API server
+bun run server:dev   # Start server with hot reload
 ```
 
 ### Project Structure
@@ -85,13 +239,14 @@ bun run zip          # Build and create distributable ZIP
 ```
 src/
 ├── background/       # Service worker (orchestrates recording)
-├── contentScript/    # Injected scripts (track interactions)
+├── contentScript/    # Injected scripts (track interactions + remote control)
 ├── sidepanel/        # React UI (control panel and timeline)
 │   ├── components/   # UI components
 │   └── context/      # React context providers
 ├── types/            # TypeScript definitions
 ├── utils/            # Export and utility functions
-└── manifest.ts       # Extension manifest configuration
+├── manifest.ts       # Extension manifest configuration
+└── server/           # Remote control API server
 ```
 
 ### Tech Stack
@@ -129,9 +284,10 @@ See [AGENTS.md](./AGENTS.md) for detailed development guidelines and code style 
 
 MIT License - see [LICENSE](./LICENSE) for details.
 
-## Author
+## Authors
 
-Ahren Stevens-Taylor <github+how-to-recorder@stevenstaylor.dev>
+- **Ahren Stevens-Taylor** — Original author <github+how-to-recorder@stevenstaylor.dev>
+- **James Tan** — Owner, remote control system <james.tan@aims-research.com>
 
 ## Acknowledgments
 

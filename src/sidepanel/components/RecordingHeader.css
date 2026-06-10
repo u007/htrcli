@@ -1,174 +1,174 @@
 .recording-header {
-  padding: 16px;
-  border-bottom: 1px solid var(--border-color);
-  background: var(--bg-secondary);
+	padding: 16px;
+	border-bottom: 1px solid var(--border-color);
+	background: var(--bg-secondary);
 }
 
 .recording-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 12px;
 }
 
 .recording-indicator {
-  background: #ef4444;
-  color: white;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 4px;
-  animation: pulse 1.5s infinite;
+	background: #ef4444;
+	color: white;
+	font-size: 10px;
+	font-weight: 700;
+	padding: 2px 6px;
+	border-radius: 4px;
+	animation: pulse 1.5s infinite;
 }
 
 @keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.5;
+	}
 }
 
 .recording-title {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text-primary);
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+	font-weight: 600;
+	font-size: 14px;
+	color: var(--text-primary);
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .step-count {
-  font-size: 12px;
-  color: var(--text-secondary);
+	font-size: 12px;
+	color: var(--text-secondary);
 }
 
 .recording-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+	display: flex;
+	align-items: center;
+	gap: 12px;
 }
 
 .elapsed-time {
-  font-family: 'SF Mono', 'Menlo', monospace;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
+	font-family: "SF Mono", "Menlo", monospace;
+	font-size: 16px;
+	font-weight: 600;
+	color: var(--text-primary);
 }
 
 .btn-stop {
-  background: #ef4444;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
+	background: #ef4444;
+	color: white;
+	border: none;
+	padding: 8px 16px;
+	border-radius: 6px;
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+	transition: background 0.2s;
 }
 
 .btn-stop:hover {
-  background: #dc2626;
+	background: #dc2626;
 }
 
 .btn-primary {
-  background: var(--primary-color);
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
+	background: var(--primary-color);
+	color: white;
+	border: none;
+	padding: 8px 16px;
+	border-radius: 6px;
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+	transition: background 0.2s;
 }
 
 .btn-primary:hover {
-  background: var(--primary-hover);
+	background: var(--primary-hover);
 }
 
 .btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+	opacity: 0.5;
+	cursor: not-allowed;
 }
 
 .btn-primary.btn-large {
-  padding: 12px 24px;
-  font-size: 14px;
+	padding: 12px 24px;
+	font-size: 14px;
 }
 
 .btn-secondary {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s;
+	background: var(--bg-tertiary);
+	color: var(--text-primary);
+	border: 1px solid var(--border-color);
+	padding: 8px 16px;
+	border-radius: 6px;
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+	transition: background 0.2s;
 }
 
 .btn-secondary:hover {
-  background: var(--bg-hover);
+	background: var(--bg-hover);
 }
 
 .no-recording {
-  display: flex;
-  justify-content: center;
-  padding: 8px 0;
+	display: flex;
+	justify-content: center;
+	padding: 8px 0;
 }
 
 /* Start Dialog */
 .start-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
 }
 
 .start-dialog h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-primary);
+	margin: 0;
+	font-size: 16px;
+	font-weight: 600;
+	color: var(--text-primary);
 }
 
-.start-dialog input[type='text'] {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  font-size: 14px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  outline: none;
-  transition: border-color 0.2s;
+.start-dialog input[type="text"] {
+	width: 100%;
+	padding: 10px 12px;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	font-size: 14px;
+	background: var(--bg-primary);
+	color: var(--text-primary);
+	outline: none;
+	transition: border-color 0.2s;
 }
 
-.start-dialog input[type='text']:focus {
-  border-color: var(--primary-color);
+.start-dialog input[type="text"]:focus {
+	border-color: var(--primary-color);
 }
 
 .audio-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  cursor: pointer;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 13px;
+	color: var(--text-secondary);
+	cursor: pointer;
 }
 
 .audio-toggle input {
-  cursor: pointer;
+	cursor: pointer;
 }
 
 .dialog-buttons {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 4px;
 }

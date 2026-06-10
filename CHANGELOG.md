@@ -9,6 +9,17 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 1.0.0 [2026.06.10]
+
+- feat: add remote control system with HTTP/WebSocket API server (`server/`)
+- feat: add content script command executor, element finder, XPath generator, and WebSocket client
+- feat: add shared command types (`src/types/commands.ts`)
+- feat: update manifest with new permissions (tabs, scripting, activeTab)
+- feat: expand README with remote control architecture and API documentation
+- chore: reformat codebase with Biome (tabs, quotes, import ordering)
+- chore: add .bunrc.toml, .npmrc, .pnpmrc for cross-package-manager support
+- chore: update TypeScript and Vite configurations
+
 ## 0.0.0 [2026.01.27]
 
 - feat: initial
