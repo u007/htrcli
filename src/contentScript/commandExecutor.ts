@@ -205,6 +205,14 @@ async function executeAction(command: Command): Promise<unknown> {
 		case "unhighlight":
 			return handleUnhighlight();
 
+		// ─── Tab Management ──────────────────────────────────────────
+		case "listTabs":
+			return handleListTabs();
+		case "getTabInfo":
+			return handleGetTabInfo(options?.tabId as number);
+		case "switchTab":
+			return handleSwitchTab(requireValue(value, action));
+
 		default:
 			throw new Error(`Unknown action: ${action}`);
 	}
@@ -687,3 +695,79 @@ function getPageInfo(): PageInfo {
 		documentWidth: document.documentElement.scrollWidth,
 	};
 }
+
+// ─── Tab Management ──────────────────────────────────────────────
+// These commands require Chrome extension APIs not available in content scripts.
+// They delegate to the background service worker via chrome.runtime.sendMessage().
+
+/**
+ * List all connected browser tabs.
+ */
+async function handleListTabs(): Promise<
+	Array<{ id: number; url: string; title: string; active: boolean }>
+> {
+	const response = await chrome.runtime.sendMessage({ type: "GET_TABS_INFO" });
+	if (!response?.success) {
+		throw new Error(response?.error || "Failed to list tabs");
+	}
+	return response.tabs;
+}
+
+/**
+ * Get info about a specific tab by ID.
+ * If no tabId is provided, returns info about the current tab.
+ */
+async function handleGetTabInfo(
+	tabId?: number,
+): Promise<{ id: number; url: string; title: string; active: boolean }> {
+	// If no tabId specified, get the current tab's info from background
+	if (tabId === undefined) {
+		const response = await chrome.runtime.sendMessage({
+			type: "GET_CURRENT_TAB_ID",
+		});
+		if (!response?.tabId) {
+			throw new Error("No current tab available");
+		}
+		tabId = response.tabId;
+	}
+
+	// Get all tabs and find the one we want
+	const tabsResponse = await chrome.runtime.sendMessage({
+		type: "GET_TABS_INFO",
+	});
+	if (!tabsResponse?.success) {
+		throw new Error(tabsResponse?.error || "Failed to get tab info");
+	}
+
+	const tab = tabsResponse.tabs.find((t: { id: number }) => t.id === tabId);
+	if (!tab) {
+		throw new Error(`Tab ${tabId} not found`);
+	}
+	return tab;
+}
+
+/**
+ * Switch to (activate) a tab by ID.
+ * The value parameter should be the tab ID as a string.
+ */
+async function handleSwitchTab(
+	tabIdStr: string,
+): Promise<{ success: boolean }> {
+	const tabId = Number(tabIdStr);
+	if (Number.isNaN(tabId)) {
+		throw new Error(`Invalid tab ID: ${tabIdStr}`);
+	}
+
+	// Use chrome.tabs.update to activate the tab
+	// This requires the tabs permission and is only available in extension context
+	try {
+		await chrome.tabs.update(tabId, { active: true });
+		return { success: true };
+	} catch (error) {
+		throw new Error(
+			`Failed to switch to tab ${tabId}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+// ─── Page Info ─────────────────────────────────────────────────────

@@ -596,6 +596,8 @@ chrome.runtime.onMessage.addListener(
 			| { type: "EXECUTE_COMMAND"; command: Command; tabId?: number }
 			| { type: "GET_CURRENT_TAB_ID" }
 			| { type: "GET_TABS_INFO" }
+			| { type: "GET_TAB_INFO"; tabId?: number }
+			| { type: "SWITCH_TAB"; tabId: number }
 			| { type: "CAPTURE_SCREENSHOT"; tabId: number }
 			| { type: "GET_RECORDING_STATE" },
 		sender,
@@ -743,6 +745,50 @@ chrome.runtime.onMessage.addListener(
 				case "GET_CURRENT_TAB_ID": {
 					// Return the tab ID of the sender (content script tab)
 					sendResponse({ tabId: sender.tab?.id ?? null });
+					break;
+				}
+
+				case "GET_TAB_INFO": {
+					const msg = message as { type: "GET_TAB_INFO"; tabId?: number };
+					const targetTabId = msg.tabId ?? sender.tab?.id;
+					if (!targetTabId) {
+						sendResponse({
+							success: false,
+							error: "No tab ID specified and sender has no tab",
+						});
+						break;
+					}
+					try {
+						const tab = await chrome.tabs.get(targetTabId);
+						sendResponse({
+							success: true,
+							tab: {
+								id: tab.id || 0,
+								url: tab.url || "",
+								title: tab.title || "",
+								active: tab.active || false,
+							},
+						});
+					} catch (error) {
+						sendResponse({
+							success: false,
+							error: `Tab ${targetTabId} not found: ${error instanceof Error ? error.message : String(error)}`,
+						});
+					}
+					break;
+				}
+
+				case "SWITCH_TAB": {
+					const msg = message as { type: "SWITCH_TAB"; tabId: number };
+					try {
+						await chrome.tabs.update(msg.tabId, { active: true });
+						sendResponse({ success: true });
+					} catch (error) {
+						sendResponse({
+							success: false,
+							error: `Failed to switch to tab ${msg.tabId}: ${error instanceof Error ? error.message : String(error)}`,
+						});
+					}
 					break;
 				}
 

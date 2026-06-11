@@ -140,7 +140,11 @@ export type CommandAction =
 	| "evaluate"
 	// ─── Highlight ──────────────────────────────────────────────────
 	| "highlight"
-	| "unhighlight";
+	| "unhighlight"
+	// ─── Tab Management ────────────────────────────────────────────
+	| "listTabs"
+	| "getTabInfo"
+	| "switchTab";
 
 // ─── Command ────────────────────────────────────────────────────────
 

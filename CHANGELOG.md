@@ -9,6 +9,12 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 1.0.1 [2026.06.11]
+
+- feat: add tab management commands (`listTabs`, `getTabInfo`, `switchTab`)
+- feat: add `GET_TAB_INFO` and `SWITCH_TAB` message handlers in background service worker
+- feat: extend `CommandAction` type with new tab management actions
+
 ## 1.0.0 [2026.06.10]
 
 - feat: add remote control system with HTTP/WebSocket API server (`server/`)
