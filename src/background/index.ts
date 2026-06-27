@@ -10,6 +10,7 @@ import {
 	createSession as dbCreateSession,
 } from "../db/index";
 import type { Command, CommandResult } from "../types/commands";
+import { startNativeHost, getConnectionMode, registerTab } from "./nativeHost";
 import type {
 	AddAnnotationMessage,
 	Annotation,
@@ -599,7 +600,9 @@ chrome.runtime.onMessage.addListener(
 			| { type: "GET_TAB_INFO"; tabId?: number }
 			| { type: "SWITCH_TAB"; tabId: number }
 			| { type: "CAPTURE_SCREENSHOT"; tabId: number }
-			| { type: "GET_RECORDING_STATE" },
+			| { type: "GET_RECORDING_STATE" }
+			| { type: "GET_CONNECTION_STATUS" }
+			| { type: "GET_TAB_ID" },
 		sender,
 		sendResponse,
 	) => {
@@ -778,6 +781,14 @@ chrome.runtime.onMessage.addListener(
 					break;
 				}
 
+				case "GET_CONNECTION_STATUS":
+					sendResponse({ type: "CONNECTION_STATUS", mode: getConnectionMode() });
+					return true;
+
+				case "GET_TAB_ID":
+					sendResponse({ tabId: sender.tab?.id ?? 0 });
+					return true;
+
 				case "SWITCH_TAB": {
 					const msg = message as { type: "SWITCH_TAB"; tabId: number };
 					try {
@@ -917,3 +928,6 @@ chrome.sidePanel
 	.catch(() => {
 		// API might not be available in all contexts
 	});
+
+// Start native host connection
+startNativeHost();
