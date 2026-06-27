@@ -64,7 +64,7 @@
   - `WriteMessage(w io.Writer, data []byte) error` — writes one NM-framed message
   - `NativeMessage` struct — shared envelope for all extension↔daemon messages
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```go
 // htcli/internal/host/native_test.go
@@ -119,14 +119,14 @@ func TestReadMessageEOF(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to confirm failure**
+- [x] **Step 2: Run tests to confirm failure**
 
 ```bash
 cd /Users/james/www/how-to-recorder/htcli && go test ./internal/host/... 2>&1
 ```
 Expected: `cannot find package` or `undefined: host.WriteMessage`
 
-- [ ] **Step 3: Implement native.go**
+- [x] **Step 3: Implement native.go**
 
 ```go
 // htcli/internal/host/native.go
@@ -176,14 +176,14 @@ func WriteMessage(w io.Writer, data []byte) error {
 }
 ```
 
-- [ ] **Step 4: Run tests to confirm pass**
+- [x] **Step 4: Run tests to confirm pass**
 
 ```bash
 cd /Users/james/www/how-to-recorder/htcli && go test ./internal/host/... -v 2>&1
 ```
 Expected: `PASS` for all three tests
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/james/www/how-to-recorder && git add htcli/internal/host/native.go htcli/internal/host/native_test.go && git commit -m "feat(htcli): add NM framing protocol (native.go)"
@@ -211,7 +211,7 @@ cd /Users/james/www/how-to-recorder && git add htcli/internal/host/native.go htc
   - `Command` struct: `{ ID string; Action string; Value string; Target json.RawMessage; Options json.RawMessage }`
   - `CommandResult` struct: `{ ID string; Success bool; Data json.RawMessage; Error string; Duration int }`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```go
 // htcli/internal/host/daemon_test.go
@@ -291,14 +291,14 @@ func TestCommandJSON(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to confirm failure**
+- [x] **Step 2: Run tests to confirm failure**
 
 ```bash
 cd /Users/james/www/how-to-recorder/htcli && go test ./internal/host/... 2>&1
 ```
 Expected: `undefined: host.NewDaemon`
 
-- [ ] **Step 3: Implement daemon.go**
+- [x] **Step 3: Implement daemon.go**
 
 ```go
 // htcli/internal/host/daemon.go
@@ -450,14 +450,14 @@ func mustMarshal(v any) json.RawMessage {
 }
 ```
 
-- [ ] **Step 4: Run tests to confirm pass**
+- [x] **Step 4: Run tests to confirm pass**
 
 ```bash
 cd /Users/james/www/how-to-recorder/htcli && go test ./internal/host/... -v 2>&1
 ```
 Expected: all tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/james/www/how-to-recorder && git add htcli/internal/host/daemon.go htcli/internal/host/daemon_test.go && git commit -m "feat(htcli): add daemon state (tab registry + pending commands)"
@@ -475,7 +475,7 @@ cd /Users/james/www/how-to-recorder && git add htcli/internal/host/daemon.go htc
 - Consumes: `ReadMessage`, `WriteMessage` (Task 1)
 - Produces: `RunRelay()` — blocks until stdin closes or socket disconnects
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```go
 // htcli/internal/host/relay_test.go
@@ -540,14 +540,14 @@ func TestRelayForwardsStdinToSocket(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to confirm failure**
+- [x] **Step 2: Run test to confirm failure**
 
 ```bash
 cd /Users/james/www/how-to-recorder/htcli && go test ./internal/host/... -run TestRelayForwards 2>&1
 ```
 Expected: `undefined: host.RunRelayWithIO`
 
-- [ ] **Step 3: Implement relay.go**
+- [x] **Step 3: Implement relay.go**
 
 ```go
 // htcli/internal/host/relay.go
@@ -624,14 +624,14 @@ func writeErrorToChrome(w io.Writer, msg string) {
 }
 ```
 
-- [ ] **Step 4: Run test to confirm pass**
+- [x] **Step 4: Run test to confirm pass**
 
 ```bash
 cd /Users/james/www/how-to-recorder/htcli && go test ./internal/host/... -v 2>&1
 ```
 Expected: all tests PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/james/www/how-to-recorder && git add htcli/internal/host/relay.go htcli/internal/host/relay_test.go && git commit -m "feat(htcli): add relay mode (stdin/stdout ↔ Unix socket)"
@@ -651,7 +651,7 @@ cd /Users/james/www/how-to-recorder && git add htcli/internal/host/relay.go htcl
   - `NewHTTPServer(d *Daemon, port int, bearerToken string, allowedIPs []string) *http.Server`
   - `StartUnixSocketServer(d *Daemon, socketPath string) error` — blocks, handles relay connections
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 ```go
 // htcli/internal/host/server_test.go  (create this file)
@@ -756,14 +756,14 @@ func TestCommandEndpointNoTabs(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to confirm failure**
+- [x] **Step 2: Run tests to confirm failure**
 
 ```bash
 cd /Users/james/www/how-to-recorder/htcli && go test ./internal/host/... -run "TestHealth|TestTabs|TestBearer|TestCommand" 2>&1
 ```
 Expected: `undefined: host.NewHTTPServer`
 
-- [ ] **Step 3: Implement bridge.go**
+- [x] **Step 3: Implement bridge.go**
 
 ```go
 // htcli/internal/host/bridge.go
@@ -872,7 +872,7 @@ func apiError(w http.ResponseWriter, status int, msg string) {
 }
 ```
 
-- [ ] **Step 4: Implement server.go**
+- [x] **Step 4: Implement server.go**
 
 ```go
 // htcli/internal/host/server.go
@@ -1025,7 +1025,7 @@ func parseTabID(s string) int {
 }
 ```
 
-- [ ] **Step 5: Add missing fmt import to server.go**
+- [x] **Step 5: Add missing fmt import to server.go**
 
 `server.go` uses `fmt.Sprintf` and `fmt.Sscanf` — ensure `"fmt"` is in the import block:
 
@@ -1040,14 +1040,14 @@ import (
 )
 ```
 
-- [ ] **Step 6: Run tests to confirm pass**
+- [x] **Step 6: Run tests to confirm pass**
 
 ```bash
 cd /Users/james/www/how-to-recorder/htcli && go test ./internal/host/... -v 2>&1
 ```
 Expected: all tests PASS including the four new ones
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/james/www/how-to-recorder && git add htcli/internal/host/server.go htcli/internal/host/bridge.go htcli/internal/host/server_test.go && git commit -m "feat(htcli): add daemon HTTP server + bridge"
@@ -1066,7 +1066,7 @@ cd /Users/james/www/how-to-recorder && git add htcli/internal/host/server.go htc
 - Consumes: `host.RunRelay()`, `host.NewDaemon()`, `host.NewHTTPServer()`, `host.StartUnixSocketServer()` (Tasks 1–4)
 - Produces: `htcli serve` CLI command, `htcli install [--extension-id] [--uninstall]` CLI command
 
-- [ ] **Step 1: Implement serve.go**
+- [x] **Step 1: Implement serve.go**
 
 ```go
 // htcli/internal/commands/serve.go
@@ -1155,7 +1155,7 @@ func init() {
 }
 ```
 
-- [ ] **Step 2: Implement install.go**
+- [x] **Step 2: Implement install.go**
 
 ```go
 // htcli/internal/commands/install.go
@@ -1265,7 +1265,7 @@ func init() {
 }
 ```
 
-- [ ] **Step 3: Modify main.go for relay mode detection**
+- [x] **Step 3: Modify main.go for relay mode detection**
 
 ```go
 // htcli/cmd/htcli/main.go
@@ -1292,21 +1292,21 @@ func main() {
 }
 ```
 
-- [ ] **Step 4: Build to confirm it compiles**
+- [x] **Step 4: Build to confirm it compiles**
 
 ```bash
 cd /Users/james/www/how-to-recorder/htcli && go build ./cmd/htcli && echo "BUILD OK" 2>&1
 ```
 Expected: `BUILD OK`
 
-- [ ] **Step 5: Run all tests**
+- [x] **Step 5: Run all tests**
 
 ```bash
 cd /Users/james/www/how-to-recorder/htcli && go test ./... 2>&1
 ```
 Expected: all PASS
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/james/www/how-to-recorder && git add htcli/internal/commands/serve.go htcli/internal/commands/install.go htcli/cmd/htcli/main.go && git commit -m "feat(htcli): add serve + install commands, relay detection in main"
@@ -1326,7 +1326,7 @@ cd /Users/james/www/how-to-recorder && git add htcli/internal/commands/serve.go 
   - Background listens for `{ type: "GET_TAB_ID" }` → responds `{ tabId: number }`
   - Background receives `{ type: "COMMAND_RESULT", commandId: string, result: CommandResult }` from content scripts, forwards to native port
 
-- [ ] **Step 1: Create src/background/nativeHost.ts**
+- [x] **Step 1: Create src/background/nativeHost.ts**
 
 ```typescript
 // src/background/nativeHost.ts
@@ -1477,7 +1477,7 @@ export function registerTab(tabId: number, info: TabInfo): void {
 }
 ```
 
-- [ ] **Step 2: Add nativeHost handlers to src/background/index.ts**
+- [x] **Step 2: Add nativeHost handlers to src/background/index.ts**
 
 Find the bottom of `src/background/index.ts` where `chrome.runtime.onMessage.addListener` is registered. Add the following after all existing handler code (before the closing of the file):
 
@@ -1551,14 +1551,14 @@ And add the startup call at the bottom:
 startNativeHost();
 ```
 
-- [ ] **Step 3: Type-check**
+- [x] **Step 3: Type-check**
 
 ```bash
 cd /Users/james/www/how-to-recorder && bun run typecheck 2>&1
 ```
 Expected: no errors in `src/background/`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /Users/james/www/how-to-recorder && git add src/background/nativeHost.ts src/background/index.ts && git commit -m "feat(extension): add nativeHost background service"
@@ -1578,7 +1578,7 @@ cd /Users/james/www/how-to-recorder && git add src/background/nativeHost.ts src/
 - Consumes: `getConnectionMode` messages from background (Task 6), `connectToServer`, `disconnectFromServer` from wsClient
 - Produces: `connect()`, `disconnect()`, `isConnected(): boolean` (same shape as wsClient exports)
 
-- [ ] **Step 1: Add setTabId to wsClient.ts**
+- [x] **Step 1: Add setTabId to wsClient.ts**
 
 Open `src/contentScript/wsClient.ts`. Find the `getTabId` function and the module-level `let ws` declaration. Add:
 
@@ -1604,7 +1604,7 @@ function getTabId(): number {
 }
 ```
 
-- [ ] **Step 2: Create connectionManager.ts**
+- [x] **Step 2: Create connectionManager.ts**
 
 ```typescript
 // src/contentScript/connectionManager.ts
@@ -1714,7 +1714,7 @@ chrome.runtime.onMessage.addListener((message) => {
 });
 ```
 
-- [ ] **Step 3: Update src/contentScript/index.ts**
+- [x] **Step 3: Update src/contentScript/index.ts**
 
 Find these lines in `index.ts`:
 
@@ -1780,7 +1780,7 @@ function disableRemoteControl(): void {
 
 Also remove the old `checkAutoConnect` call at the bottom of `index.ts` if it calls `wsClient` directly — `connectionManager` now handles auto-connect.
 
-- [ ] **Step 4: Add nativeMessaging to manifest**
+- [x] **Step 4: Add nativeMessaging to manifest**
 
 Open `src/manifest.ts`. Find the `permissions` array:
 
@@ -1811,21 +1811,21 @@ permissions: [
 ],
 ```
 
-- [ ] **Step 5: Type-check entire extension**
+- [x] **Step 5: Type-check entire extension**
 
 ```bash
 cd /Users/james/www/how-to-recorder && bun run typecheck 2>&1
 ```
 Expected: no errors
 
-- [ ] **Step 6: Build extension**
+- [x] **Step 6: Build extension**
 
 ```bash
 cd /Users/james/www/how-to-recorder && bun run build 2>&1
 ```
 Expected: successful build with no errors
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /Users/james/www/how-to-recorder && git add src/contentScript/connectionManager.ts src/contentScript/wsClient.ts src/contentScript/index.ts src/manifest.ts && git commit -m "feat(extension): add connectionManager with native/WS auto-detect"
