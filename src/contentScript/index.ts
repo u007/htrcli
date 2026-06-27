@@ -21,7 +21,7 @@ import {
 	startInputTracking,
 	stopInputTracking,
 } from "./inputHandler";
-import { connectToServer, disconnectFromServer } from "./wsClient";
+import { connect as connectRemote, disconnect as disconnectRemote, isConnected as remoteIsConnected } from "./connectionManager";
 
 console.info("[How-To Recorder] Content script loaded");
 
@@ -166,14 +166,14 @@ async function getTabId(): Promise<number> {
 /**
  * Enable remote control by connecting to the server
  */
-function enableRemoteControl(serverUrl?: string): void {
+function enableRemoteControl(_serverUrl?: string): void {
 	if (remoteControlEnabled) {
 		console.warn("[How-To Recorder] Remote control already enabled");
 		return;
 	}
 
 	remoteControlEnabled = true;
-	connectToServer(serverUrl);
+	connectRemote();
 	console.info("[How-To Recorder] Remote control enabled");
 }
 
@@ -186,7 +186,7 @@ function disableRemoteControl(): void {
 	}
 
 	remoteControlEnabled = false;
-	disconnectFromServer();
+	disconnectRemote();
 	console.info("[How-To Recorder] Remote control disabled");
 }
 

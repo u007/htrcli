@@ -31,6 +31,9 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let isConnecting = false;
 let serverUrl = DEFAULT_SERVER_URL;
 
+// Module-level real tab ID (set by connectionManager once known)
+let realTabId: number | null = null;
+
 // ─── Public API ────────────────────────────────────────────────────
 
 /**
@@ -116,6 +119,14 @@ export function disconnectFromServer(): void {
  */
 export function isConnected(): boolean {
 	return ws?.readyState === WebSocket.OPEN;
+}
+
+/**
+ * Override the pseudo tab ID with the real chrome.tabs ID.
+ * Called by connectionManager after fetching the real ID from background.
+ */
+export function setTabId(id: number): void {
+	realTabId = id;
 }
 
 // ─── Message Handling ──────────────────────────────────────────────
@@ -224,6 +235,7 @@ function registerTab(): void {
 }
 
 function getTabId(): number {
+	if (realTabId !== null) return realTabId;
 	// Content scripts don't have direct access to tab ID
 	// We'll use a hash of the URL as a pseudo-ID
 	// The background script can provide the real tab ID if needed
