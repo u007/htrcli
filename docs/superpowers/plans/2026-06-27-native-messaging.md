@@ -1837,6 +1837,12 @@ cd /Users/james/www/how-to-recorder && git add src/contentScript/connectionManag
 
 This task verifies the full flow end-to-end before shipping.
 
+Current shell smoke-test status:
+- `htcli serve` now starts cleanly after creating the Unix socket parent directory.
+- `/api/health` responds `running` on the daemon.
+- Native host relay registration and a command round-trip both work in a local shell simulation.
+- Steps that require a live Chrome session and extension reload still need browser validation.
+
 - [ ] **Step 1: Build htcli**
 
 ```bash

@@ -9,6 +9,14 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 1.1.0 [2026.06.28]
+
+- feat: redesign options page with remote control settings (server URL, bearer token, enable toggle)
+- feat: add auto-creation of Unix socket parent directory in htcli daemon
+- feat: add unit test for ensureSocketParentDir
+- docs: update native messaging plan with smoke-test status
+- chore: update htcli binary build
+
 ## 1.0.1 [2026.06.11]
 
 - feat: add tab management commands (`listTabs`, `getTabInfo`, `switchTab`)

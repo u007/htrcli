@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -13,6 +14,9 @@ import (
 // Each accepted connection becomes the active relay for the daemon.
 // Blocks until an error occurs.
 func StartUnixSocketServer(d *Daemon, socketPath string) error {
+	if err := ensureSocketParentDir(socketPath); err != nil {
+		return fmt.Errorf("create socket dir: %w", err)
+	}
 	os.Remove(socketPath)
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
@@ -30,6 +34,10 @@ func StartUnixSocketServer(d *Daemon, socketPath string) error {
 		}
 		go handleRelayConn(d, conn)
 	}
+}
+
+func ensureSocketParentDir(socketPath string) error {
+	return os.MkdirAll(filepath.Dir(socketPath), 0700)
 }
 
 func handleRelayConn(d *Daemon, conn net.Conn) {

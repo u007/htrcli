@@ -1,31 +1,112 @@
-@media (prefers-color-scheme: light) {
-	a:hover {
-		color: #61dafb;
-	}
-}
-
 body {
-	min-width: 20rem;
+	min-width: 24rem;
+	margin: 0;
+	font-family:
+		-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	background: #111827;
+	color: #f9fafb;
 }
 
 main {
-	text-align: center;
-	padding: 1em;
+	padding: 2rem;
+	max-width: 480px;
 	margin: 0 auto;
 }
 
 h3 {
-	color: #61dafb;
-	text-transform: uppercase;
-	font-size: 1.5rem;
-	font-weight: 200;
-	line-height: 1.2rem;
-	margin: 2rem auto;
+	color: #3b82f6;
+	font-size: 1.25rem;
+	font-weight: 600;
+	margin: 0 0 1.5rem;
 }
 
-a {
-	font-size: 0.5rem;
-	margin: 0.5rem;
-	color: #cccccc;
-	text-decoration: none;
+h4 {
+	font-size: 1rem;
+	font-weight: 600;
+	margin: 0 0 0.5rem;
+	color: #f9fafb;
+}
+
+.section {
+	background: #1f2937;
+	border: 1px solid #374151;
+	border-radius: 8px;
+	padding: 1.25rem;
+}
+
+.hint,
+.status {
+	font-size: 0.8rem;
+	line-height: 1.4;
+	margin: 0 0 1rem;
+}
+
+.hint {
+	color: #9ca3af;
+}
+
+.status.success {
+	color: #86efac;
+}
+
+.status.error {
+	color: #fca5a5;
+}
+
+.toggle-label {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-size: 0.9rem;
+	cursor: pointer;
+	margin-bottom: 1rem;
+}
+
+.fields {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	margin-bottom: 1rem;
+}
+
+.fields label {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+	font-size: 0.8rem;
+	color: #9ca3af;
+}
+
+.fields input {
+	padding: 0.5rem 0.75rem;
+	background: #111827;
+	border: 1px solid #374151;
+	border-radius: 6px;
+	color: #f9fafb;
+	font-size: 0.875rem;
+	outline: none;
+}
+
+.fields input:focus {
+	border-color: #3b82f6;
+}
+
+button {
+	padding: 0.5rem 1.25rem;
+	background: #3b82f6;
+	color: #fff;
+	border: none;
+	border-radius: 6px;
+	font-size: 0.875rem;
+	cursor: pointer;
+	font-weight: 500;
+}
+
+button:hover {
+	background: #2563eb;
+}
+
+button:disabled {
+	cursor: wait;
+	opacity: 0.75;
 }
