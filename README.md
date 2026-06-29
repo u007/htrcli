@@ -1,6 +1,8 @@
 # How-To Recorder
 
-A Chrome extension that records user interactions (clicks, inputs, navigation) with screenshots and optional audio narration, then exports them as step-by-step documentation.
+A browser extension that records user interactions (clicks, inputs, navigation) with screenshots and optional audio narration, then exports them as step-by-step documentation.
+
+The same source code ships as a **Chrome extension** (Manifest V3) and a **Firefox extension** (Manifest V3 with `sidebar_action`). See [`firefox/`](./firefox/) for the Firefox build.
 
 ## Features
 
@@ -8,6 +10,7 @@ A Chrome extension that records user interactions (clicks, inputs, navigation) w
 - 🎯 **Smart Element Detection** - Tracks clicks and inputs with intelligent selectors
 - 🔒 **Sensitive Data Protection** - Automatically masks passwords and sensitive fields
 - 📝 **Multiple Export Formats** - JSON, Markdown, and ZIP with images
+- 🦊 **Cross-browser** - Chrome side panel and Firefox sidebar (identical UI, same React source)
 - 🎨 **Visual Timeline** - Side panel interface for managing recordings
 - 🎙️ **Audio Support** (planned) - Add voice narration to recordings
 
@@ -43,6 +46,27 @@ A Chrome extension that records user interactions (clicks, inputs, navigation) w
    bun run server
    ```
    The server will display a bearer token on startup — use this for API authentication.
+
+### Firefox (Build & Load Locally)
+
+Firefox uses the same `bun` toolchain with a separate `firefox/` workspace that re-uses 100% of the shared source under `src/`:
+
+1. **Build the Firefox extension** (Manifest V3 with `sidebar_action`)
+   ```bash
+   bun run firefox:build
+   ```
+2. **Load temporarily in Firefox**
+   - Open `about:debugging#/runtime/this-firefox` in Firefox
+   - Click **Load Temporary Add-on…**
+   - Select `firefox/build/manifest.json`
+3. **Open the sidebar** — click the extension's toolbar icon (or use `Ctrl+B` after it's focused) to open the sidebar UI. It's the same React UI as the Chrome side panel.
+4. **(Optional) Build a distributable `.xpi`**
+   ```bash
+   bun run firefox:zip
+   ```
+   This writes `firefox/how-to-recorder-firefox.xpi`, ready for [addons.mozilla.org](https://addons.mozilla.org) upload.
+
+See [`firefox/README.md`](./firefox/README.md) for the full architecture, the polyfill strategy, and how the Chrome and Firefox builds share one source tree.
 
 ### From Release
 

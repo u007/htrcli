@@ -41,6 +41,19 @@ import type {
 const PORT = Number(process.env.HTR_PORT) || 3845;
 const HOST = process.env.HTR_HOST || "127.0.0.1";
 
+// TLS cert paths (relative to this file)
+const CERT_PATH =
+	process.env.HTR_CERT || new URL("cert.pem", import.meta.url).pathname;
+const KEY_PATH =
+	process.env.HTR_KEY || new URL("key.pem", import.meta.url).pathname;
+
+import { existsSync, readFileSync } from "node:fs";
+
+const TLS_ENABLED = existsSync(CERT_PATH) && existsSync(KEY_PATH);
+const tlsConfig = TLS_ENABLED
+	? { cert: readFileSync(CERT_PATH), key: readFileSync(KEY_PATH) }
+	: undefined;
+
 // ─── Types ─────────────────────────────────────────────────────────
 
 interface WebSocketData {
@@ -89,16 +102,25 @@ function handleWsMessage(
 	data: string | Buffer,
 ): void {
 	try {
-		const message = JSON.parse(data.toString()) as ExtensionMessage;
+		const raw = data.toString();
+		const message = JSON.parse(raw) as ExtensionMessage;
+		console.log(
+			`📨 WS message received: ${message.type} (${raw.length} bytes)`,
+		);
 		handleExtensionMessage(ws, message);
 	} catch (error) {
-		console.error("Failed to parse extension message:", error);
+		console.error(
+			`Failed to parse extension message (${data.toString().length} bytes):`,
+			error,
+		);
 	}
 }
 
 function handleWsClose(ws: ServerWebSocket<WebSocketData>): void {
+	let found = false;
 	for (const [tabId, conn] of connectedTabs.entries()) {
 		if (conn.ws === ws) {
+			found = true;
 			connectedTabs.delete(tabId);
 			console.log(`🔌 Tab ${tabId} disconnected`);
 			// Resolve pending commands for this tab so callers don't wait for the timeout
@@ -116,8 +138,10 @@ function handleWsClose(ws: ServerWebSocket<WebSocketData>): void {
 			break;
 		}
 	}
+	if (!found) {
+		console.log(`🔌 Unregistered WS closed (no register msg received)`);
+	}
 }
-
 
 function handleExtensionMessage(
 	ws: ServerWebSocket<WebSocketData>,
@@ -207,6 +231,7 @@ function handleCorsHeaders(): Record<string, string> {
 		"Access-Control-Allow-Origin": "*",
 		"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 		"Access-Control-Allow-Headers": "Content-Type, Authorization",
+		"Access-Control-Allow-Private-Network": "true",
 	};
 }
 
@@ -442,7 +467,10 @@ function generateCommandId(): string {
 setInterval(() => {
 	const now = Date.now();
 	const staleThreshold = 60000; // 60 seconds
-	const pingMsg = JSON.stringify({ type: "ping", timestamp: now } satisfies ServerMessage);
+	const pingMsg = JSON.stringify({
+		type: "ping",
+		timestamp: now,
+	} satisfies ServerMessage);
 
 	for (const [tabId, conn] of connectedTabs.entries()) {
 		if (now - conn.lastHeartbeat > staleThreshold) {
@@ -457,9 +485,10 @@ setInterval(() => {
 
 // ─── Start Server ──────────────────────────────────────────────────
 
-const server = Bun.serve<WebSocketData>({
+const _server = Bun.serve<WebSocketData>({
 	port: PORT,
 	hostname: HOST,
+	...(tlsConfig ? { tls: tlsConfig } : {}),
 	fetch(req, server) {
 		if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
 			const ip = server.requestIP(req)?.address ?? "127.0.0.1";
@@ -474,7 +503,10 @@ const server = Bun.serve<WebSocketData>({
 				console.log(`❌ WebSocket rejected: ${authResult.error}`);
 				return new Response(authResult.error, { status: 401 });
 			}
-			server.upgrade(req, { data: { ip } });
+			server.upgrade(req, {
+				data: { ip },
+				headers: { "Access-Control-Allow-Private-Network": "true" },
+			});
 			return undefined;
 		}
 		return handleRequest(req, server);
@@ -491,8 +523,8 @@ console.log(`
 ║           How-To Recorder Server v0.1.0                 ║
 ╠══════════════════════════════════════════════════════════╣
 ║                                                          ║
-║  HTTP API:  http://${HOST}:${PORT}                       ║
-║  WebSocket: ws://${HOST}:${PORT}                         ║
+║  HTTP API:  ${TLS_ENABLED ? "https" : "http"}://${HOST}:${PORT}                      ║
+║  WebSocket: ${TLS_ENABLED ? "wss" : "ws"}://${HOST}:${PORT}                         ║
 ║                                                          ║
 ║  Auth:                                                  ║
 ║    IP Whitelist: ${authConfig.enableIpWhitelist ? "✅ Enabled" : "❌ Disabled"}                            ║
@@ -510,7 +542,9 @@ console.log(`
 ╚══════════════════════════════════════════════════════════╝
 `);
 
-console.log(`💡 Connect the Chrome extension to ws://${HOST}:${PORT}`);
+console.log(
+	`💡 Connect the Chrome extension to ${TLS_ENABLED ? "wss" : "ws"}://${HOST}:${PORT}`,
+);
 console.log(`💡 Send commands via HTTP to http://${HOST}:${PORT}/api/command`);
 console.log(``);
 

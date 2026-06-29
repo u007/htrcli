@@ -199,6 +199,12 @@ async function executeAction(command: Command): Promise<unknown> {
 		case "evaluate":
 			return handleEvaluate(requireValue(value, action));
 
+		case "fetch":
+			return handleFetchViaBackground(requireValue(value, action), options);
+
+		case "printToPDF":
+			return handlePrintToPDF(options?.tabId as number | undefined);
+
 		// ─── Highlight ────────────────────────────────────────────────
 		case "highlight":
 			return handleHighlight(requireTarget(target, action));
@@ -212,6 +218,17 @@ async function executeAction(command: Command): Promise<unknown> {
 			return handleGetTabInfo(options?.tabId as number);
 		case "switchTab":
 			return handleSwitchTab(requireValue(value, action));
+		case "getSessionStorage":
+			return sessionStorage.getItem(value || "eReceiptData");
+		case "openTab":
+			return handleOpenTab(options as { url: string; sessionData?: string });
+		case "closeTab":
+			return handleCloseTab((options?.tabId as number) || Number(value));
+		case "cdpNavigate":
+			return handleCdpNavigate(
+				options?.tabId as number,
+				requireValue(value, action),
+			);
 
 		default:
 			throw new Error(`Unknown action: ${action}`);
@@ -660,6 +677,68 @@ function handleEvaluate(script: string): unknown {
 	return fn();
 }
 
+async function handlePrintToPDF(targetTabId?: number): Promise<unknown> {
+	let tabId = targetTabId;
+	if (!tabId) {
+		tabId = await new Promise<number>((resolve) => {
+			chrome.runtime.sendMessage(
+				{ type: "GET_TAB_ID" },
+				(resp: { tabId: number }) => resolve(resp.tabId),
+			);
+		});
+	}
+	const response = await chrome.runtime.sendMessage({
+		type: "PRINT_TO_PDF",
+		tabId,
+	});
+	if (!response?.ok) throw new Error(response?.error || "printToPDF failed");
+	return response.data;
+}
+
+async function handleFetchViaBackground(
+	url: string,
+	options?: Record<string, unknown>,
+): Promise<unknown> {
+	// Build default headers; auto-inject AIA JWT only for trusted AIA API origins
+	const AIA_API_ORIGINS = new Set([
+		"https://api.aia.com.my",
+		"https://myaia.aia.com.my",
+	]);
+	const defaultHeaders: Record<string, string> = {
+		"Content-Type": "application/json",
+		Accept: "application/json",
+		"X-Channel-ID": "MYP_WEB",
+		"X-Request-ID": `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+		"Content-Language": "en",
+	};
+	try {
+		const targetOrigin = new URL(url).origin;
+		if (AIA_API_ORIGINS.has(targetOrigin)) {
+			const raw = localStorage.getItem("OAOP_LOGINDATA");
+			if (raw) {
+				const parsed = JSON.parse(raw) as { jwt?: string };
+				if (parsed.jwt)
+					defaultHeaders["Authorization"] = `Bearer ${parsed.jwt}`;
+			}
+		}
+	} catch {
+		// ignore — invalid URL or no AIA login data
+	}
+
+	const response = await chrome.runtime.sendMessage({
+		type: "FETCH_URL",
+		url,
+		method: (options?.method as string) || "POST",
+		headers: (options?.headers as Record<string, string>) ?? defaultHeaders,
+		body: options?.body,
+	});
+	if (!response?.ok)
+		throw new Error(
+			response?.error || `Fetch failed: HTTP ${response?.status}`,
+		);
+	return response.data;
+}
+
 // ─── Highlight Handlers ────────────────────────────────────────────
 
 function handleHighlight(target: TargetSelector): RemoteElementInfo | null {
@@ -694,6 +773,36 @@ function getPageInfo(): PageInfo {
 		documentHeight: document.documentElement.scrollHeight,
 		documentWidth: document.documentElement.scrollWidth,
 	};
+}
+
+async function handleOpenTab(opts: {
+	url: string;
+	sessionData?: string;
+}): Promise<{ tabId: number }> {
+	const response = await chrome.runtime.sendMessage({
+		type: "OPEN_TAB",
+		url: opts.url,
+		sessionData: opts.sessionData,
+	});
+	if (!response?.ok) throw new Error(response?.error || "openTab failed");
+	return { tabId: response.tabId };
+}
+
+async function handleCloseTab(tabId: number): Promise<void> {
+	const response = await chrome.runtime.sendMessage({
+		type: "CLOSE_TAB",
+		tabId,
+	});
+	if (!response?.ok) throw new Error(response?.error || "closeTab failed");
+}
+
+async function handleCdpNavigate(tabId: number, url: string): Promise<void> {
+	const response = await chrome.runtime.sendMessage({
+		type: "CDP_NAVIGATE",
+		tabId,
+		url,
+	});
+	if (!response?.ok) throw new Error(response?.error || "cdpNavigate failed");
 }
 
 // ─── Tab Management ──────────────────────────────────────────────
@@ -757,17 +866,14 @@ async function handleSwitchTab(
 	if (Number.isNaN(tabId)) {
 		throw new Error(`Invalid tab ID: ${tabIdStr}`);
 	}
-
-	// Use chrome.tabs.update to activate the tab
-	// This requires the tabs permission and is only available in extension context
-	try {
-		await chrome.tabs.update(tabId, { active: true });
-		return { success: true };
-	} catch (error) {
-		throw new Error(
-			`Failed to switch to tab ${tabId}: ${error instanceof Error ? error.message : String(error)}`,
-		);
+	const response = await chrome.runtime.sendMessage({
+		type: "SWITCH_TAB",
+		tabId,
+	});
+	if (!response?.success) {
+		throw new Error(response?.error || `Failed to switch to tab ${tabId}`);
 	}
+	return { success: true };
 }
 
 // ─── Page Info ─────────────────────────────────────────────────────

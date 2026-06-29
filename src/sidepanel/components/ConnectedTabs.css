@@ -1,0 +1,129 @@
+.connected-tabs {
+	border-top: 1px solid var(--border-color);
+	font-size: 0.78rem;
+}
+
+.ct-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 8px 16px;
+	cursor: pointer;
+	user-select: none;
+	color: var(--text-secondary);
+}
+
+.ct-header:hover {
+	background: var(--bg-hover);
+}
+
+.ct-title {
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	font-size: 0.7rem;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.ct-count {
+	background: var(--bg-tertiary);
+	color: var(--text-secondary);
+	border-radius: 10px;
+	padding: 0 6px;
+	font-size: 0.68rem;
+	font-weight: 500;
+}
+
+.ct-chevron {
+	font-size: 0.75rem;
+}
+
+.ct-list {
+	list-style: none;
+	margin: 0;
+	padding: 0 8px 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+}
+
+.ct-empty {
+	padding: 8px;
+	color: var(--text-tertiary);
+	text-align: center;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.ct-hint {
+	font-size: 0.68rem;
+	color: var(--text-tertiary);
+	line-height: 1.5;
+	text-align: left;
+	background: var(--bg-tertiary);
+	border-radius: 6px;
+	padding: 6px 8px;
+}
+
+.ct-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 8px;
+	border-radius: 6px;
+	border: 1px solid var(--border-color);
+	background: var(--bg-secondary);
+}
+
+.ct-item.ct-active {
+	border-color: var(--primary-color);
+}
+
+.ct-favicon {
+	width: 14px;
+	height: 14px;
+	flex-shrink: 0;
+	border-radius: 2px;
+}
+
+.ct-favicon-placeholder {
+	width: 14px;
+	height: 14px;
+	flex-shrink: 0;
+	background: var(--bg-tertiary);
+	border-radius: 2px;
+}
+
+.ct-info {
+	flex: 1;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.ct-name {
+	color: var(--text-primary);
+	font-weight: 500;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.ct-id {
+	color: var(--text-tertiary);
+	font-size: 0.65rem;
+	font-family: monospace;
+}
+
+.ct-badge {
+	font-size: 0.62rem;
+	background: var(--primary-color);
+	color: #fff;
+	padding: 1px 5px;
+	border-radius: 4px;
+	flex-shrink: 0;
+}

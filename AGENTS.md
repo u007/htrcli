@@ -4,15 +4,22 @@ Guidelines for AI coding agents working in this Chrome extension codebase.
 
 ## Project Overview
 
-How-To Recorder is a Chrome extension that records user interactions (clicks, inputs, navigation) with screenshots and optional audio narration, then exports them as step-by-step documentation.
+How-To Recorder is a browser extension that records user interactions (clicks, inputs, navigation) with screenshots and optional audio narration, then exports them as step-by-step documentation. The same source code ships as a **Chrome extension** (MV3) and a **Firefox extension** (MV3 with `sidebar_action`); see `firefox/` for the Firefox build.
 
 ### Architecture
 
 - **Background Service Worker** (`src/background/`) - Orchestrates recording, captures screenshots, manages state
 - **Content Scripts** (`src/contentScript/`) - Injected into pages to track clicks/inputs
-- **Side Panel** (`src/sidepanel/`) - React UI for controlling recordings and viewing timeline
+- **Side Panel** (`src/sidepanel/`) - React UI for controlling recordings and viewing timeline (shared by both Chrome and Firefox)
 - **Types** (`src/types/`) - Shared TypeScript interfaces and message types
 - **Utils** (`src/utils/`) - Export functions (JSON, Markdown, ZIP), sensitive field detection
+
+### Cross-browser layout
+
+- The Chrome build uses `@crxjs/vite-plugin` with `src/manifest.ts` (MV3, `side_panel`).
+- The Firefox build lives under `firefox/` and uses plain Vite (the crxjs plugin is Chrome-only) with a small `manifest` emitter built into `firefox/vite.config.ts`. It shares every source file in `src/` and adds only thin entry shims that import `webextension-polyfill` and apply a Firefox-specific `chrome.sidePanel` stub (see `firefox/src/firefox-shims.ts`).
+- The polyfill is loaded first in every entry, so the shared `chrome.*` calls in `src/` resolve to Firefox's native `browser.*` API at runtime without any source modifications.
+- See `firefox/README.md` for the full architecture, build commands, and XPI packaging.
 
 ## Package Manager
 
@@ -32,6 +39,12 @@ bun run build    # TypeScript check + Vite production build (outputs to build/)
 bun run dev      # Start Vite dev server with HMR
 bun run zip      # Build and create distributable ZIP
 bun run preview  # Preview production build
+
+# Firefox (separate workspace under firefox/)
+bun run firefox:build      # tsc -p firefox/tsconfig.json + vite build
+bun run firefox:typecheck  # tsc -p firefox/tsconfig.json --noEmit
+bun run firefox:dev        # Vite dev server for Firefox
+bun run firefox:zip        # Build and create firefox/build/...xpi
 ```
 
 ## Linting & Formatting

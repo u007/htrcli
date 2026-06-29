@@ -110,3 +110,88 @@ button:disabled {
 	cursor: wait;
 	opacity: 0.75;
 }
+
+/* ─── Tabs Section ──────────────────────────────────── */
+
+.tabs-section {
+	margin-bottom: 1rem;
+}
+
+.tabs-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 0.75rem;
+}
+
+.tabs-header h4 {
+	margin: 0;
+}
+
+.btn-sm {
+	padding: 0.25rem 0.75rem;
+	font-size: 0.75rem;
+}
+
+.tab-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.tab-item {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	background: #111827;
+	border: 1px solid #374151;
+	border-radius: 6px;
+	padding: 0.5rem 0.75rem;
+}
+
+.tab-item.tab-active {
+	border-color: #3b82f6;
+}
+
+.tab-favicon {
+	width: 14px;
+	height: 14px;
+	flex-shrink: 0;
+}
+
+.tab-info {
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+	overflow: hidden;
+	flex: 1;
+}
+
+.tab-title {
+	font-size: 0.8rem;
+	font-weight: 500;
+	color: #f9fafb;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.tab-meta {
+	font-size: 0.7rem;
+	color: #6b7280;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.tab-badge {
+	font-size: 0.65rem;
+	background: #1d4ed8;
+	color: #bfdbfe;
+	padding: 0.1rem 0.4rem;
+	border-radius: 4px;
+	flex-shrink: 0;
+}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./Options.css";
 
 const DEFAULT_SERVER_URL = "ws://127.0.0.1:3845";
@@ -6,37 +6,70 @@ const STORAGE_KEYS = ["remoteControlServer", "remoteControlToken"];
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+interface TabInfo {
+	id: number;
+	url: string;
+	title: string;
+	active: boolean;
+	favIconUrl?: string;
+}
+
 export const Options = (): JSX.Element => {
 	const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
 	const [token, setToken] = useState("");
 	const [enabled, setEnabled] = useState(false);
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 	const [saveError, setSaveError] = useState<string | null>(null);
+	const [tabs, setTabs] = useState<TabInfo[]>([]);
 	const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+	const refreshTabs = useCallback(async (): Promise<void> => {
+		try {
+			const res = (await chrome.runtime.sendMessage({
+				type: "GET_READY_TABS",
+			})) as { success?: boolean; tabs?: TabInfo[] } | undefined;
+			if (res?.success && Array.isArray(res.tabs)) {
+				setTabs(res.tabs);
+			}
+		} catch (error) {
+			console.warn("[How-To Recorder] Failed to load connected tabs:", error);
+		}
+	}, []);
+
 	useEffect(() => {
-		chrome.storage.local.get(STORAGE_KEYS, (result) => {
-			const lastError = chrome.runtime.lastError;
-			if (lastError) {
+		void refreshTabs();
+		const interval = setInterval(() => {
+			void refreshTabs();
+		}, 3000);
+		return () => clearInterval(interval);
+	}, [refreshTabs]);
+
+	useEffect(() => {
+		void (async () => {
+			try {
+				const result = (await chrome.storage.local.get(STORAGE_KEYS)) as {
+					remoteControlServer?: string;
+					remoteControlToken?: string;
+				};
+
+				if (
+					typeof result.remoteControlServer === "string" &&
+					result.remoteControlServer
+				) {
+					setServerUrl(result.remoteControlServer);
+					setEnabled(true);
+				}
+
+				if (typeof result.remoteControlToken === "string") {
+					setToken(result.remoteControlToken);
+				}
+			} catch (error) {
 				console.warn(
 					"[How-To Recorder] Failed to load remote control settings:",
-					lastError.message,
+					error,
 				);
-				return;
 			}
-
-			if (
-				typeof result.remoteControlServer === "string" &&
-				result.remoteControlServer
-			) {
-				setServerUrl(result.remoteControlServer);
-				setEnabled(true);
-			}
-
-			if (typeof result.remoteControlToken === "string") {
-				setToken(result.remoteControlToken);
-			}
-		});
+		})();
 
 		return () => {
 			if (successTimeoutRef.current) {
@@ -67,30 +100,15 @@ export const Options = (): JSX.Element => {
 	};
 
 	const persistSettings = async (): Promise<void> => {
-		await new Promise<void>((resolve, reject) => {
-			const finish = (): void => {
-				const lastError = chrome.runtime.lastError;
-				if (lastError) {
-					reject(new Error(lastError.message));
-					return;
-				}
+		if (enabled) {
+			await chrome.storage.local.set({
+				remoteControlServer: serverUrl,
+				remoteControlToken: token,
+			});
+			return;
+		}
 
-				resolve();
-			};
-
-			if (enabled) {
-				chrome.storage.local.set(
-					{
-						remoteControlServer: serverUrl,
-						remoteControlToken: token,
-					},
-					finish,
-				);
-				return;
-			}
-
-			chrome.storage.local.remove(STORAGE_KEYS, finish);
-		});
+		await chrome.storage.local.remove(STORAGE_KEYS);
 	};
 
 	const save = async (): Promise<void> => {
@@ -116,6 +134,39 @@ export const Options = (): JSX.Element => {
 	return (
 		<main>
 			<h3>How-To Recorder Settings</h3>
+
+			<section className="section tabs-section">
+				<div className="tabs-header">
+					<h4>Connected Tabs</h4>
+					<button type="button" className="btn-sm" onClick={refreshTabs}>
+						Refresh
+					</button>
+				</div>
+				{tabs.length === 0 ? (
+					<p className="hint">No tabs connected. Refresh a page to connect.</p>
+				) : (
+					<ul className="tab-list">
+						{tabs.map((tab) => (
+							<li
+								key={tab.id}
+								className={`tab-item${tab.active ? " tab-active" : ""}`}
+							>
+								{tab.favIconUrl && (
+									<img className="tab-favicon" src={tab.favIconUrl} alt="" />
+								)}
+								<div className="tab-info">
+									<span className="tab-title">{tab.title || "(no title)"}</span>
+									<span className="tab-meta">
+										ID: {tab.id} &middot;{" "}
+										{tab.url.length > 50 ? `${tab.url.slice(0, 50)}…` : tab.url}
+									</span>
+								</div>
+								{tab.active && <span className="tab-badge">active</span>}
+							</li>
+						))}
+					</ul>
+				)}
+			</section>
 
 			<section className="section">
 				<h4>Remote Control</h4>

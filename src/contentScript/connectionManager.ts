@@ -6,8 +6,8 @@
 import {
 	connectToServer,
 	disconnectFromServer,
-	isConnected as wsIsConnected,
 	setTabId,
+	isConnected as wsIsConnected,
 } from "./wsClient";
 
 type ConnectionMode = "native" | "ws" | "disconnected";
@@ -32,7 +32,9 @@ export async function connect(): Promise<void> {
 
 	// Native unavailable — fall back to WebSocket
 	mode = "ws";
-	console.log("[ConnectionManager] Native unavailable, falling back to WebSocket");
+	console.log(
+		"[ConnectionManager] Native unavailable, falling back to WebSocket",
+	);
 	await checkAutoConnectWS();
 }
 

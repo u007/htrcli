@@ -52,6 +52,7 @@ export default defineManifest({
 		"scripting", // Inject content scripts into new tabs
 		"sidePanel", // Main UI
 		"nativeMessaging", // Connect to htcli native host
+		"debugger", // CDP Page.printToPDF for headless PDF capture
 	],
 	host_permissions: ["<all_urls>"], // Content script injection on any page
 });

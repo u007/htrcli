@@ -1,0 +1,22 @@
+{
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"types": [
+			"chrome",
+			"firefox-webext-browser",
+			"webextension-polyfill",
+			"bun"
+		],
+		"noEmit": true
+	},
+	"include": [
+		"./src/**/*.ts",
+		"./src/**/*.tsx",
+		"../src/**/*.ts",
+		"../src/**/*.tsx",
+		"./sidepanel.html",
+		"./popup.html",
+		"./options.html"
+	],
+	"exclude": ["build", "node_modules", "../build", "../node_modules"]
+}

@@ -15,13 +15,17 @@ import type {
 } from "../types/recording";
 import { startClickTracking, stopClickTracking } from "./clickHandler";
 import { executeCommand } from "./commandExecutor";
+import {
+	connect as connectRemote,
+	disconnect as disconnectRemote,
+	isConnected as remoteIsConnected,
+} from "./connectionManager";
 import { hideHighlight, removeHighlight, showHighlight } from "./highlighter";
 import {
 	flushPendingInputs,
 	startInputTracking,
 	stopInputTracking,
 } from "./inputHandler";
-import { connect as connectRemote, disconnect as disconnectRemote, isConnected as remoteIsConnected } from "./connectionManager";
 
 console.info("[How-To Recorder] Content script loaded");
 

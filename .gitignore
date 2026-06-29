@@ -9,11 +9,14 @@ node_modules
 # production
 /build
 /package
+/firefox/build
+/firefox/how-to-recorder-firefox.xpi
 
 # CI/CD artifacts
 *.crx
 *.zip
 key.pem
+server/cert.pem
 CHANGELOG.txt
 
 # misc

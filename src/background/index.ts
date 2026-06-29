@@ -10,7 +10,6 @@ import {
 	createSession as dbCreateSession,
 } from "../db/index";
 import type { Command, CommandResult } from "../types/commands";
-import { startNativeHost, getConnectionMode, registerTab } from "./nativeHost";
 import type {
 	AddAnnotationMessage,
 	Annotation,
@@ -24,6 +23,42 @@ import type {
 	StartRecordingMessage,
 	UpdateAnnotationMessage,
 } from "../types/recording";
+import { getConnectionMode, registerTab, startNativeHost } from "./nativeHost";
+
+type ChromeWithSidebarAction = typeof chrome & {
+	sidebarAction?: unknown;
+};
+
+function getContentScriptInjectionFile(): string {
+	const chromeApi = chrome as ChromeWithSidebarAction;
+	return typeof chromeApi.sidebarAction === "undefined"
+		? "src/contentScript/index.ts"
+		: "content.js";
+}
+
+async function registerNativeTab(
+	tabId: number,
+	tab?: chrome.tabs.Tab,
+): Promise<void> {
+	let resolvedTab = tab;
+	if (!resolvedTab) {
+		try {
+			resolvedTab = await chrome.tabs.get(tabId);
+		} catch {
+			return;
+		}
+	}
+
+	if (!resolvedTab?.url || !/^https?:\/\//.test(resolvedTab.url)) return;
+
+	registerTab(tabId, {
+		id: tabId,
+		url: resolvedTab.url || "",
+		title: resolvedTab.title || "",
+		active: resolvedTab.active || false,
+		favIconUrl: resolvedTab.favIconUrl,
+	});
+}
 
 /**
  * Migrate sessions from chrome.storage.local to IndexedDB (one-time migration)
@@ -211,7 +246,7 @@ async function enableRecordingInTab(
 		try {
 			await chrome.scripting.executeScript({
 				target: { tabId },
-				files: ["src/contentScript/index.ts"],
+				files: [getContentScriptInjectionFile()],
 			});
 			// Try again after injection
 			await chrome.tabs.sendMessage(tabId, {
@@ -532,7 +567,7 @@ async function forwardCommand(
 		try {
 			await chrome.scripting.executeScript({
 				target: { tabId: targetTabId },
-				files: ["src/contentScript/index.ts"],
+				files: [getContentScriptInjectionFile()],
 			});
 			// Wait a moment for script to initialize
 			await new Promise((resolve) => setTimeout(resolve, 200));
@@ -576,6 +611,39 @@ async function getTabsInfo(): Promise<
 	}));
 }
 
+async function getReadyTabsInfo(): Promise<
+	Array<{
+		id: number;
+		url: string;
+		title: string;
+		active: boolean;
+		favIconUrl?: string;
+	}>
+> {
+	const tabs = await Promise.all(
+		[...readyTabs].map(async (tabId) => {
+			try {
+				const tab = await chrome.tabs.get(tabId);
+				if (!tab.url || !/^https?:\/\//.test(tab.url)) return null;
+
+				return {
+					id: tab.id ?? tabId,
+					url: tab.url || "",
+					title: tab.title || "",
+					active: tab.active || false,
+					favIconUrl: tab.favIconUrl,
+				};
+			} catch {
+				return null;
+			}
+		}),
+	);
+
+	return tabs.filter(
+		(tab): tab is NonNullable<(typeof tabs)[number]> => tab !== null,
+	);
+}
+
 /**
  * Capture screenshot of a specific tab (for remote control)
  */
@@ -602,7 +670,19 @@ chrome.runtime.onMessage.addListener(
 			| { type: "CAPTURE_SCREENSHOT"; tabId: number }
 			| { type: "GET_RECORDING_STATE" }
 			| { type: "GET_CONNECTION_STATUS" }
-			| { type: "GET_TAB_ID" },
+			| { type: "GET_TAB_ID" }
+			| {
+					type: "FETCH_URL";
+					url: string;
+					method?: string;
+					headers?: Record<string, string>;
+					body?: unknown;
+			  }
+			| { type: "GET_READY_TABS" }
+			| { type: "PRINT_TO_PDF"; tabId: number }
+			| { type: "OPEN_TAB"; url: string; sessionData?: string }
+			| { type: "CDP_NAVIGATE"; tabId: number; url: string }
+			| { type: "CLOSE_TAB"; tabId: number },
 		sender,
 		sendResponse,
 	) => {
@@ -711,6 +791,7 @@ chrome.runtime.onMessage.addListener(
 				case "CONTENT_SCRIPT_READY": {
 					if (sender.tab?.id) {
 						readyTabs.add(sender.tab.id);
+						void registerNativeTab(sender.tab.id, sender.tab);
 						// If we're recording, enable in this tab
 						if (currentSession?.isRecording) {
 							await enableRecordingInTab(
@@ -741,6 +822,12 @@ chrome.runtime.onMessage.addListener(
 
 				case "GET_TABS_INFO": {
 					const tabs = await getTabsInfo();
+					sendResponse({ success: true, tabs });
+					break;
+				}
+
+				case "GET_READY_TABS": {
+					const tabs = await getReadyTabsInfo();
 					sendResponse({ success: true, tabs });
 					break;
 				}
@@ -782,7 +869,10 @@ chrome.runtime.onMessage.addListener(
 				}
 
 				case "GET_CONNECTION_STATUS":
-					sendResponse({ type: "CONNECTION_STATUS", mode: getConnectionMode() });
+					sendResponse({
+						type: "CONNECTION_STATUS",
+						mode: getConnectionMode(),
+					});
 					return true;
 
 				case "GET_TAB_ID":
@@ -810,6 +900,178 @@ chrome.runtime.onMessage.addListener(
 					break;
 				}
 
+				case "PRINT_TO_PDF": {
+					const msg = message as { type: "PRINT_TO_PDF"; tabId: number };
+					const target = { tabId: msg.tabId };
+					try {
+						await chrome.debugger.attach(target, "1.3");
+						try {
+							await chrome.debugger.sendCommand(target, "Page.enable");
+							const result = (await chrome.debugger.sendCommand(
+								target,
+								"Page.printToPDF",
+								{
+									printBackground: true,
+									preferCSSPageSize: true,
+								},
+							)) as { data: string };
+							sendResponse({ ok: true, data: result.data });
+						} finally {
+							await chrome.debugger.detach(target);
+						}
+					} catch (error) {
+						console.error("[How-To Recorder] PRINT_TO_PDF error:", error);
+						sendResponse({
+							ok: false,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					break;
+				}
+
+				case "FETCH_URL": {
+					const msg = message as {
+						type: "FETCH_URL";
+						url: string;
+						method?: string;
+						headers?: Record<string, string>;
+						body?: unknown;
+					};
+					try {
+						const resp = await fetch(msg.url, {
+							method: msg.method || "GET",
+							credentials: "include",
+							headers: msg.headers || { "Content-Type": "application/json" },
+							body:
+								msg.body !== undefined ? JSON.stringify(msg.body) : undefined,
+						});
+						const text = await resp.text();
+						let data: unknown;
+						try {
+							data = JSON.parse(text);
+						} catch {
+							data = text;
+						}
+						sendResponse({ ok: resp.ok, status: resp.status, data });
+					} catch (error) {
+						console.error("[How-To Recorder] FETCH_URL error:", error);
+						sendResponse({
+							ok: false,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					break;
+				}
+
+				case "OPEN_TAB": {
+					const msg = message as {
+						type: "OPEN_TAB";
+						url: string;
+						sessionData?: string;
+					};
+					try {
+						const tab = await chrome.tabs.create({
+							url: msg.url,
+							active: false,
+						});
+						if (tab.id == null) {
+							throw new Error("Opened tab has no id");
+						}
+						const tabId = tab.id;
+						// Wait for initial load
+						await new Promise<void>((resolve) => {
+							const onUpdated = (
+								tid: number,
+								info: chrome.tabs.TabChangeInfo,
+							) => {
+								if (tid === tabId && info.status === "complete") {
+									chrome.tabs.onUpdated.removeListener(onUpdated);
+									resolve();
+								}
+							};
+							chrome.tabs.onUpdated.addListener(onUpdated);
+							// Fallback: 15s
+							setTimeout(resolve, 15000);
+						});
+						if (msg.sessionData) {
+							// Inject sessionStorage into the page (main world)
+							await chrome.scripting.executeScript({
+								target: { tabId },
+								world: "MAIN",
+								func: (data: string) => {
+									sessionStorage.setItem("eReceiptData", data);
+								},
+								args: [msg.sessionData],
+							});
+							// Navigate to the preview URL (re-run in case tab redirected)
+							await chrome.tabs.update(tabId, { url: msg.url });
+							await new Promise<void>((resolve) => {
+								const onUpdated = (
+									tid: number,
+									info: chrome.tabs.TabChangeInfo,
+								) => {
+									if (tid === tabId && info.status === "complete") {
+										chrome.tabs.onUpdated.removeListener(onUpdated);
+										resolve();
+									}
+								};
+								chrome.tabs.onUpdated.addListener(onUpdated);
+								setTimeout(resolve, 15000);
+							});
+						}
+						sendResponse({ ok: true, tabId });
+					} catch (error) {
+						console.error("[How-To Recorder] OPEN_TAB error:", error);
+						sendResponse({
+							ok: false,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					break;
+				}
+
+				case "CDP_NAVIGATE": {
+					const msg = message as {
+						type: "CDP_NAVIGATE";
+						tabId: number;
+						url: string;
+					};
+					const target = { tabId: msg.tabId };
+					try {
+						await chrome.debugger.attach(target, "1.3");
+						try {
+							await chrome.debugger.sendCommand(target, "Page.navigate", {
+								url: msg.url,
+							});
+						} finally {
+							await chrome.debugger.detach(target);
+						}
+						sendResponse({ ok: true });
+					} catch (error) {
+						console.error("[How-To Recorder] CDP_NAVIGATE error:", error);
+						sendResponse({
+							ok: false,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					break;
+				}
+
+				case "CLOSE_TAB": {
+					const msg = message as { type: "CLOSE_TAB"; tabId: number };
+					try {
+						await chrome.tabs.remove(msg.tabId);
+						sendResponse({ ok: true });
+					} catch (error) {
+						console.error("[How-To Recorder] CLOSE_TAB error:", error);
+						sendResponse({
+							ok: false,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					break;
+				}
+
 				default:
 					sendResponse({ success: false, error: "Unknown message type" });
 			}
@@ -829,6 +1091,10 @@ chrome.runtime.onMessage.addListener(
 
 // Track tab navigation for recording new pages
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+	if (changeInfo.status === "complete") {
+		void registerNativeTab(tabId, tab);
+	}
+
 	if (!currentSession?.isRecording) return;
 	if (!currentSession.trackedTabIds.includes(tabId)) return;
 

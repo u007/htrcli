@@ -138,13 +138,19 @@ export type CommandAction =
 	| "screenshot"
 	// ─── Script Execution ───────────────────────────────────────────
 	| "evaluate"
+	| "fetch"
+	| "printToPDF"
 	// ─── Highlight ──────────────────────────────────────────────────
 	| "highlight"
 	| "unhighlight"
 	// ─── Tab Management ────────────────────────────────────────────
 	| "listTabs"
 	| "getTabInfo"
-	| "switchTab";
+	| "switchTab"
+	| "getSessionStorage"
+	| "openTab"
+	| "closeTab"
+	| "cdpNavigate";
 
 // ─── Command ────────────────────────────────────────────────────────
 
