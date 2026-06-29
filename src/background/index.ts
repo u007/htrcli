@@ -645,6 +645,53 @@ async function getReadyTabsInfo(): Promise<
 }
 
 /**
+ * Ensure the content script is running in every open http(s) tab.
+ *
+ * The declarative `content_scripts` manifest entry only runs on page
+ * load/navigation, so tabs that were already open when the extension
+ * was installed/enabled (or that were open before the user granted host
+ * access on Firefox) never get a content script and therefore never
+ * register as "ready". This walks the open tabs and programmatically
+ * injects the content script into any that aren't ready yet, using the
+ * file list declared in the manifest so the same code works for both
+ * the Chrome (crxjs, hashed filenames) and Firefox (`content.js`)
+ * builds.
+ *
+ * Injection requires host access for each tab; on Firefox (where
+ * `<all_urls>` is opt-in) the calls below simply fail until the user
+ * grants access, which is why the side panel exposes a "Grant access"
+ * action that requests it before calling this.
+ */
+async function ensureContentScriptsInjected(): Promise<void> {
+	const manifest = chrome.runtime.getManifest();
+	const files = manifest.content_scripts?.[0]?.js ?? [];
+	if (files.length === 0) return;
+
+	let tabs: chrome.tabs.Tab[];
+	try {
+		tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+	} catch {
+		return;
+	}
+
+	await Promise.all(
+		tabs.map(async (tab) => {
+			if (typeof tab.id !== "number") return;
+			if (readyTabs.has(tab.id)) return;
+			try {
+				await chrome.scripting.executeScript({
+					target: { tabId: tab.id },
+					files,
+				});
+			} catch {
+				// No host access for this tab (common on Firefox until
+				// the user grants it), or a restricted page — skip it.
+			}
+		}),
+	);
+}
+
+/**
  * Capture screenshot of a specific tab (for remote control)
  */
 async function captureTabScreenshot(
@@ -679,6 +726,7 @@ chrome.runtime.onMessage.addListener(
 					body?: unknown;
 			  }
 			| { type: "GET_READY_TABS" }
+			| { type: "SYNC_READY_TABS" }
 			| { type: "PRINT_TO_PDF"; tabId: number }
 			| { type: "OPEN_TAB"; url: string; sessionData?: string }
 			| { type: "CDP_NAVIGATE"; tabId: number; url: string }
@@ -827,6 +875,19 @@ chrome.runtime.onMessage.addListener(
 				}
 
 				case "GET_READY_TABS": {
+					const tabs = await getReadyTabsInfo();
+					sendResponse({ success: true, tabs });
+					break;
+				}
+
+				case "SYNC_READY_TABS": {
+					// Inject the content script into any open http(s) tabs
+					// that aren't connected yet (used after the user grants
+					// host access), then return the refreshed list. The
+					// injected scripts announce readiness asynchronously, so
+					// give them a brief moment before reporting back.
+					await ensureContentScriptsInjected();
+					await new Promise((resolve) => setTimeout(resolve, 300));
 					const tabs = await getReadyTabsInfo();
 					sendResponse({ success: true, tabs });
 					break;
@@ -1197,3 +1258,16 @@ chrome.sidePanel
 
 // Start native host connection
 startNativeHost();
+
+// Connect already-open tabs on install/enable and on browser startup.
+// Declarative content scripts only run on navigation, so without this a
+// freshly installed/enabled extension shows zero connected tabs until
+// every tab is manually reloaded. Injection is best-effort and silently
+// skips tabs we lack host access for (e.g. before the user opts in on
+// Firefox).
+chrome.runtime.onInstalled.addListener(() => {
+	void ensureContentScriptsInjected();
+});
+chrome.runtime.onStartup.addListener(() => {
+	void ensureContentScriptsInjected();
+});

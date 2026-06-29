@@ -306,31 +306,48 @@ window.addEventListener("how-to-recorder:unhighlight", () => {
 
 // ─── Initialize ───────────────────────────────────────────────────
 
-// Listen for messages from background script
-chrome.runtime.onMessage.addListener(handleMessage);
+// This content script can be loaded two ways: declaratively (via the
+// manifest `content_scripts` entry, on page load) or programmatically
+// (via `chrome.scripting.executeScript`, e.g. after the user grants
+// host access on Firefox where `<all_urls>` is opt-in). Both paths run
+// this module's top-level code in the same isolated world, so guard the
+// one-time listener registration to avoid double-handling messages.
+interface ContentScriptWindow extends Window {
+	__howToRecorderInitialized?: boolean;
+}
+const contentWindow = window as ContentScriptWindow;
 
-// Notify background script that content script is ready
+if (!contentWindow.__howToRecorderInitialized) {
+	contentWindow.__howToRecorderInitialized = true;
+
+	// Listen for messages from background script
+	chrome.runtime.onMessage.addListener(handleMessage);
+
+	// Handle page unload - ensure any pending data is sent
+	window.addEventListener("beforeunload", () => {
+		if (isRecording) {
+			flushPendingInputs();
+		}
+		// Disconnect from remote control server
+		if (remoteControlEnabled) {
+			disableRemoteControl();
+		}
+	});
+
+	// Handle visibility change - could be used for pausing recording
+	document.addEventListener("visibilitychange", () => {
+		if (document.hidden && isRecording) {
+			// Page became hidden, flush pending inputs
+			flushPendingInputs();
+		}
+	});
+}
+
+// Always (re-)announce readiness so the background's `readyTabs` set is
+// repopulated even when the content script was injected programmatically
+// or the background service worker/event page restarted and lost state.
 chrome.runtime
 	.sendMessage({ type: "CONTENT_SCRIPT_READY", url: window.location.href })
 	.catch(() => {
 		// Ignore errors if background script isn't listening yet
 	});
-
-// Handle page unload - ensure any pending data is sent
-window.addEventListener("beforeunload", () => {
-	if (isRecording) {
-		flushPendingInputs();
-	}
-	// Disconnect from remote control server
-	if (remoteControlEnabled) {
-		disableRemoteControl();
-	}
-});
-
-// Handle visibility change - could be used for pausing recording
-document.addEventListener("visibilitychange", () => {
-	if (document.hidden && isRecording) {
-		// Page became hidden, flush pending inputs
-		flushPendingInputs();
-	}
-});

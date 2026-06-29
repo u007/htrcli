@@ -9,9 +9,18 @@ interface TabInfo {
 	favIconUrl?: string;
 }
 
+// The host access the content scripts need in order to connect tabs for
+// remote control. On Chrome this is granted at install time; on Firefox
+// MV3 `<all_urls>` is opt-in, so the extension has to request it from a
+// user gesture before any tab can connect.
+const REMOTE_CONTROL_ORIGINS = ["<all_urls>"];
+
 export function ConnectedTabs() {
 	const [tabs, setTabs] = useState<TabInfo[]>([]);
 	const [collapsed, setCollapsed] = useState(false);
+	// `null` while we haven't checked yet. `true`/`false` once known.
+	const [hasAccess, setHasAccess] = useState<boolean | null>(null);
+	const [requesting, setRequesting] = useState(false);
 
 	const refresh = useCallback(async (): Promise<void> => {
 		try {
@@ -26,13 +35,60 @@ export function ConnectedTabs() {
 		}
 	}, []);
 
+	const checkAccess = useCallback(async (): Promise<void> => {
+		// `chrome.permissions` is unavailable in some contexts; treat its
+		// absence as "access granted" so we don't block Chrome users.
+		if (!chrome.permissions?.contains) {
+			setHasAccess(true);
+			return;
+		}
+		try {
+			const granted = await chrome.permissions.contains({
+				origins: REMOTE_CONTROL_ORIGINS,
+			});
+			setHasAccess(granted);
+		} catch {
+			setHasAccess(true);
+		}
+	}, []);
+
+	const requestAccess = useCallback(async (): Promise<void> => {
+		if (!chrome.permissions?.request) return;
+		setRequesting(true);
+		try {
+			const granted = await chrome.permissions.request({
+				origins: REMOTE_CONTROL_ORIGINS,
+			});
+			setHasAccess(granted);
+			if (granted) {
+				// Connect tabs that were already open before access was
+				// granted, then show the refreshed list.
+				const res = (await chrome.runtime.sendMessage({
+					type: "SYNC_READY_TABS",
+				})) as { success?: boolean; tabs?: TabInfo[] } | undefined;
+				if (res?.success && Array.isArray(res.tabs)) {
+					setTabs(res.tabs);
+				} else {
+					await refresh();
+				}
+			}
+		} catch {
+			// User dismissed the prompt or the API is unavailable.
+		} finally {
+			setRequesting(false);
+		}
+	}, [refresh]);
+
 	useEffect(() => {
+		void checkAccess();
 		void refresh();
 		const id = setInterval(() => {
 			void refresh();
 		}, 3000);
 		return () => clearInterval(id);
-	}, [refresh]);
+	}, [checkAccess, refresh]);
+
+	const needsAccess = hasAccess === false;
 
 	return (
 		<div className="connected-tabs">
@@ -56,13 +112,30 @@ export function ConnectedTabs() {
 
 			{!collapsed && (
 				<ul className="ct-list">
-					{tabs.length === 0 ? (
+					{needsAccess ? (
+						<li className="ct-empty">
+							<span>This extension needs access to your tabs.</span>
+							<span className="ct-hint">
+								Firefox doesn't grant site access automatically. Click below and
+								allow access to all sites so tabs can connect for remote
+								control.
+							</span>
+							<button
+								type="button"
+								className="ct-grant"
+								onClick={() => void requestAccess()}
+								disabled={requesting}
+							>
+								{requesting ? "Requesting…" : "Grant access to tabs"}
+							</button>
+						</li>
+					) : tabs.length === 0 ? (
 						<li className="ct-empty">
 							<span>No tabs connected.</span>
 							<span className="ct-hint">
-								If tabs are not visible: go to the nav bar → click the site
-								settings icon → disable this extension → re-enable it → then
-								refresh the page.
+								Open or reload an http(s) page to connect it. If tabs still
+								aren't visible: go to the nav bar → click the site settings icon
+								→ disable this extension → re-enable it → then refresh the page.
 							</span>
 						</li>
 					) : (
