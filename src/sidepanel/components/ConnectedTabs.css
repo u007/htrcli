@@ -68,6 +68,28 @@
 	padding: 6px 8px;
 }
 
+.ct-grant {
+	align-self: stretch;
+	margin-top: 2px;
+	padding: 6px 10px;
+	border: none;
+	border-radius: 6px;
+	background: var(--primary-color);
+	color: #fff;
+	font-size: 0.72rem;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.ct-grant:hover:not(:disabled) {
+	filter: brightness(1.08);
+}
+
+.ct-grant:disabled {
+	opacity: 0.6;
+	cursor: default;
+}
+
 .ct-item {
 	display: flex;
 	align-items: center;
