@@ -292,18 +292,6 @@ function handleMessage(
 	return true;
 }
 
-// ─── Highlight Event Listeners (for command executor) ──────────────
-
-window.addEventListener("how-to-recorder:highlight", ((e: CustomEvent) => {
-	if (e.detail?.element) {
-		showHighlight(e.detail.element);
-	}
-}) as EventListener);
-
-window.addEventListener("how-to-recorder:unhighlight", () => {
-	hideHighlight();
-});
-
 // ─── Initialize ───────────────────────────────────────────────────
 
 // This content script can be loaded two ways: declaratively (via the
@@ -319,6 +307,17 @@ const contentWindow = window as ContentScriptWindow;
 
 if (!contentWindow.__howToRecorderInitialized) {
 	contentWindow.__howToRecorderInitialized = true;
+
+	// Highlight event listeners (driven by the command executor).
+	window.addEventListener("how-to-recorder:highlight", ((e: CustomEvent) => {
+		if (e.detail?.element) {
+			showHighlight(e.detail.element);
+		}
+	}) as EventListener);
+
+	window.addEventListener("how-to-recorder:unhighlight", () => {
+		hideHighlight();
+	});
 
 	// Listen for messages from background script
 	chrome.runtime.onMessage.addListener(handleMessage);
