@@ -8,7 +8,7 @@
 
 ## Overview
 
-A Go CLI for controlling browser tabs via the How-To Recorder's HTTP/WebSocket remote control API. The CLI is a thin HTTP client; the existing Bun server (`server/index.ts`) handles all browser interaction through the Chrome extension.
+A Go CLI for controlling browser tabs via the How-To Recorder's HTTP remote control API. The CLI is a thin HTTP client talking to a server on :3845. That server is either the Bun server (`server/index.ts`, WebSocket transport) or the `htcli serve` native-messaging daemon (`internal/host/`, Unix-socket relay transport) — both expose the same HTTP API and drive the Chrome or Firefox extension. The native-messaging daemon supports Chrome and Firefox connected simultaneously, routing each command to the browser that owns the target tab.
 
 ```
 htcli (Go) ──HTTP──► Server (Bun, port 3845) ──WebSocket──► Extension ──DOM──► Chrome

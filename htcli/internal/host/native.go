@@ -7,6 +7,17 @@ import (
 	"io"
 )
 
+// MaxMessageSize bounds a single framed message read from the relay or socket.
+//
+// Browsers cap app→extension messages at 1 MB (the daemon only sends small
+// commands that way, so that direction is never near the limit). But
+// extension→daemon messages — command results carrying a fetch body, page HTML,
+// or an eval result in CommandResult.data — can legitimately exceed 1 MB, and
+// Firefox permits extension→app messages up to ~4 GB. So the cap here, which
+// gates both the relay's stdin read and the daemon's socket read, is set well
+// above 1 MB while staying low enough to still reject a corrupt length prefix.
+const MaxMessageSize = 64 << 20 // 64 MB
+
 // NativeMessage is the envelope for all messages between the relay and daemon.
 type NativeMessage struct {
 	Type      string          `json:"type"`
@@ -22,7 +33,7 @@ func ReadMessage(r io.Reader) ([]byte, error) {
 	if err := binary.Read(r, binary.LittleEndian, &length); err != nil {
 		return nil, fmt.Errorf("reading length: %w", err)
 	}
-	if length == 0 || length > 1<<20 {
+	if length == 0 || length > MaxMessageSize {
 		return nil, fmt.Errorf("invalid message length: %d", length)
 	}
 	buf := make([]byte, length)

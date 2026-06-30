@@ -129,7 +129,6 @@ function buildFirefoxManifest(): Plugin {
 					"storage",
 					"scripting",
 					"nativeMessaging",
-					"debugger",
 				],
 				host_permissions: ["<all_urls>"],
 				browser_specific_settings: {

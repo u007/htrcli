@@ -30,8 +30,8 @@ export function ConnectedTabs() {
 			if (res?.success && Array.isArray(res.tabs)) {
 				setTabs(res.tabs);
 			}
-		} catch {
-			// ignore
+		} catch (err) {
+			console.warn("[How-To Recorder] GET_READY_TABS failed:", err);
 		}
 	}, []);
 
@@ -47,7 +47,8 @@ export function ConnectedTabs() {
 				origins: REMOTE_CONTROL_ORIGINS,
 			});
 			setHasAccess(granted);
-		} catch {
+		} catch (err) {
+			console.warn("[How-To Recorder] permissions.contains failed:", err);
 			setHasAccess(true);
 		}
 	}, []);
@@ -72,8 +73,9 @@ export function ConnectedTabs() {
 					await refresh();
 				}
 			}
-		} catch {
+		} catch (err) {
 			// User dismissed the prompt or the API is unavailable.
+			console.warn("[How-To Recorder] permissions.request failed:", err);
 		} finally {
 			setRequesting(false);
 		}
@@ -81,7 +83,14 @@ export function ConnectedTabs() {
 
 	useEffect(() => {
 		void checkAccess();
-		void refresh();
+		// On mount, do a full sync so already-running content scripts are detected
+		// after a background restart (which clears readyTabs).
+		void chrome.runtime
+			.sendMessage({ type: "SYNC_READY_TABS" })
+			.then((res: { success?: boolean; tabs?: TabInfo[] } | undefined) => {
+				if (res?.success && Array.isArray(res.tabs)) setTabs(res.tabs);
+			})
+			.catch(() => void refresh());
 		const id = setInterval(() => {
 			void refresh();
 		}, 3000);

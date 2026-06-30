@@ -9,6 +9,16 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.2.4 [2026.06.30]
+
+- fix: detect Firefox's native-messaging launch (manifest path + add-on ID as args) so `htcli` enters relay mode instead of leaking CLI text to stdout (was: `No such native application` / multi-hundred-MB frame errors)
+- feat: `htcli install --browser chrome|firefox` — registers the native host with the correct manifest format (`allowed_extensions` vs `allowed_origins`) and per-browser directory (Mozilla vs Google Chrome)
+- feat: route screenshots over HTTP (`GET` + `POST /api/screenshot`, correlated by command ID) instead of the relay, so PNGs that exceed the 1 MB native-messaging frame limit no longer tear down the connection
+- fix: capture the focused window's active tab for screenshots rather than a registry tab ID (which may be stale or belong to another browser → "Invalid tab ID")
+- feat: per-connection tab scoping in the daemon — Chrome and Firefox can connect simultaneously; commands route to the browser that owns the target tab, and one browser disconnecting no longer drops the others' tabs
+- update: raise the relay/daemon framed-message read cap from 1 MB to 64 MB so large command results (fetch bodies, page HTML) survive the extension→daemon path
+- docs: document native-messaging daemon mode (`htcli serve` / `htcli install`) and cross-browser setup in htcli and Firefox READMEs
+
 ## 0.2.3 [2026.06.29]
 
 - feat: add Firefox cross-browser extension support (`firefox/` workspace, webextension-polyfill, sidebar shim)

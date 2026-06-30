@@ -220,6 +220,14 @@ async function executeAction(command: Command): Promise<unknown> {
 			return handleSwitchTab(requireValue(value, action));
 		case "getSessionStorage":
 			return sessionStorage.getItem(value || "eReceiptData");
+		case "getLocalStorage":
+			return localStorage.getItem(requireValue(value, action));
+		case "fetchInPage":
+			return handleFetchInPage(requireValue(value, action), options);
+		case "fetchViaDOM":
+			return handleFetchInPage(requireValue(value, action), options);
+		case "fetchFromCS":
+			return handleFetchFromCS(requireValue(value, action), options);
 		case "openTab":
 			return handleOpenTab(options as { url: string; sessionData?: string });
 		case "closeTab":
@@ -693,6 +701,141 @@ async function handlePrintToPDF(targetTabId?: number): Promise<unknown> {
 	});
 	if (!response?.ok) throw new Error(response?.error || "printToPDF failed");
 	return response.data;
+}
+
+const AIA_API_KEY = "50efbade-11e8-4169-abc3-e84e1b4c561b";
+
+// Fetch from the content script's isolated world — shares the page's cookie jar
+// (credentials: "include" sends session cookies), reads JWT from localStorage.
+// Returns { status, contentType, base64 } so binary PDFs are transferred safely.
+async function handleFetchFromCS(
+	url: string,
+	options?: Record<string, unknown>,
+): Promise<unknown> {
+	const method = (options?.method as string) || "POST";
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+		Accept: "application/json",
+		"X-Channel-ID": "MYP_WEB",
+		"X-Gateway-APIKey": AIA_API_KEY,
+		"Content-Language": "en",
+		...((options?.headers as Record<string, string>) ?? {}),
+	};
+	// Read JWT from page's localStorage (content scripts share it)
+	try {
+		const raw = localStorage.getItem("OAOP_LOGINDATA");
+		if (raw) {
+			const p = JSON.parse(raw) as { jwt?: string };
+			if (p.jwt) headers["Authorization"] = `Bearer ${p.jwt}`;
+		}
+	} catch {
+		// intentionally not logged: failures are benign
+	}
+	const body = options?.body;
+	const resp = await fetch(url, {
+		method,
+		headers,
+		credentials: "include",
+		body: body !== undefined ? JSON.stringify(body) : undefined,
+	});
+	const status = resp.status;
+	const contentType = resp.headers.get("content-type") || "";
+	if (!resp.ok) {
+		const errText = await resp.text();
+		throw new Error(`HTTP ${status}: ${errText.slice(0, 400)}`);
+	}
+	// Base64-encode for binary-safe transfer
+	const buf = await resp.arrayBuffer();
+	const bytes = new Uint8Array(buf);
+	let bin = "";
+	for (let i = 0; i < bytes.length; i += 8192) {
+		bin += String.fromCharCode(...bytes.subarray(i, Math.min(i + 8192, bytes.length)));
+	}
+	return { status, contentType, base64: btoa(bin) };
+}
+
+// Runs fetch in the PAGE's JS context (MAIN world) via <script> injection,
+// so the request goes out with Origin: https://www.aia.com.my instead of the
+// extension origin. Requires the page to have no CSP blocking inline scripts.
+const FETCH_IN_PAGE_ALLOWED_HOSTS = new Set(["api.aia.com.my", "www.aia.com.my"]);
+
+async function handleFetchInPage(
+	url: string,
+	options?: Record<string, unknown>,
+): Promise<unknown> {
+	const parsed = new URL(url);
+	if (
+		parsed.protocol !== "https:" ||
+		!FETCH_IN_PAGE_ALLOWED_HOSTS.has(parsed.hostname)
+	) {
+		throw new Error(`fetchInPage: URL not in allowlist: ${parsed.hostname}`);
+	}
+	const jwtRaw = localStorage.getItem("OAOP_LOGINDATA");
+	let jwt = "";
+	try {
+		const parsed = JSON.parse(jwtRaw || "{}") as { jwt?: string };
+		jwt = parsed.jwt || "";
+	} catch {
+		// intentionally not logged: benign
+	}
+
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+		Accept: "application/json",
+		"X-Channel-ID": "MYP_WEB",
+		"X-Gateway-APIKey": AIA_API_KEY,
+		"Content-Language": "en",
+		...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+		...((options?.headers as Record<string, string>) ?? {}),
+	};
+
+	const msgId = `__aip_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+	return new Promise<unknown>((resolve, reject) => {
+		const timeout = setTimeout(() => {
+			window.removeEventListener("message", listener);
+			reject(new Error("fetchInPage timeout after 30s"));
+		}, 30000);
+
+		function listener(event: MessageEvent) {
+			if (
+				event.source !== window ||
+				(event.data as { __id?: string })?.__id !== msgId
+			)
+				return;
+			clearTimeout(timeout);
+			window.removeEventListener("message", listener);
+			const d = event.data as { ok: boolean; data?: unknown; error?: string };
+			if (!d.ok) reject(new Error(d.error ?? "fetchInPage failed"));
+			else resolve(d.data);
+		}
+		window.addEventListener("message", listener);
+
+		const fetchBody =
+			options?.body !== undefined ? JSON.stringify(options.body) : undefined;
+		const scriptCode = `(async () => {
+  const _id = ${JSON.stringify(msgId)};
+  try {
+    const r = await fetch(${JSON.stringify(url)}, {
+      method: ${JSON.stringify((options?.method as string) || "POST")},
+      headers: ${JSON.stringify(headers)},
+      credentials: "include",
+      body: ${fetchBody !== undefined ? JSON.stringify(fetchBody) : "undefined"},
+    });
+    const text = await r.text();
+    if (!r.ok) throw new Error("HTTP " + r.status + ": " + text.slice(0, 200));
+    let data; try { data = JSON.parse(text); } catch { data = text; }
+    window.postMessage({ __id: _id, ok: true, data }, "*");
+  } catch(e) {
+    window.postMessage({ __id: _id, ok: false, error: e.message }, "*");
+  }
+})();`;
+
+		const script = document.createElement("script");
+		script.textContent = scriptCode;
+		document.head.appendChild(script);
+		document.head.removeChild(script);
+	});
 }
 
 async function handleFetchViaBackground(

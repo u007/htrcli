@@ -23,7 +23,12 @@ import type {
 	StartRecordingMessage,
 	UpdateAnnotationMessage,
 } from "../types/recording";
-import { getConnectionMode, registerTab, startNativeHost } from "./nativeHost";
+import {
+	getConnectionMode,
+	registerTab,
+	setScreenshotCapturer,
+	startNativeHost,
+} from "./nativeHost";
 
 type ChromeWithSidebarAction = typeof chrome & {
 	sidebarAction?: unknown;
@@ -131,6 +136,16 @@ async function migrateFromChromeStorage(): Promise<void> {
 }
 
 console.log("[How-To Recorder] Background service worker started");
+
+// Seed default remote-control settings on first install so tabs auto-connect.
+chrome.storage.local.get(["remoteControlServer"], (result) => {
+	if (!result.remoteControlServer) {
+		chrome.storage.local.set({
+			remoteControlServer: "wss://127.0.0.1:3845",
+			remoteControlToken: "htr_aia_2026",
+		});
+	}
+});
 
 // Run migration on startup
 migrateFromChromeStorage();
@@ -669,8 +684,16 @@ async function ensureContentScriptsInjected(): Promise<void> {
 
 	let tabs: chrome.tabs.Tab[];
 	try {
-		tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
-	} catch {
+		// Use an unfiltered query + JS filter so this works in Firefox even when
+		// host_permissions are not yet fully applied (URL-pattern filtering in
+		// tabs.query requires host access in Firefox; the `tabs` permission alone
+		// is sufficient for tabs.query({}) with URL in the result object).
+		const allTabs = await chrome.tabs.query({});
+		tabs = allTabs.filter(
+			(t) => typeof t.url === "string" && /^https?:\/\//.test(t.url),
+		);
+	} catch (err) {
+		console.warn("[How-To Recorder] tabs.query failed:", err);
 		return;
 	}
 
@@ -683,9 +706,11 @@ async function ensureContentScriptsInjected(): Promise<void> {
 					target: { tabId: tab.id },
 					files,
 				});
-			} catch {
-				// No host access for this tab (common on Firefox until
-				// the user grants it), or a restricted page — skip it.
+			} catch (err) {
+				console.warn(
+					`[How-To Recorder] executeScript failed for tab ${tab.id} (${tab.url}):`,
+					err,
+				);
 			}
 		}),
 	);
@@ -698,6 +723,35 @@ async function captureTabScreenshot(
 	tabId: number,
 ): Promise<string | undefined> {
 	return captureScreenshot(tabId);
+}
+
+/**
+ * Capture a screenshot for native-host upload, surfacing the real failure
+ * reason instead of swallowing it, so the daemon's GET /api/screenshot returns
+ * a diagnosable error.
+ *
+ * captureVisibleTab can only capture a window's *visible* (active) tab, and the
+ * daemon's tabId comes from its registry — which may hold a stale or pseudo id
+ * that chrome.tabs.get rejects ("Invalid tab ID"). So we ignore it and capture
+ * the focused window's active tab, which is what a screenshot means anyway.
+ */
+async function captureScreenshotForUpload(
+	_tabId: number,
+): Promise<{ data?: string; error?: string }> {
+	try {
+		const [active] = await chrome.tabs.query({
+			active: true,
+			lastFocusedWindow: true,
+		});
+		if (!active?.windowId) return { error: "no active tab to capture" };
+		const dataUrl = await chrome.tabs.captureVisibleTab(active.windowId, {
+			format: "png",
+		});
+		if (!dataUrl) return { error: "captureVisibleTab returned empty" };
+		return { data: dataUrl };
+	} catch (err) {
+		return { error: err instanceof Error ? err.message : String(err) };
+	}
 }
 
 // ─── Message Handler ──────────────────────────────────────────────
@@ -888,6 +942,37 @@ chrome.runtime.onMessage.addListener(
 					// give them a brief moment before reporting back.
 					await ensureContentScriptsInjected();
 					await new Promise((resolve) => setTimeout(resolve, 300));
+					// Probe tabs that still haven't registered — covers Firefox
+					// where content scripts were already running when the background
+					// restarted (lost readyTabs state) and can't be re-injected.
+					let probeTabs: chrome.tabs.Tab[] = [];
+					try {
+						const allTabs = await chrome.tabs.query({});
+						probeTabs = allTabs.filter(
+							(t) =>
+								typeof t.url === "string" && /^https?:\/\//.test(t.url),
+						);
+					} catch (err) {
+						console.warn("[How-To Recorder] probe tabs.query failed:", err);
+					}
+					await Promise.all(
+						probeTabs.map(async (tab) => {
+							if (typeof tab.id !== "number") return;
+							if (readyTabs.has(tab.id)) return;
+							try {
+								await chrome.tabs.sendMessage(tab.id, {
+									type: "GET_RECORDING_STATE",
+								});
+								readyTabs.add(tab.id);
+								void registerNativeTab(tab.id, tab);
+							} catch (err) {
+								console.warn(
+									`[How-To Recorder] Probe failed for tab ${tab.id} (${tab.url}):`,
+									err,
+								);
+							}
+						}),
+					);
 					const tabs = await getReadyTabsInfo();
 					sendResponse({ success: true, tabs });
 					break;
@@ -1257,6 +1342,7 @@ chrome.sidePanel
 	});
 
 // Start native host connection
+setScreenshotCapturer(captureScreenshotForUpload);
 startNativeHost();
 
 // Connect already-open tabs on install/enable and on browser startup.

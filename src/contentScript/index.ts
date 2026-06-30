@@ -296,14 +296,21 @@ function handleMessage(
 
 // This content script can be loaded two ways: declaratively (via the
 // manifest `content_scripts` entry, on page load) or programmatically
-// (via `chrome.scripting.executeScript`, e.g. after the user grants
-// host access on Firefox where `<all_urls>` is opt-in). Both paths run
-// this module's top-level code in the same isolated world, so guard the
-// one-time listener registration to avoid double-handling messages.
+// (via `chrome.scripting.executeScript`). Both paths run this module's
+// top-level code in the same isolated world.
+//
+// The message listener must be (re-)registered on every execution so it
+// survives extension reloads: after a reload the old extension context is
+// invalidated and its listeners silently die, but `__howToRecorderInitialized`
+// persists on `window` (the page was not reloaded). removeListener is a
+// no-op if the function isn't registered, preventing double-registration.
 interface ContentScriptWindow extends Window {
 	__howToRecorderInitialized?: boolean;
 }
 const contentWindow = window as ContentScriptWindow;
+
+chrome.runtime.onMessage.removeListener(handleMessage);
+chrome.runtime.onMessage.addListener(handleMessage);
 
 if (!contentWindow.__howToRecorderInitialized) {
 	contentWindow.__howToRecorderInitialized = true;
@@ -318,9 +325,6 @@ if (!contentWindow.__howToRecorderInitialized) {
 	window.addEventListener("how-to-recorder:unhighlight", () => {
 		hideHighlight();
 	});
-
-	// Listen for messages from background script
-	chrome.runtime.onMessage.addListener(handleMessage);
 
 	// Handle page unload - ensure any pending data is sent
 	window.addEventListener("beforeunload", () => {
@@ -342,11 +346,17 @@ if (!contentWindow.__howToRecorderInitialized) {
 	});
 }
 
-// Always (re-)announce readiness so the background's `readyTabs` set is
-// repopulated even when the content script was injected programmatically
-// or the background service worker/event page restarted and lost state.
-chrome.runtime
-	.sendMessage({ type: "CONTENT_SCRIPT_READY", url: window.location.href })
-	.catch(() => {
-		// Ignore errors if background script isn't listening yet
-	});
+// Announce readiness to the background. Runs on every execution so the
+// background's `readyTabs` set is repopulated after a service-worker restart.
+// Retries with backoff: at `document_start` the background may not have
+// finished initialising yet, so the first send can fail silently.
+function announceReady(attemptsLeft = 5): void {
+	chrome.runtime
+		.sendMessage({ type: "CONTENT_SCRIPT_READY", url: window.location.href })
+		.catch(() => {
+			if (attemptsLeft > 0) {
+				setTimeout(() => announceReady(attemptsLeft - 1), 1000);
+			}
+		});
+}
+announceReady();

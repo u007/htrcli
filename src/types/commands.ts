@@ -148,6 +148,11 @@ export type CommandAction =
 	| "getTabInfo"
 	| "switchTab"
 	| "getSessionStorage"
+	| "getLocalStorage"
+	| "fetchInPage"
+	| "fetchViaDOM"
+	| "fetchFromCS"
+	| "debuggerEval"
 	| "openTab"
 	| "closeTab"
 	| "cdpNavigate";

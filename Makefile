@@ -59,3 +59,7 @@ serve:
 
 close:
 	@lsof -ti :3845 | xargs kill -9 2>/dev/null && echo "Killed process on :3845" || echo "Nothing running on :3845"
+
+list:
+	HTR_BEARER_TOKEN=htr_aia_2026 htcli tabs list
+

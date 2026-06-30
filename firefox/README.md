@@ -129,3 +129,26 @@ Everything else — recording state, IndexedDB sessions, exports, the
 `htcli` native messaging host, screenshots, sensitive-field masking,
 audio capture, the devtools panel, etc. — is shared code under `src/`
 and behaves identically.
+
+## Remote control via `htcli` (native messaging)
+
+To drive this Firefox build from the [`htcli`](../htcli) CLI over native
+messaging, register the native host for Firefox (Firefox uses
+`allowed_extensions` + the add-on ID, not Chrome's `allowed_origins`):
+
+```bash
+htcli install --browser firefox --extension-id how-to-recorder@stevenstaylor.dev
+```
+
+This writes the host manifest to
+`~/Library/Application Support/Mozilla/NativeMessagingHosts/` (macOS) or
+`~/.mozilla/native-messaging-hosts/` (Linux). Then reload the extension
+(`about:debugging` → **Reload**) and start the daemon with `htcli serve`.
+
+Firefox and Chrome can both be registered and connected to the same daemon
+at once; commands route to whichever browser owns the target tab. See the
+[htcli README](../htcli/README.md#native-messaging-daemon-mode) for details.
+
+> The add-on ID comes from `browser_specific_settings.gecko.id` in the
+> built `manifest.json`. The native host requires the `nativeMessaging`
+> permission, which the manifest already declares.

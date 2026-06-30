@@ -43,10 +43,13 @@ func ensureSocketParentDir(socketPath string) error {
 func handleRelayConn(d *Daemon, conn net.Conn) {
 	defer conn.Close()
 
-	d.SetRelay(func(msg []byte) error {
+	// Each relay connection is one browser. Scope its tabs to this connection
+	// so commands route to the right browser, and drop only this connection's
+	// tabs when it disconnects (leaving other browsers working).
+	rc := d.AddConn(func(msg []byte) error {
 		return WriteMessage(conn, msg)
 	})
-	defer d.SetRelay(nil)
+	defer d.RemoveConn(rc)
 
 	// Read results from relay (extension responses)
 	for {
@@ -62,7 +65,7 @@ func handleRelayConn(d *Daemon, conn net.Conn) {
 		case "register":
 			var info TabInfo
 			if err := json.Unmarshal(msg.Payload, &info); err == nil {
-				d.RegisterTab(msg.TabID, info)
+				d.RegisterTab(rc, msg.TabID, info)
 			}
 		case "command_result":
 			var result CommandResult
@@ -88,6 +91,9 @@ func sendCommand(d *Daemon, tabID int, cmd Command, timeoutMs int) (*CommandResu
 	case result := <-ch:
 		return &result, nil
 	case <-timer.C:
+		d.mu.Lock()
+		delete(d.pending, cmd.ID)
+		d.mu.Unlock()
 		return nil, fmt.Errorf("command timed out after %dms", timeoutMs)
 	}
 }

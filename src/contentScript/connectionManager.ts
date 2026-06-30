@@ -103,6 +103,11 @@ chrome.runtime.onMessage.addListener((message) => {
 			mode = "native";
 			if (wsIsConnected()) disconnectFromServer();
 			console.log("[ConnectionManager] Switched to native messaging");
+			// Re-announce so the daemon's tab registry gets this tab (native port
+			// was just (re)connected, so the background will forward it reliably).
+			chrome.runtime
+				.sendMessage({ type: "CONTENT_SCRIPT_READY", url: window.location.href })
+				.catch(() => {});
 		} else if (message.mode === "unavailable" && mode === "native") {
 			mode = "disconnected";
 			checkAutoConnectWS();

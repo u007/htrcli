@@ -2,9 +2,22 @@
 
 Go CLI for controlling browser tabs via the [How-To Recorder](https://github.com/u007/how-to-recorder) remote control API.
 
+`htcli` is an HTTP client that talks to a server on port 3845. There are two
+interchangeable transports for that server — pick one:
+
 ```
-htcli (Go) ──HTTP──► Server (Bun, port 3845) ──WebSocket──► Extension ──DOM──► Chrome
+# WebSocket transport (Bun server)
+htcli (Go) ──HTTP──► Bun server (server/, :3845) ──WebSocket──► Extension ──DOM──► Chrome / Firefox
+
+# Native messaging transport (htcli daemon — no Bun server)
+htcli (Go) ──HTTP──► htcli serve (:3845) ──Unix socket──► relay ──stdio──► Extension ──DOM──► Chrome / Firefox
 ```
+
+The native-messaging daemon (`htcli serve`) is a drop-in replacement for the Bun
+server: same HTTP API on :3845, but the browser connects via a native-messaging
+relay instead of a WebSocket. Both Chrome and Firefox are supported, and both can
+be connected to the daemon at the same time (commands route to the browser that
+owns the target tab). Only one of the two servers can hold :3845 at a time.
 
 ## Installation
 
@@ -22,6 +35,33 @@ make build
 ```bash
 go install github.com/u007/htcli/cmd/htcli@latest
 ```
+
+## Native Messaging (daemon mode)
+
+Run the browser over a native-messaging relay instead of the Bun server. This
+needs no `bun run server`; `htcli serve` provides the HTTP API on :3845 itself.
+
+```bash
+# 1. Register htcli as the browser's native-messaging host.
+#    Chrome — use the extension ID from chrome://extensions → Details:
+htcli install --browser chrome  --extension-id <chrome-extension-id>
+#    Firefox — use the add-on ID (browser_specific_settings.gecko.id):
+htcli install --browser firefox --extension-id how-to-recorder@stevenstaylor.dev
+
+#    Remove a manifest with: htcli install --browser <b> --uninstall
+
+# 2. Reload the extension (chrome://extensions → reload, or
+#    about:debugging → Reload) so it re-reads the host registration.
+
+# 3. Start the daemon (binds :3845 + the Unix socket the relay connects to).
+htcli serve
+#    Custom token / port: HTR_BEARER_TOKEN=secret HTR_PORT=3845 htcli serve
+```
+
+Chrome and Firefox may both be registered and connected at once — `htcli tabs
+list` shows tabs from both, and `--tab <id>` routes to whichever browser owns
+that tab. Screenshots and large command results (e.g. `fetch` bodies) travel
+over HTTP, so they are not limited by the 1 MB native-messaging frame size.
 
 ## Quick Start
 
@@ -140,8 +180,8 @@ Priority: flags > env vars (`HTCLI_SERVER`, `HTCLI_TOKEN`) > config file > defau
 
 ## Requirements
 
-- [How-To Recorder](https://github.com/u007/how-to-recorder) Chrome extension installed
-- How-To Recorder server running (`bun run server`)
+- [How-To Recorder](https://github.com/u007/how-to-recorder) extension installed (Chrome or Firefox)
+- A server on :3845 — either the Bun server (`bun run server`) or the native-messaging daemon (`htcli serve`)
 - Go 1.22+ (for building from source)
 
 ## License

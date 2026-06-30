@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./Options.css";
 
-const DEFAULT_SERVER_URL = "ws://127.0.0.1:3845";
+const DEFAULT_SERVER_URL = "wss://127.0.0.1:3845";
+const DEFAULT_TOKEN = "htr_aia_2026";
 const STORAGE_KEYS = ["remoteControlServer", "remoteControlToken"];
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -16,8 +17,8 @@ interface TabInfo {
 
 export const Options = (): JSX.Element => {
 	const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
-	const [token, setToken] = useState("");
-	const [enabled, setEnabled] = useState(false);
+	const [token, setToken] = useState(DEFAULT_TOKEN);
+	const [enabled, setEnabled] = useState(true);
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [tabs, setTabs] = useState<TabInfo[]>([]);
@@ -52,15 +53,11 @@ export const Options = (): JSX.Element => {
 					remoteControlToken?: string;
 				};
 
-				if (
-					typeof result.remoteControlServer === "string" &&
-					result.remoteControlServer
-				) {
+				if (typeof result.remoteControlServer === "string" && result.remoteControlServer) {
 					setServerUrl(result.remoteControlServer);
-					setEnabled(true);
 				}
 
-				if (typeof result.remoteControlToken === "string") {
+				if (typeof result.remoteControlToken === "string" && result.remoteControlToken) {
 					setToken(result.remoteControlToken);
 				}
 			} catch (error) {

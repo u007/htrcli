@@ -195,6 +195,49 @@ Fields containing passwords, credit cards, etc. are automatically detected and m
 - Stored as base64 PNG data URLs
 - Elements highlighted before capture (red border overlay)
 
+## Cross-Browser Development Workflow
+
+**When updating anything in the extension, always work on both Chrome and Firefox.** The shared `src/` code affects both browsers, but each has its own build pipeline and runtime quirks.
+
+### Rule: Always update both browsers
+
+1. **Shared code (`src/`)** — Changes here apply to both browsers automatically. After making changes, verify both builds pass:
+   ```bash
+   bun run build          # Chrome build
+   bun run firefox:build  # Firefox build
+   ```
+
+2. **Chrome-specific code (`src/manifest.ts`)** — If you change Chrome manifest permissions, entry points, or MV3 config, check whether Firefox needs an equivalent change in `firefox/vite.config.ts` (which emits the Firefox manifest).
+
+3. **Firefox-specific code (`firefox/`)** — If you add a shim or Firefox-only workaround in `firefox/src/`, consider whether the same fix should be applied to the shared `src/` code so both browsers benefit. Document why a Firefox-only path exists.
+
+4. **Server changes (`server/`)** — The server (port 3845) is shared by both browsers via WebSocket. After changing server endpoints, message handling, or auth:
+   - Verify the extension's content script (`src/contentScript/connectionManager.ts`) still connects correctly
+   - Test with both Chrome and Firefox if possible, or at minimum confirm no browser-specific assumptions were introduced in the server code
+
+### Verification checklist
+
+After any extension or server change, run these commands before committing:
+
+```bash
+bun run check:fix         # Lint + format
+bun run build             # Chrome build
+bun run firefox:build     # Firefox build
+bun run test              # Unit tests (if any)
+```
+
+If the change touches server code or the WebSocket connection layer:
+
+```bash
+bun run server:dev        # Start server locally
+# Manually verify extension connects in both Chrome and Firefox
+```
+
+### Why this matters
+
+- The Firefox build uses `webextension-polyfill` to alias `chrome.*` → `browser.*`, so Chrome-only API calls may silently fail on Firefox if not shimmed.
+- The server doesn't know which browser is talking to it — both connect over the same WebSocket protocol. A breaking change in the server protocol breaks both browsers equally.
+
 ## File Structure
 
 ```
