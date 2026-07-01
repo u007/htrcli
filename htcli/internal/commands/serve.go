@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 	"github.com/u007/htcli/internal/host"
 )
 
@@ -21,6 +22,9 @@ var serveCmd = &cobra.Command{
 		socketPath := home + host.DefaultSocketPath
 
 		bearerToken := os.Getenv("HTR_BEARER_TOKEN")
+		if bearerToken == "" {
+			bearerToken = viper.GetString("token")
+		}
 		port := 3845
 		if p := os.Getenv("HTR_PORT"); p != "" {
 			fmt.Sscanf(p, "%d", &port)
@@ -45,7 +49,10 @@ var serveCmd = &cobra.Command{
 		fmt.Printf("[htcli serve] Listening on http://127.0.0.1:%d\n", port)
 		fmt.Printf("[htcli serve] Unix socket: %s\n", socketPath)
 		if bearerToken == "" {
-			fmt.Println("[htcli serve] Warning: no HTR_BEARER_TOKEN set — unauthenticated")
+			fmt.Println("[htcli serve] Warning: no bearer token configured — unauthenticated")
+			fmt.Println("  Set HTR_BEARER_TOKEN env var, or run: htcli config set-token <token>")
+		} else {
+			fmt.Printf("[htcli serve] Using bearer token: %s\n", bearerToken)
 		}
 
 		return srv.Serve(ln)

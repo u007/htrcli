@@ -9,6 +9,12 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.2.5 [2026.07.01]
+
+- feat: fall back to `htcli config token` for bearer token when `HTR_BEARER_TOKEN` env var is unset
+- update: improve `htcli serve` authentication warnings with actionable hint (`htcli config set-token <token>`)
+- chore: rebuild htcli binary with viper token config support
+
 ## 0.2.4 [2026.06.30]
 
 - fix: detect Firefox's native-messaging launch (manifest path + add-on ID as args) so `htcli` enters relay mode instead of leaking CLI text to stdout (was: `No such native application` / multi-hundred-MB frame errors)
