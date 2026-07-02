@@ -12,6 +12,8 @@ import {
 } from "../../db/index";
 import type {
 	Annotation,
+	ConnectionMode,
+	ConnectionStatusMessage,
 	NewStepMessage,
 	RecordingMessage,
 	RecordingSession,
@@ -30,6 +32,9 @@ interface RecordingState {
 
 	// Past sessions
 	pastSessions: SessionMetadata[];
+
+	// Server connection
+	connectionStatus: ConnectionMode;
 
 	// UI state
 	isLoading: boolean;
@@ -50,7 +55,8 @@ type RecordingAction =
 	| { type: "SET_ELAPSED_TIME"; payload: number }
 	| { type: "SET_PAST_SESSIONS"; payload: SessionMetadata[] }
 	| { type: "LOAD_SESSION"; payload: RecordingSession }
-	| { type: "CLEAR_SESSION" };
+	| { type: "CLEAR_SESSION" }
+	| { type: "SET_CONNECTION_STATUS"; payload: ConnectionMode };
 
 // Initial state
 const initialState: RecordingState = {
@@ -58,6 +64,7 @@ const initialState: RecordingState = {
 	session: null,
 	elapsedTime: 0,
 	pastSessions: [],
+	connectionStatus: "unavailable",
 	isLoading: true,
 	error: null,
 };
@@ -163,6 +170,9 @@ function recordingReducer(
 				elapsedTime: 0,
 			};
 
+		case "SET_CONNECTION_STATUS":
+			return { ...state, connectionStatus: action.payload };
+
 		default:
 			return state;
 	}
@@ -210,7 +220,9 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
 
 	// Listen for messages from background script
 	useEffect(() => {
-		const handleMessage = (message: RecordingMessage) => {
+		const handleMessage = (
+			message: RecordingMessage | ConnectionStatusMessage,
+		) => {
 			if (message.type === "NEW_STEP") {
 				dispatch({
 					type: "ADD_STEP",
@@ -226,6 +238,11 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
 						}
 					},
 				);
+			} else if (message.type === "CONNECTION_STATUS") {
+				dispatch({
+					type: "SET_CONNECTION_STATUS",
+					payload: (message as ConnectionStatusMessage).mode,
+				});
 			}
 		};
 
@@ -236,6 +253,19 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
 	// Initialize state from background script
 	useEffect(() => {
 		const initialize = async () => {
+			// Query current connection status from background
+			chrome.runtime.sendMessage(
+				{ type: "GET_CONNECTION_STATUS" },
+				(resp: ConnectionStatusMessage | undefined) => {
+					if (resp?.mode) {
+						dispatch({
+							type: "SET_CONNECTION_STATUS",
+							payload: resp.mode,
+						});
+					}
+				},
+			);
+
 			try {
 				// Get current recording state
 				chrome.runtime.sendMessage(

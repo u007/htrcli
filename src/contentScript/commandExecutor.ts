@@ -749,7 +749,9 @@ async function handleFetchFromCS(
 	const bytes = new Uint8Array(buf);
 	let bin = "";
 	for (let i = 0; i < bytes.length; i += 8192) {
-		bin += String.fromCharCode(...bytes.subarray(i, Math.min(i + 8192, bytes.length)));
+		bin += String.fromCharCode(
+			...bytes.subarray(i, Math.min(i + 8192, bytes.length)),
+		);
 	}
 	return { status, contentType, base64: btoa(bin) };
 }
@@ -757,7 +759,10 @@ async function handleFetchFromCS(
 // Runs fetch in the PAGE's JS context (MAIN world) via <script> injection,
 // so the request goes out with Origin: https://www.aia.com.my instead of the
 // extension origin. Requires the page to have no CSP blocking inline scripts.
-const FETCH_IN_PAGE_ALLOWED_HOSTS = new Set(["api.aia.com.my", "www.aia.com.my"]);
+const FETCH_IN_PAGE_ALLOWED_HOSTS = new Set([
+	"api.aia.com.my",
+	"www.aia.com.my",
+]);
 
 async function handleFetchInPage(
 	url: string,

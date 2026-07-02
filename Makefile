@@ -55,10 +55,22 @@ install: htcli-install
 	fi
 
 serve:
+	@port=$${HTR_PORT:-3845}; \
+	pid=$$(netstat -anv -p tcp 2>/dev/null | awk -v port="$$port" '$$6 == "LISTEN" {split($$4,addr,"."); if (addr[length(addr)] == port) {split($$11,a,":"); print a[2]; exit}}'); \
+	if [ -n "$$pid" ]; then \
+		echo "Killing process $$pid on port $$port..."; \
+		kill -9 $$pid 2>/dev/null || true; \
+	fi; \
 	htcli serve
 
 close:
-	@lsof -ti :3845 | xargs kill -9 2>/dev/null && echo "Killed process on :3845" || echo "Nothing running on :3845"
+	@port=$${HTR_PORT:-3845}; \
+	pid=$$(netstat -anv -p tcp 2>/dev/null | awk -v port="$$port" '$$6 == "LISTEN" {split($$4,addr,"."); if (addr[length(addr)] == port) {split($$11,a,":"); print a[2]; exit}}'); \
+	if [ -n "$$pid" ]; then \
+		kill -9 $$pid 2>/dev/null && echo "Killed process on :$$port" || echo "Failed to kill on :$$port"; \
+	else \
+		echo "Nothing running on :$$port"; \
+	fi
 
 list:
 	HTR_BEARER_TOKEN=htr_aia_2026 htcli tabs list

@@ -58,6 +58,12 @@ export interface RecordingSession {
 	trackedTabIds: number[];
 }
 
+// Connection mode tracked by native host
+// - "native": connected and communicating with the daemon
+// - "disconnected": transient — relay exited (daemon down), retrying with backoff
+// - "unavailable": permanent — host not installed/forbidden, or max retries exceeded
+export type ConnectionMode = "native" | "disconnected" | "unavailable";
+
 // Message types for communication between components
 export type MessageType =
 	| "START_RECORDING"
@@ -79,7 +85,9 @@ export type MessageType =
 	| "DISABLE_RECORDING"
 	| "CONTENT_SCRIPT_READY"
 	| "HIGHLIGHT_ELEMENT"
-	| "HIDE_HIGHLIGHT";
+	| "HIDE_HIGHLIGHT"
+	| "CONNECTION_STATUS"
+	| "RECONNECT_NATIVE";
 
 // Base message structure
 export interface BaseMessage {
@@ -204,6 +212,12 @@ export interface HideHighlightMessage extends BaseMessage {
 	type: "HIDE_HIGHLIGHT";
 }
 
+// Connection status message (background → sidepanel)
+export interface ConnectionStatusMessage extends BaseMessage {
+	type: "CONNECTION_STATUS";
+	mode: ConnectionMode;
+}
+
 // Union type for all messages
 export type RecordingMessage =
 	| StartRecordingMessage
@@ -223,7 +237,8 @@ export type RecordingMessage =
 	| DisableRecordingMessage
 	| ContentScriptReadyMessage
 	| HighlightElementMessage
-	| HideHighlightMessage;
+	| HideHighlightMessage
+	| ConnectionStatusMessage;
 
 // Export format types
 export interface ExportedStep {

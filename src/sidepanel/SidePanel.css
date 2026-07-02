@@ -67,6 +67,80 @@
 	font-weight: 400;
 }
 
+/* Connection status indicator */
+.connection-indicator {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 11px;
+	font-weight: 500;
+	margin-left: auto;
+}
+
+.ci-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+
+.connection-indicator.online .ci-dot {
+	background: #22c55e;
+	box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
+}
+
+.connection-indicator.reconnecting .ci-dot {
+	background: #f59e0b;
+	box-shadow: 0 0 4px rgba(245, 158, 11, 0.5);
+	animation: ci-pulse 1.2s ease-in-out infinite;
+}
+
+.connection-indicator.unavailable .ci-dot {
+	background: #ef4444;
+	box-shadow: 0 0 4px rgba(239, 68, 68, 0.4);
+}
+
+.connection-indicator.online .ci-label {
+	color: #22c55e;
+}
+
+.connection-indicator.reconnecting .ci-label {
+	color: #f59e0b;
+}
+
+.connection-indicator.unavailable .ci-label {
+	color: #ef4444;
+}
+
+.ci-retry {
+	background: none;
+	border: 1px solid #6b7280;
+	color: #6b7280;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 11px;
+	line-height: 1;
+	padding: 1px 4px;
+	transition:
+		color 0.15s,
+		border-color 0.15s;
+}
+
+.ci-retry:hover {
+	color: #d1d5db;
+	border-color: #d1d5db;
+}
+
+@keyframes ci-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.4;
+	}
+}
+
 /* Loading State */
 .loading {
 	display: flex;

@@ -8,11 +8,13 @@ import type { Command, CommandResult, TabInfo } from "../types/commands";
 const HOST_NAME = "com.howtorecorder.host";
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
+const MAX_RECONNECT_ATTEMPTS = 20;
 
 let nativePort: chrome.runtime.Port | null = null;
 let reconnectDelay = RECONNECT_BASE_MS;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let connectionMode: "native" | "unavailable" = "unavailable";
+let connectionMode: "native" | "disconnected" | "unavailable" = "unavailable";
+let reconnectAttempts = 0;
 
 type ScreenshotResult = { data?: string; error?: string };
 type ScreenshotCapturer = (tabId: number) => Promise<ScreenshotResult>;
@@ -33,8 +35,19 @@ export function setScreenshotCapturer(fn: ScreenshotCapturer): void {
 	captureScreenshot = fn;
 }
 
-export function getConnectionMode(): "native" | "unavailable" {
+export function getConnectionMode(): "native" | "disconnected" | "unavailable" {
 	return connectionMode;
+}
+
+/**
+ * Manually retry connecting to the native host after the max retries cap has
+ * been exceeded, or any time the user wants to force a reconnection attempt.
+ */
+export function retryConnect(): void {
+	// Reset the retry state so connect() works fresh
+	reconnectAttempts = 0;
+	reconnectDelay = RECONNECT_BASE_MS;
+	connect();
 }
 
 export function sendToNative(msg: object): void {
@@ -69,23 +82,24 @@ function connect(): void {
 		console.warn(`[NativeHost] Disconnected: ${err}`);
 		nativePort = null;
 
-		if (
-			err.includes("not found") ||
-			err.includes("not installed") ||
-			err.includes("No such native application") ||
-			err.includes("Native host has exited") ||
-			err.includes("Access to the specified native messaging host is forbidden")
-		) {
+		if (isPermanentError(err)) {
 			markUnavailable();
 			return;
 		}
 
-		// Relay died (SW was killed) — retry with backoff
+		// Transient: the relay exits immediately when it can't reach the daemon
+		// socket, which Chrome reports as "Native host has exited" — that is NOT
+		// permanent (it just means the daemon is down), and neither is a relay
+		// death from the SW being killed. Retry with backoff so we recover as
+		// soon as the daemon starts, instead of staying dead until the extension
+		// is reloaded.
+		setDisconnected();
 		scheduleReconnect();
 	});
 
 	connectionMode = "native";
 	reconnectDelay = RECONNECT_BASE_MS;
+	reconnectAttempts = 0;
 	console.log("[NativeHost] Connected");
 
 	// Broadcast new status to all content scripts
@@ -95,13 +109,44 @@ function connect(): void {
 	syncRegisteredTabs();
 }
 
-function markUnavailable(): void {
-	connectionMode = "unavailable";
+/**
+ * A native-messaging disconnect is permanent only when the host itself is
+ * missing or blocked — retrying cannot fix those until the user installs the
+ * host or grants access. Every other disconnect (daemon down → relay exits, or
+ * the service worker was killed) is transient and must be retried with backoff.
+ */
+export function isPermanentError(err: string): boolean {
+	return (
+		err.includes("not found") ||
+		err.includes("not installed") ||
+		err.includes("No such native application") ||
+		err.includes("Access to the specified native messaging host is forbidden")
+	);
+}
+
+function setDisconnected(): void {
+	connectionMode = "disconnected";
 	nativePort = null;
 	broadcastStatus();
 }
 
+function markUnavailable(): void {
+	connectionMode = "unavailable";
+	nativePort = null;
+	reconnectTimer = null;
+	broadcastStatus();
+}
+
 function scheduleReconnect(): void {
+	reconnectAttempts++;
+	if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+		console.warn(
+			`[NativeHost] Max reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached, giving up`,
+		);
+		markUnavailable();
+		return;
+	}
+
 	reconnectTimer = setTimeout(() => {
 		reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
 		connect();
@@ -130,18 +175,21 @@ function syncRegisteredTabs(): void {
 }
 
 function broadcastStatus(): void {
+	const payload = { type: "CONNECTION_STATUS" as const, mode: connectionMode };
+
+	// Broadcast to all content scripts
 	chrome.tabs.query({}, (tabs) => {
 		for (const tab of tabs) {
 			if (tab.id == null) continue;
-			chrome.tabs
-				.sendMessage(tab.id, {
-					type: "CONNECTION_STATUS",
-					mode: connectionMode,
-				})
-				.catch(() => {
-					// Content script may not be loaded on this tab — ignore
-				});
+			chrome.tabs.sendMessage(tab.id, payload).catch(() => {
+				// Content script may not be loaded on this tab — ignore
+			});
 		}
+	});
+
+	// Also broadcast to the side panel so the UI can show online/offline status
+	chrome.runtime.sendMessage(payload).catch(() => {
+		// Side panel may not be open — ignore
 	});
 }
 
@@ -261,12 +309,12 @@ async function handleFetchInPage(
 			// biome-ignore lint/complexity/useArrowFunction: serialized to page context
 			// Synchronous XHR so no Promise is returned — avoids Chrome's known
 			// issue where executeScript world:MAIN async return values are null.
-			func: function (
+			func: (
 				fetchUrl: string,
 				fetchMethod: string,
 				extraHeaders: Record<string, string>,
 				fetchBody: unknown,
-			) {
+			) => {
 				const headers: Record<string, string> = { ...extraHeaders };
 				try {
 					const raw = localStorage.getItem("OAOP_LOGINDATA");
@@ -330,7 +378,10 @@ async function handleFetchInPage(
 
 // Evaluates an async JS expression via Chrome DevTools Protocol.
 // Bypasses executeScript structured-clone issues — CDP returns values natively.
-async function handleDebuggerEval(tabId: number, payload: Command): Promise<void> {
+async function handleDebuggerEval(
+	tabId: number,
+	payload: Command,
+): Promise<void> {
 	const { id, value: expression } = payload;
 	if (!expression) {
 		replyError(tabId, id, "debuggerEval requires an expression (value field)");
@@ -339,14 +390,23 @@ async function handleDebuggerEval(tabId: number, payload: Command): Promise<void
 	try {
 		await chrome.debugger.attach({ tabId }, "1.3");
 		try {
-			type EvalResult = { result: { type: string; value: unknown }; exceptionDetails?: unknown };
-			const res = (await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
-				expression,
-				awaitPromise: true,
-				returnByValue: true,
-			})) as EvalResult;
+			type EvalResult = {
+				result: { type: string; value: unknown };
+				exceptionDetails?: unknown;
+			};
+			const res = (await chrome.debugger.sendCommand(
+				{ tabId },
+				"Runtime.evaluate",
+				{
+					expression,
+					awaitPromise: true,
+					returnByValue: true,
+				},
+			)) as EvalResult;
 			if (res.exceptionDetails) {
-				throw new Error(`JS exception: ${JSON.stringify(res.exceptionDetails)}`);
+				throw new Error(
+					`JS exception: ${JSON.stringify(res.exceptionDetails)}`,
+				);
 			}
 			sendToNative({
 				type: "command_result",

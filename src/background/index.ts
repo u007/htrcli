@@ -26,6 +26,7 @@ import type {
 import {
 	getConnectionMode,
 	registerTab,
+	retryConnect,
 	setScreenshotCapturer,
 	startNativeHost,
 } from "./nativeHost";
@@ -771,6 +772,7 @@ chrome.runtime.onMessage.addListener(
 			| { type: "CAPTURE_SCREENSHOT"; tabId: number }
 			| { type: "GET_RECORDING_STATE" }
 			| { type: "GET_CONNECTION_STATUS" }
+			| { type: "RECONNECT_NATIVE" }
 			| { type: "GET_TAB_ID" }
 			| {
 					type: "FETCH_URL";
@@ -949,8 +951,7 @@ chrome.runtime.onMessage.addListener(
 					try {
 						const allTabs = await chrome.tabs.query({});
 						probeTabs = allTabs.filter(
-							(t) =>
-								typeof t.url === "string" && /^https?:\/\//.test(t.url),
+							(t) => typeof t.url === "string" && /^https?:\/\//.test(t.url),
 						);
 					} catch (err) {
 						console.warn("[How-To Recorder] probe tabs.query failed:", err);
@@ -1019,6 +1020,11 @@ chrome.runtime.onMessage.addListener(
 						type: "CONNECTION_STATUS",
 						mode: getConnectionMode(),
 					});
+					return true;
+
+				case "RECONNECT_NATIVE":
+					retryConnect();
+					sendResponse({ success: true });
 					return true;
 
 				case "GET_TAB_ID":

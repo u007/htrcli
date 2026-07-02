@@ -53,11 +53,17 @@ export const Options = (): JSX.Element => {
 					remoteControlToken?: string;
 				};
 
-				if (typeof result.remoteControlServer === "string" && result.remoteControlServer) {
+				if (
+					typeof result.remoteControlServer === "string" &&
+					result.remoteControlServer
+				) {
 					setServerUrl(result.remoteControlServer);
 				}
 
-				if (typeof result.remoteControlToken === "string" && result.remoteControlToken) {
+				if (
+					typeof result.remoteControlToken === "string" &&
+					result.remoteControlToken
+				) {
 					setToken(result.remoteControlToken);
 				}
 			} catch (error) {

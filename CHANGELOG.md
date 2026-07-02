@@ -9,6 +9,15 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.2.6 [2026.07.02]
+
+- feat: add `ConnectionMode` type (`"native" | "disconnected" | "unavailable"`) with reconnection backoff capped at 20 attempts
+- feat: distinguish permanent native-host errors (not installed/forbidden) from transient ones (daemon down — relay exited) so the extension auto-recovers when the daemon restarts
+- feat: add `retryConnect()` and `RECONNECT_NATIVE` message type for manual retry from the side panel
+- feat: broadcast CONNECTION_STATUS to the side panel alongside content scripts, driving an Online/Reconnecting/Offline indicator with a "↻ Retry" button when permanently unavailable
+- feat: Makefile `serve` and `close` targets now respect `HTR_PORT` env var (fallback `:3845`)
+- chore: formatting-only cleanups in commandExecutor.ts, Options.tsx, connectionManager.ts, and nativeHost.ts
+
 ## 0.2.5 [2026.07.01]
 
 - feat: fall back to `htcli config token` for bearer token when `HTR_BEARER_TOKEN` env var is unset
