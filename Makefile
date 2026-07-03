@@ -1,5 +1,6 @@
-.PHONY: build install serve close htcli-build htcli-install htcli-clean \
-	ext-build ext-dev ext-zip firefox-build firefox-install firefox-zip
+.PHONY: build install serve close \
+		htcli-build htcli-build-all htcli-install htcli-clean \
+		ext-build ext-dev ext-zip firefox-build firefox-install firefox-zip
 
 -include .env.local
 export
@@ -10,6 +11,16 @@ HTCLI_DIR := htcli
 
 htcli-build:
 	cd $(HTCLI_DIR) && go build -o bin/htcli ./cmd/htcli
+
+# Cross-compile htcli for all supported OS/arch combinations.
+# Binaries are placed in htcli/bin/ with platform-specific names.
+htcli-build-all:
+	cd $(HTCLI_DIR) && \
+	GOOS=darwin  GOARCH=amd64 go build -o bin/htcli-darwin-amd64   ./cmd/htcli && \
+	GOOS=darwin  GOARCH=arm64 go build -o bin/htcli-darwin-arm64   ./cmd/htcli && \
+	GOOS=linux   GOARCH=amd64 go build -o bin/htcli-linux-amd64    ./cmd/htcli && \
+	GOOS=linux   GOARCH=arm64 go build -o bin/htcli-linux-arm64    ./cmd/htcli && \
+	GOOS=windows GOARCH=amd64 go build -o bin/htcli-windows-amd64.exe ./cmd/htcli
 
 htcli-install:
 	cd $(HTCLI_DIR) && go install ./cmd/htcli
@@ -44,7 +55,7 @@ firefox-install: firefox-build
 
 # ── Combined ───────────────────────────────────────────────────────────
 
-build: htcli-build ext-build
+build: htcli-build-all ext-build firefox-build
 
 install: htcli-install
 	@if [ -n "$(EXTID)" ]; then \
@@ -74,4 +85,3 @@ close:
 
 list:
 	HTR_BEARER_TOKEN=htr_aia_2026 htcli tabs list
-
