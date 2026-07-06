@@ -1,25 +1,48 @@
 ---
 name: htrcli
-description: How-To Recorder CLI (htcli) usage guide. Read this before running any htcli commands. Covers connecting to the How-To Recorder server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select), extracting text and data, taking screenshots (viewport, full page, annotated), getting accessibility tree snapshots with @eN refs, executing JavaScript, and managing browser sessions. Use when the user asks to control a browser, interact with a website, fill a form, click something, extract data, take a screenshot, or automate any browser task via How-To Recorder.
-allowed-tools: Bash(htcli:*), Bash(go run ./cmd/htcli:*)
+description: How-To Recorder CLI (htcli) usage guide. Read this before running any htcli commands. Covers connecting to the How-To Recorder server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select), extracting text and data, taking screenshots (viewport, full page, annotated), getting accessibility tree snapshots with @eN refs, executing JavaScript, managing browser sessions, and running the native messaging daemon. Use when the user asks to control a browser, interact with a website, fill a form, click something, extract data, take a screenshot, or automate any browser task via How-To Recorder.
+allowed-tools: Bash(htcli:*), Bash(go run ./cmd/htcli:*), Bash(make htcli-*)
 ---
 
 # htcli — How-To Recorder CLI
 
 Go CLI for controlling browser tabs via the How-To Recorder remote control
-API. Requires the How-To Recorder Chrome extension and server running.
+API. Supports Chrome and Firefox.
 
 ```
-htcli (Go) ──HTTP──► Server (Bun, port 3845) ──WebSocket──► Extension ──DOM──► Chrome
+# WebSocket transport (Bun server)
+htcli (Go) ──HTTP──► Bun server (server/, :3845) ──WebSocket──► Extension ──DOM──► Chrome / Firefox
+
+# Native messaging transport (htcli daemon — no Bun server needed)
+htcli (Go) ──HTTP──► htcli serve (:3845) ──Unix socket──► relay ──stdio──► Extension ──DOM──► Chrome / Firefox
 ```
+
+Two interchangeable server transports — pick one:
+- **Bun server** (`bun run server`) — WebSocket-based, requires Node/Bun runtime
+- **htcli daemon** (`htcli serve`) — native messaging, pure Go, no extra runtime
+
+Both expose the same HTTP API on port 3845. Only one can hold the port at a time.
 
 ## Setup
 
-```bash
-# Build the CLI
-cd /path/to/htcli && make build
+### Build
 
-# Configure server connection
+```bash
+cd /path/to/how-to-recorder/htcli
+make build         # → bin/htcli
+make install       # go install (global)
+```
+
+Or from the repo root:
+
+```bash
+make htcli-build   # builds htcli
+make htcli-install # installs globally
+```
+
+### Configure connection
+
+```bash
 htcli config set-server http://127.0.0.1:3845
 htcli config set-token <bearer-token>
 
@@ -31,9 +54,48 @@ export HTCLI_TOKEN=<bearer-token>
 htcli health
 ```
 
-The token is displayed when the server starts: `🔑 Auto-generated bearer token: abc123...`
+Config file: `~/.htcli/config.json`
+Priority: flags > env vars (`HTCLI_SERVER`, `HTCLI_TOKEN`) > config file > defaults.
 
 If no token is configured, htcli will attempt to auto-read it from the server.
+
+## Native Messaging Daemon
+
+The daemon (`htcli serve`) is a drop-in replacement for the Bun server — same
+HTTP API on :3845, but the browser connects via native messaging instead of
+WebSocket. Supports Chrome and Firefox connected simultaneously.
+
+```bash
+# 1. Register htcli as the browser's native messaging host
+htcli install --browser chrome  --extension-id <chrome-extension-id>
+htcli install --browser firefox --extension-id how-to-recorder@stevenstaylor.dev
+
+# 2. Reload the extension so it re-reads the host registration
+
+# 3. Start the daemon (binds :3845 + Unix socket)
+htcli serve
+#    Custom port / token:
+HTR_PORT=48546 HTR_BEARER_TOKEN=secret htcli serve
+```
+
+Chrome and Firefox may both be registered and connected at once —
+`htcli tabs list` shows tabs from both, and `--tab <id>` routes to whichever
+browser owns that tab.
+
+### Install flags
+
+```bash
+htcli install --browser chrome  --extension-id <id>   # register Chrome
+htcli install --browser firefox --extension-id <id>   # register Firefox
+htcli install --browser chrome  --uninstall           # remove manifest
+```
+
+### Why use the daemon?
+
+- No Bun/Node.js runtime required — pure Go
+- Firefox support via native messaging (Chrome also works)
+- Both browsers can be connected simultaneously
+- Screenshots and large results travel over HTTP (not limited by 1 MB NM frame size)
 
 ## The core loop
 
@@ -162,6 +224,8 @@ htcli click "text=Submit"               # by text content
 htcli click "label=Email"               # by label
 htcli click "name=email"                # by name attribute
 htcli click "placeholder=Search"        # by placeholder
+htcli click "xpath=//button[1]"         # by XPath
+htcli click "id=login"                  # by ID
 ```
 
 Rule of thumb: snapshot + `@eN` refs are fastest and most reliable. Use
@@ -275,6 +339,52 @@ htcli eval "document.querySelectorAll('a').length"
 htcli eval "window.scrollTo(0, 0)"
 ```
 
+## Fetching and downloading (no popup)
+
+These commands fetch data or save files **without triggering browser download popups** — everything runs silently via the extension background.
+
+### Fetch a URL (with cookies)
+
+```bash
+htcli fetch <url>                       # POST by default
+htcli fetch <url> --method GET          # explicit GET
+htcli fetch <url> --method POST --body '{"key":"value"}'  # POST with JSON body
+htcli fetch <url> --json                # raw JSON output
+```
+
+`fetch` runs through the extension background script, so it:
+- Sends session cookies (`credentials: "include"`)
+- Bypasses page CSP
+- Returns JSON data directly to the CLI (no download dialog)
+
+Use this to download API responses, JSON data, or any URL that returns structured data.
+
+### Print page to PDF (no save-as prompt)
+
+```bash
+htcli printpdf output.pdf               # save current page as PDF
+```
+
+Uses Chrome DevTools Protocol (`Page.printToPDF`) to generate a PDF of the
+current page **without a save-as dialog**. The PDF is saved directly to the
+specified path. Useful for capturing reports, receipts, or any page content.
+
+### Download via JavaScript (no popup)
+
+For arbitrary file downloads without popups, use `eval` to fetch the content
+and send it to the CLI:
+
+```bash
+# Download a file as base64, decode locally
+htcli eval "fetch('https://example.com/file.pdf').then(r => r.arrayBuffer()).then(b => btoa(String.fromCharCode(...new Uint8Array(b))))" --json | jq -r '.data' | base64 -d > file.pdf
+```
+
+Or use `fetch` + write to a file:
+
+```bash
+htcli fetch https://example.com/api/data --json | jq '.data' > output.json
+```
+
 ## Raw commands
 
 For advanced use, send raw JSON commands:
@@ -354,7 +464,7 @@ htcli screenshot debug.png               # visual state
 ### "No tabs connected"
 
 The How-To Recorder extension must be open and connected to the server.
-1. Open Chrome with the extension installed
+1. Open Chrome/Firefox with the extension installed
 2. Click the extension icon or open the side panel
 3. Ensure remote control is enabled
 4. Check: `htcli health` should show connected tabs > 0
@@ -369,9 +479,13 @@ htcli health                             # test connection
 
 ### "Connection refused"
 
-Server not running. Start it:
+Server not running. Start one of:
 ```bash
+# Option A: Bun server (WebSocket transport)
 cd /path/to/how-to-recorder && bun run server
+
+# Option B: htcli daemon (native messaging — no Bun needed)
+htcli serve
 ```
 
 ### Element not found
@@ -400,6 +514,9 @@ htcli click @e3                          # use new ref
 | `htcli config set-server <url>` | Set server URL |
 | `htcli config set-token <token>` | Set bearer token |
 | `htcli config show` | Show current config |
+| `htcli install --browser <b> --extension-id <id>` | Register as native messaging host |
+| `htcli install --browser <b> --uninstall` | Remove native messaging manifest |
+| `htcli serve` | Start native messaging daemon (:3845) |
 | `htcli tabs list` | List connected tabs |
 | `htcli tabs get <id>` | Get tab info |
 | `htcli open <url>` | Navigate to URL |
@@ -427,10 +544,8 @@ htcli click @e3                          # use new ref
 | `htcli get html <sel>` | Get innerHTML |
 | `htcli eval <js>` | Execute JavaScript |
 | `htcli command <json>` | Send raw JSON command |
-
-### Snapshot flags
-
-| Flag | Description |
+| `htcli fetch <url>` | Fetch URL via background (no popup, includes cookies) |
+| `htcli printpdf <path>` | Print page to PDF via CDP (no save-as prompt) |
 |------|-------------|
 | `-i`, `--interactive` | Only interactive elements |
 | `-c`, `--compact` | Compact output |
@@ -448,14 +563,23 @@ htcli click @e3                          # use new ref
 | `--format <fmt>` | png (default) or jpeg |
 | `--quality <n>` | JPEG quality 1-100 |
 | `--selector <sel>` | Capture specific element |
-| `--json` | Return base64 only |
+| `--json` | Base64 JSON output |
 
 ### Global flags
 
 | Flag | Description |
 |------|-------------|
-| `--server <url>` | Server URL |
-| `--token <token>` | Bearer token |
+| `--server <url>` | Server URL (overrides config) |
+| `--token <token>` | Bearer token (overrides config) |
 | `--json` | Raw JSON output |
 | `--tab <id>` | Target specific tab |
-| `--timeout <ms>` | Command timeout |
+| `--timeout <ms>` | Command timeout (default: 30000) |
+
+### Environment variables
+
+| Variable | Description |
+|----------|-------------|
+| `HTCLI_SERVER` | Server URL |
+| `HTCLI_TOKEN` | Bearer token |
+| `HTR_PORT` | Daemon port (default: 3845) |
+| `HTR_BEARER_TOKEN` | Daemon bearer token |

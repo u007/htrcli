@@ -4,6 +4,7 @@
  */
 
 import type { Command, CommandResult, TabInfo } from "../types/commands";
+import { AIA_API_KEY } from "../utils/aiaConfig";
 
 const HOST_NAME = "com.howtorecorder.host";
 const RECONNECT_BASE_MS = 1000;
@@ -290,8 +291,6 @@ function replyError(tabId: number, id: string, error: string): void {
 		payload: { id, success: false, error },
 	});
 }
-
-const AIA_API_KEY = "50efbade-11e8-4169-abc3-e84e1b4c561b";
 
 async function handleFetchInPage(
 	tabId: number,

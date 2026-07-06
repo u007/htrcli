@@ -16,6 +16,7 @@ import type {
 	RemoteElementInfo,
 	TargetSelector,
 } from "../types/commands";
+import { AIA_API_KEY } from "../utils/aiaConfig";
 import {
 	findElement,
 	findElementInfo,
@@ -702,8 +703,6 @@ async function handlePrintToPDF(targetTabId?: number): Promise<unknown> {
 	if (!response?.ok) throw new Error(response?.error || "printToPDF failed");
 	return response.data;
 }
-
-const AIA_API_KEY = "50efbade-11e8-4169-abc3-e84e1b4c561b";
 
 // Fetch from the content script's isolated world — shares the page's cookie jar
 // (credentials: "include" sends session cookies), reads JWT from localStorage.

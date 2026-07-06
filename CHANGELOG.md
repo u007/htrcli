@@ -9,6 +9,14 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.2.7 [2026.07.06]
+
+- fix: repair corrupted `.gitignore` line (`secrets.*.jshtcli/htcli` → separate entries), add `.env` and `htcli/bin/` to gitignore
+- fix: remove tracked compiled Go binaries from `htcli/bin/` and `htcli/htcli`
+- feat: extract hardcoded AIA API key into centralized `src/utils/aiaConfig.ts` (injected at build time via `VITE_AIA_API_KEY`)
+- chore: add `.env.example`, `ImportMetaEnv` type declarations in `global.d.ts`
+- docs: update htcli skill with daemon/native messaging transport and build instructions
+
 ## 0.2.6 [2026.07.02]
 
 - feat: add `ConnectionMode` type (`"native" | "disconnected" | "unavailable"`) with reconnection backoff capped at 20 attempts

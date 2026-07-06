@@ -31,4 +31,11 @@ CHANGELOG.txt
 *.log
 
 # secrets
-secrets.*.jshtcli/htcli
+secrets.*.js
+htcli/htcli
+
+# environment variables
+.env
+
+# compiled binaries
+htcli/bin/
