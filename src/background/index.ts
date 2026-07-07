@@ -1054,22 +1054,31 @@ chrome.runtime.onMessage.addListener(
 
 				case "PRINT_TO_PDF": {
 					const msg = message as { type: "PRINT_TO_PDF"; tabId: number };
-					const target = { tabId: msg.tabId };
 					try {
-						await chrome.debugger.attach(target, "1.3");
-						try {
-							await chrome.debugger.sendCommand(target, "Page.enable");
-							const result = (await chrome.debugger.sendCommand(
-								target,
-								"Page.printToPDF",
-								{
-									printBackground: true,
-									preferCSSPageSize: true,
-								},
-							)) as { data: string };
-							sendResponse({ ok: true, data: result.data });
-						} finally {
-							await chrome.debugger.detach(target);
+						if (typeof chrome.debugger === "undefined") {
+							// Firefox: chrome.debugger is not available — PDF generation unsupported
+							sendResponse({
+								ok: false,
+								error:
+									"PDF generation is not supported on Firefox (chrome.debugger API unavailable). Use a screenshot instead.",
+							});
+						} else {
+							const target = { tabId: msg.tabId };
+							await chrome.debugger.attach(target, "1.3");
+							try {
+								await chrome.debugger.sendCommand(target, "Page.enable");
+								const result = (await chrome.debugger.sendCommand(
+									target,
+									"Page.printToPDF",
+									{
+										printBackground: true,
+										preferCSSPageSize: true,
+									},
+								)) as { data: string };
+								sendResponse({ ok: true, data: result.data });
+							} finally {
+								await chrome.debugger.detach(target);
+							}
 						}
 					} catch (error) {
 						console.error("[How-To Recorder] PRINT_TO_PDF error:", error);
@@ -1188,17 +1197,24 @@ chrome.runtime.onMessage.addListener(
 						tabId: number;
 						url: string;
 					};
-					const target = { tabId: msg.tabId };
 					try {
-						await chrome.debugger.attach(target, "1.3");
-						try {
-							await chrome.debugger.sendCommand(target, "Page.navigate", {
-								url: msg.url,
-							});
-						} finally {
-							await chrome.debugger.detach(target);
+						if (typeof chrome.debugger === "undefined") {
+							// Firefox: no debugger API — use standard tabs API instead
+							await chrome.tabs.update(msg.tabId, { url: msg.url });
+							sendResponse({ ok: true });
+						} else {
+							// Chrome: use CDP Page.navigate for consistency
+							const target = { tabId: msg.tabId };
+							await chrome.debugger.attach(target, "1.3");
+							try {
+								await chrome.debugger.sendCommand(target, "Page.navigate", {
+									url: msg.url,
+								});
+							} finally {
+								await chrome.debugger.detach(target);
+							}
+							sendResponse({ ok: true });
 						}
-						sendResponse({ ok: true });
 					} catch (error) {
 						console.error("[How-To Recorder] CDP_NAVIGATE error:", error);
 						sendResponse({

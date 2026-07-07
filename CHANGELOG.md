@@ -9,6 +9,11 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.2.8 [2026.07.07]
+
+- fix: add Firefox fallback in `CDP_NAVIGATE` background handler — use `chrome.tabs.update` when `chrome.debugger` is unavailable instead of crashing on the undefined API
+- fix: add Firefox fallback in `PRINT_TO_PDF` background handler — return a graceful "unsupported on Firefox" error instead of throwing when `chrome.debugger` is undefined
+
 ## 0.2.7 [2026.07.06]
 
 - fix: repair corrupted `.gitignore` line (`secrets.*.jshtcli/htcli` → separate entries), add `.env` and `htcli/bin/` to gitignore
