@@ -1,6 +1,6 @@
-# htcli — How-To Recorder CLI
+# htcli — HTR Ncontrol CLI
 
-Go CLI for controlling browser tabs via the [How-To Recorder](https://github.com/u007/how-to-recorder) remote control API.
+Go CLI for controlling browser tabs via the [HTR Ncontrol](https://github.com/u007/htrncontrol) remote control API.
 
 `htcli` is an HTTP client that talks to a server on port 3845. There are two
 interchangeable transports for that server — pick one:
@@ -24,8 +24,8 @@ owns the target tab). Only one of the two servers can hold :3845 at a time.
 ### From source
 
 ```bash
-git clone https://github.com/u007/how-to-recorder.git
-cd how-to-recorder/htcli
+git clone https://github.com/u007/htrncontrol.git
+cd htrncontrol/htcli
 make build
 ./bin/htcli --help
 ```
@@ -46,7 +46,7 @@ needs no `bun run server`; `htcli serve` provides the HTTP API on :3845 itself.
 #    Chrome — use the extension ID from chrome://extensions → Details:
 htcli install --browser chrome  --extension-id <chrome-extension-id>
 #    Firefox — use the add-on ID (browser_specific_settings.gecko.id):
-htcli install --browser firefox --extension-id how-to-recorder@stevenstaylor.dev
+htcli install --browser firefox --extension-id htrcontrol@mercstudio.com
 
 #    Remove a manifest with: htcli install --browser <b> --uninstall
 
@@ -66,8 +66,8 @@ over HTTP, so they are not limited by the 1 MB native-messaging frame size.
 ## Quick Start
 
 ```bash
-# 1. Start the How-To Recorder server
-cd /path/to/how-to-recorder
+# 1. Start the HTR Ncontrol server
+cd /path/to/htrncontrol
 bun run server
 
 # 2. Configure htcli
@@ -111,6 +111,9 @@ htcli forward                             # Go forward
 htcli reload                              # Reload page
 ```
 
+All navigation commands wait for the destination page to finish loading
+(`document.readyState === "complete"`, up to 25s) before returning.
+
 ### Interaction
 
 ```bash
@@ -126,6 +129,16 @@ htcli uncheck <selector>                  # Uncheck checkbox
 htcli scroll <direction> [pixels]         # Scroll page
 htcli clear <selector>                    # Clear input
 ```
+
+Interaction commands (`click`, `dblclick`, `rightclick`, `fill`, `type`,
+`clear`, `select`, `check`, `uncheck`, `press`, and the visible-only `hover`,
+`focus`, `blur`, `scroll`, `selectText`, `highlight`) **auto-wait** for their
+target to exist, be visible, and (where it matters) be enabled before acting.
+The default budget is 5s; override it with `--timeout <ms>` (capped at 20s). If
+the element never becomes actionable the command fails with a descriptive error
+(`not found` / `not visible` / `disabled`). Read-only inspection commands
+(`find`, `get text`, `get value`, …) keep instant, probing semantics and do
+not wait.
 
 ### Inspection
 
@@ -180,7 +193,7 @@ Priority: flags > env vars (`HTCLI_SERVER`, `HTCLI_TOKEN`) > config file > defau
 
 ## Requirements
 
-- [How-To Recorder](https://github.com/u007/how-to-recorder) extension installed (Chrome or Firefox)
+- [HTR Ncontrol](https://github.com/u007/htrncontrol) extension installed (Chrome or Firefox)
 - A server on :3845 — either the Bun server (`bun run server`) or the native-messaging daemon (`htcli serve`)
 - Go 1.22+ (for building from source)
 

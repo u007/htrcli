@@ -1,12 +1,12 @@
 ---
 name: htrcli
-description: How-To Recorder CLI (htcli) usage guide. Read this before running any htcli commands. Covers connecting to the How-To Recorder server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select), extracting text and data, taking screenshots (viewport, full page, annotated), getting accessibility tree snapshots with @eN refs, executing JavaScript, managing browser sessions, and running the native messaging daemon. Use when the user asks to control a browser, interact with a website, fill a form, click something, extract data, take a screenshot, or automate any browser task via How-To Recorder.
+description: HTR Ncontrol CLI (htcli) usage guide. Read this before running any htcli commands. Covers connecting to the HTR Ncontrol server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select), extracting text and data, taking screenshots (viewport, full page, annotated), getting accessibility tree snapshots with @eN refs, executing JavaScript, managing browser sessions, and running the native messaging daemon. Use when the user asks to control a browser, interact with a website, fill a form, click something, extract data, take a screenshot, or automate any browser task via HTR Ncontrol.
 allowed-tools: Bash(htcli:*), Bash(go run ./cmd/htcli:*), Bash(make htcli-*)
 ---
 
-# htcli — How-To Recorder CLI
+# htcli — HTR Ncontrol CLI
 
-Go CLI for controlling browser tabs via the How-To Recorder remote control
+Go CLI for controlling browser tabs via the HTR Ncontrol remote control
 API. Supports Chrome and Firefox.
 
 ```
@@ -28,7 +28,7 @@ Both expose the same HTTP API on port 3845. Only one can hold the port at a time
 ### Build
 
 ```bash
-cd /path/to/how-to-recorder/htcli
+cd /path/to/htrncontrol/htcli
 make build         # → bin/htcli
 make install       # go install (global)
 ```
@@ -68,7 +68,7 @@ WebSocket. Supports Chrome and Firefox connected simultaneously.
 ```bash
 # 1. Register htcli as the browser's native messaging host
 htcli install --browser chrome  --extension-id <chrome-extension-id>
-htcli install --browser firefox --extension-id how-to-recorder@stevenstaylor.dev
+htcli install --browser firefox --extension-id htrcontrol@mercstudio.com
 
 # 2. Reload the extension so it re-reads the host registration
 
@@ -100,11 +100,17 @@ htcli install --browser chrome  --uninstall           # remove manifest
 ## The core loop
 
 ```bash
-htcli open <url>              # 1. Navigate to a page
+htcli open <url>              # 1. Navigate to a page (waits for page load)
 htcli snapshot -i             # 2. See what's on it (interactive elements only)
 htcli click @e3               # 3. Act on refs from the snapshot
 htcli snapshot -i             # 4. Re-snapshot after any page change
 ```
+
+`open`, `back`, `forward`, and `reload` block until the destination page
+finishes loading (up to 25s), so the next command runs against the loaded
+page. Clicks that *trigger* a navigation do NOT wait — after such a click,
+poll readiness before interacting (e.g. `htcli eval 'document.readyState'`
+or re-snapshot and check the content).
 
 Refs (`@e1`, `@e2`, ...) are assigned fresh on every snapshot. They become
 **stale the moment the page changes** — after clicks that navigate, form
@@ -230,6 +236,22 @@ htcli click "id=login"                  # by ID
 
 Rule of thumb: snapshot + `@eN` refs are fastest and most reliable. Use
 selectors as a fallback when refs don't work.
+
+### Actionable-wait behavior
+
+Every interaction command (`click`, `dblclick`, `rightclick`, `fill`, `type`,
+`clear`, `select`, `check`, `uncheck`, `pressKey`, and the visible-only
+`hover`, `focus`, `blur`, `scrollTo`, `selectText`, `highlight`) now
+**auto-waits** for its target to exist, be visible, and (where it matters) be
+enabled before acting. The default budget is 5s; tune it per command with
+`--timeout <ms>` (capped at 20s). If the element never becomes actionable the
+command fails with a descriptive error naming the unmet condition
+(`not found` / `not visible` / `disabled`) instead of a bare "element not found".
+
+This means you usually do **not** need to sleep or re-snapshot before clicking
+an element that is animating in or rendering lazily — the command waits for it.
+Read-only inspection commands (`find`, `getText`, `getValue`, `isVisible`, …)
+keep their instant, probing semantics and do **not** wait.
 
 ### Keys
 
@@ -463,7 +485,7 @@ htcli screenshot debug.png               # visual state
 
 ### "No tabs connected"
 
-The How-To Recorder extension must be open and connected to the server.
+The HTR Ncontrol extension must be open and connected to the server.
 1. Open Chrome/Firefox with the extension installed
 2. Click the extension icon or open the side panel
 3. Ensure remote control is enabled
@@ -482,7 +504,7 @@ htcli health                             # test connection
 Server not running. Start one of:
 ```bash
 # Option A: Bun server (WebSocket transport)
-cd /path/to/how-to-recorder && bun run server
+cd /path/to/htrncontrol && bun run server
 
 # Option B: htcli daemon (native messaging — no Bun needed)
 htcli serve
