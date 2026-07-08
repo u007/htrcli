@@ -492,3 +492,120 @@ function generateCSSSelector(element: Element): string {
 
 	return parts.join(" > ");
 }
+
+/**
+ * Options for {@link waitForActionableElement}.
+ */
+export interface WaitForActionableOptions {
+	/** Maximum time (ms) to wait for both appearance and actionability. Default 5000. */
+	timeoutMs?: number;
+	/**
+	 * When true (default), the element must also be enabled (not `disabled` /
+	 * `aria-disabled`). Hover/scroll targets should pass false.
+	 */
+	requireEnabled?: boolean;
+}
+
+/**
+ * Human-readable description of a target selector for error messages.
+ */
+function describeTarget(target: TargetSelector): string {
+	if (target.selector) return `"${target.selector}"`;
+	if (target.xpath) return `xpath "${target.xpath}"`;
+	if (target.id) return `#${target.id}`;
+	if (target.text) return `text "${target.text}"`;
+	if (target.name) return `[name="${target.name}"]`;
+	if (target.role) return `[role="${target.role}"]`;
+	return JSON.stringify(target);
+}
+
+/**
+ * Wait for an element to both appear in the DOM (Phase A) and become actionable
+ * (Phase B: visible, and enabled when `requireEnabled` is set) within a single
+ * shared deadline.
+ *
+ * Existence is detected event-driven via a MutationObserver (not polled), while
+ * actionability is polled on a short interval. This always waits — unlike
+ * {@link waitForElement}, the `waitForAppear` gate is intentionally NOT consulted.
+ *
+ * On timeout, the rejection message names the failed condition distinctly:
+ * - never appeared → "... was not found ..."
+ * - present but hidden → "... is not visible ..."
+ * - present but disabled → "... is disabled ..."
+ * so callers can tell a wrong selector from a timing bug.
+ */
+export async function waitForActionableElement(
+	target: TargetSelector,
+	opts: WaitForActionableOptions = {},
+): Promise<Element> {
+	const timeoutMs = opts.timeoutMs ?? 5000;
+	const requireEnabled = opts.requireEnabled ?? true;
+	const deadline = Date.now() + timeoutMs;
+
+	const check = (element: Element): { ok: boolean; reason?: string } => {
+		const info = getElementInfo(element);
+		if (!info.visible) return { ok: false, reason: "is not visible" };
+		if (requireEnabled && !info.enabled)
+			return { ok: false, reason: "is disabled" };
+		return { ok: true };
+	};
+
+	// Fast path: already present and actionable.
+	const immediate = findElement(target);
+	if (immediate && check(immediate).ok) return immediate;
+
+	return new Promise<Element>((resolve, reject) => {
+		let settled = false;
+		let foundElement: Element | null = null;
+		const label = describeTarget(target);
+
+		const cleanup = () => {
+			clearTimeout(timer);
+			clearInterval(poll);
+			obs.disconnect();
+		};
+
+		const succeed = (el: Element) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			resolve(el);
+		};
+
+		const fail = (reason: string) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			reject(
+				new Error(
+					`Element ${label} ${reason} (waited ${timeoutMs}ms for it to become actionable)`,
+				),
+			);
+		};
+
+		const evaluate = () => {
+			if (settled) return;
+			if (Date.now() > deadline) {
+				if (!foundElement) fail("was not found");
+				else {
+					const result = check(foundElement);
+					fail(result.reason ?? "is not actionable");
+				}
+				return;
+			}
+			const el = findElement(target);
+			if (!el) return; // not appeared yet
+			foundElement = el;
+			const result = check(el);
+			if (result.ok) succeed(el);
+		};
+
+		const timer = setTimeout(evaluate, timeoutMs);
+		const obs = new MutationObserver(() => evaluate());
+		obs.observe(document.documentElement, { childList: true, subtree: true });
+		const poll = setInterval(evaluate, 50);
+
+		// Kick off an initial evaluation in case the element is already present.
+		evaluate();
+	});
+}
