@@ -47,21 +47,48 @@ export function findElementInfo(target: TargetSelector): RemoteElementInfo[] {
 export function waitForElement(
 	target: TargetSelector,
 	timeoutMs = 5000,
+	options: { force?: boolean; throwOnTimeout?: boolean } = {},
 ): Promise<Element | null> {
+	const { force = false, throwOnTimeout = false } = options;
 	// Check if already present
 	const existing = findElement(target);
 	if (existing) return Promise.resolve(existing);
 
-	if (!target.waitForAppear) return Promise.resolve(null);
+	// Most callers use `waitForAppear` to opt in to waiting. The `wait` command
+	// passes `force: true` because waiting is the entire point of that action.
+	if (!target.waitForAppear && !force) return Promise.resolve(null);
 
-	return new Promise((resolve) => {
+	return new Promise((resolve, reject) => {
 		let resolved = false;
 		const timer = setTimeout(() => {
 			if (!resolved) {
 				obs.disconnect();
-				resolve(null);
+				if (throwOnTimeout) {
+					reject(
+						new Error(
+							`Element ${describeTarget(target)} did not appear within ${timeoutMs}ms`,
+						),
+					);
+				} else {
+					resolve(null);
+				}
 			}
 		}, timeoutMs);
+
+		// Event-driven detection via MutationObserver; a short poll backs it up
+		// for environments where observer delivery is unreliable.
+		const poll = setInterval(() => {
+			if (resolved) return;
+			const el = findElement(target);
+			if (el) {
+				resolved = true;
+				clearTimeout(timer);
+				clearInterval(poll);
+				obs.disconnect();
+				if (throwOnTimeout) resolve(el);
+				else resolve(el);
+			}
+		}, 50);
 
 		const obs = new MutationObserver(() => {
 			const el = findElement(target);
@@ -69,6 +96,7 @@ export function waitForElement(
 				resolved = true;
 				clearTimeout(timer);
 				obs.disconnect();
+				clearInterval(poll);
 				resolve(el);
 			}
 		});

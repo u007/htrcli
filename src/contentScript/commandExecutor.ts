@@ -303,9 +303,20 @@ function handleFindAll(target: TargetSelector): RemoteElementInfo[] {
 async function handleWait(
 	target: TargetSelector,
 	timeout?: number,
-): Promise<RemoteElementInfo | null> {
-	const element = await waitForElement(target, timeout ?? 5000);
-	if (!element) return null;
+): Promise<RemoteElementInfo> {
+	const timeoutMs = timeout ?? 5000;
+	// `wait` always waits for the element to appear (the `waitForAppear` gate
+	// does not apply) and fails loudly on timeout instead of resolving null.
+	const element = await waitForElement(target, timeoutMs, {
+		force: true,
+		throwOnTimeout: true,
+	});
+	if (!element) {
+		const label = target.selector ?? target.xpath ?? JSON.stringify(target);
+		throw new Error(
+			`wait: element "${label}" did not appear within ${timeoutMs}ms`,
+		);
+	}
 	return getElementInfo(element);
 }
 
@@ -503,17 +514,52 @@ async function handleBlur(
 	(element as HTMLElement).blur();
 }
 
+/**
+ * Wait until the page scroll position is stable across two consecutive
+ * animation frames, so a command issued right after `scrollTo` (e.g. a
+ * screenshot) observes the settled position rather than mid-animation.
+ * Bounded by a short hard cap so a page with its own scroll animations can't
+ * hang the command.
+ */
+function waitForScrollSettle(maxMs = 500): Promise<void> {
+	return new Promise((resolve) => {
+		const start = Date.now();
+		let lastTop = window.scrollY;
+		let lastLeft = window.scrollX;
+		let stableFrames = 0;
+		const check = () => {
+			const top = window.scrollY;
+			const left = window.scrollX;
+			if (top === lastTop && left === lastLeft) {
+				stableFrames++;
+			} else {
+				stableFrames = 0;
+				lastTop = top;
+				lastLeft = left;
+			}
+			if (stableFrames >= 2 || Date.now() - start > maxMs) {
+				resolve();
+				return;
+			}
+			requestAnimationFrame(check);
+		};
+		requestAnimationFrame(check);
+	});
+}
+
 async function handleScrollTo(
 	target: TargetSelector,
 	timeoutMs = 5000,
 ): Promise<void> {
-	// Auto-wait for the target to be visible (no enabled requirement); the
-	// instant/settled scroll behavior is finalized in the scrollTo correctness fix.
+	// Auto-wait for the target to be visible (no enabled requirement).
 	const element = await waitForActionableElement(target, {
 		timeoutMs,
 		requireEnabled: false,
 	});
-	element.scrollIntoView({ behavior: "smooth", block: "center" });
+	// Instant scroll (no smooth animation) so the following action captures the
+	// settled position; then wait for the scroll to actually settle.
+	element.scrollIntoView({ behavior: "auto", block: "center" });
+	await waitForScrollSettle();
 }
 
 async function handleFill(
@@ -795,10 +841,44 @@ function handleScreenshot(_target?: TargetSelector): string {
 function handleEvaluate(script: string): unknown {
 	if (!script) throw new Error("Script is required");
 
-	// SECURITY: Use Function constructor for indirect eval in global scope.
-	// This executes arbitrary code with full page access.
-	const fn = new Function(`return (${script})`);
-	return fn();
+	// SECURITY: This uses the `Function` constructor to execute arbitrary code
+	// with full page access. It is intended for trusted browser automation and
+	// the server enforces authentication before forwarding commands.
+	//
+	// ISOLATED WORLD: the script runs in the extension's isolated world, so it
+	// cannot see page-context JavaScript globals/variables. Use `debuggerEval`
+	// for page-context evaluation.
+	//
+	// Compilation uses two deterministic modes chosen at compile time (NOT a
+	// runtime fallback): first as a single expression (preserving the
+	// `document.title` style usage); if that is a SyntaxError, as a function
+	// body where the caller supplies an explicit `return`. Both are executed
+	// inside an async function so `await` works, and the resolved value is
+	// returned. Runtime errors from the script propagate unchanged.
+	let compiled: () => unknown;
+	try {
+		// Mode 1: a single expression.
+		compiled = new Function(`return ( ${script} );`) as () => unknown;
+	} catch (err) {
+		if (!(err instanceof SyntaxError)) throw err;
+		// Mode 2: a statement list / function body with an explicit `return`.
+		try {
+			compiled = new Function(
+				`return (async () => { ${script} })();`,
+			) as () => unknown;
+		} catch (err2) {
+			// Genuinely invalid in both modes. Normalize the message so callers
+			// (and tests) get a consistent "SyntaxError" indicator across
+			// runtimes — V8 prefixes `.message` with "SyntaxError:" but
+			// JavaScriptCore does not.
+			const msg = err2 instanceof Error ? err2.message : String(err2);
+			throw new Error(
+				msg.includes("SyntaxError") ? msg : `SyntaxError: ${msg}`,
+			);
+		}
+	}
+
+	return (async () => compiled())();
 }
 
 async function handlePrintToPDF(targetTabId?: number): Promise<unknown> {

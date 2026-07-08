@@ -321,3 +321,148 @@ describe("interaction auto-wait (DOM)", () => {
 		expect(elapsed).toBeLessThan(500);
 	});
 });
+
+describe("wait action (DOM)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("resolves with element info when the element appears shortly after", async () => {
+		setTimeout(() => {
+			const el = document.createElement("div");
+			el.id = "appears";
+			el.textContent = "hello";
+			document.body.appendChild(el);
+		}, 100);
+
+		const result = await executeCommand({
+			id: "w1",
+			action: "wait",
+			target: { selector: "#appears" },
+			options: { timeout: 2000 },
+		});
+		expect(result.success).toBe(true);
+		expect((result.data as { text?: string }).text).toContain("hello");
+	});
+
+	it("fails with success:false and names the selector on timeout", async () => {
+		const result = await executeCommand({
+			id: "w2",
+			action: "wait",
+			target: { selector: "#never" },
+			options: { timeout: 200 },
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/#never/);
+	});
+
+	it("waits even when waitForAppear is absent from the target", async () => {
+		setTimeout(() => {
+			const el = document.createElement("span");
+			el.id = "late-span";
+			document.body.appendChild(el);
+		}, 100);
+
+		const result = await executeCommand({
+			id: "w3",
+			action: "wait",
+			// No `waitForAppear` — `wait` must still wait for appearance.
+			target: { selector: "#late-span" },
+			options: { timeout: 2000 },
+		});
+		expect(result.success).toBe(true);
+	});
+});
+
+describe("scrollTo action (DOM)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("resolves (settles) without hanging when the target is present", async () => {
+		const el = document.createElement("div");
+		el.id = "scroll-target";
+		document.body.appendChild(el);
+
+		const start = Date.now();
+		const result = await executeCommand({
+			id: "s1",
+			action: "scrollTo",
+			target: { selector: "#scroll-target" },
+			options: { timeout: 2000 },
+		});
+		expect(result.success).toBe(true);
+		// The settle wait must terminate well within the timeout/hard cap.
+		expect(Date.now() - start).toBeLessThan(2000);
+	});
+});
+
+describe("evaluate action (DOM)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+		document.title = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("still evaluates single-expression scripts", async () => {
+		document.title = "EvalPage";
+		const result = await executeCommand({
+			id: "e1",
+			action: "evaluate",
+			value: "document.title",
+		});
+		expect(result.success).toBe(true);
+		expect(result.data).toBe("EvalPage");
+	});
+
+	it("evaluates multi-statement scripts with an explicit return", async () => {
+		const result = await executeCommand({
+			id: "e2",
+			action: "evaluate",
+			value: "const a = 2; const b = 3; return a + b;",
+		});
+		expect(result.success).toBe(true);
+		expect(result.data).toBe(5);
+	});
+
+	it("awaits async scripts and returns the resolved value", async () => {
+		const result = await executeCommand({
+			id: "e3",
+			action: "evaluate",
+			value: "return await Promise.resolve(42);",
+		});
+		expect(result.success).toBe(true);
+		expect(result.data).toBe(42);
+	});
+
+	it("propagates a script's own runtime error", async () => {
+		const result = await executeCommand({
+			id: "e4",
+			action: "evaluate",
+			value: "throw new Error('boom');",
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/boom/);
+	});
+
+	it("reports a SyntaxError for a script invalid in both modes", async () => {
+		const result = await executeCommand({
+			id: "e5",
+			action: "evaluate",
+			value: "const = = ;",
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/SyntaxError/);
+	});
+});
