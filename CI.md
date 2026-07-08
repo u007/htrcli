@@ -1,6 +1,6 @@
 # CI/CD Configuration
 
-This document describes the CI/CD setup for the How-To Recorder Chrome extension.
+This document describes the CI/CD setup for the HTR NControl Chrome extension.
 
 ## Workflows
 

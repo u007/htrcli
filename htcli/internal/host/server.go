@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/u007/htcli/internal/api"
 )
 
 // NewHTTPServer builds the HTTP server with all API routes.
@@ -86,6 +88,9 @@ func apiHandler(d *Daemon, port int, bearerToken string) http.Handler {
 		case path == "/api/tabs" && r.Method == "GET":
 			apiOK(w, d.Tabs())
 
+		case path == "/api/page" && r.Method == "GET":
+			handlePageGet(w, r, d)
+
 		case tabGetRe.MatchString(path) && r.Method == "GET":
 			m := tabGetRe.FindStringSubmatch(path)
 			id := parseTabID(m[1])
@@ -145,6 +150,45 @@ func handleCommand(w http.ResponseWriter, r *http.Request, d *Daemon, tabID int)
 		return
 	}
 	apiOK(w, result)
+}
+
+// handlePageGet returns the active tab's current PageInfo by dispatching a
+// `getPageInfo` command and unwrapping the CommandResult. Mirrors the Bun
+// server's /api/page behavior: targets the first connected tab if --tab is
+// not given (none of the existing CLI commands pass a tab here).
+func handlePageGet(w http.ResponseWriter, r *http.Request, d *Daemon) {
+	tabID, ok := d.FirstTabID()
+	if !ok {
+		apiError(w, 404, "no tabs connected")
+		return
+	}
+	result, err := sendCommand(
+		d,
+		tabID,
+		Command{ID: generateID(), Action: "getPageInfo"},
+		5000,
+	)
+	if err != nil {
+		apiError(w, 404, err.Error())
+		return
+	}
+	if !result.Success {
+		apiError(w, 500, result.Error)
+		return
+	}
+	// Unwrap the result.Data into PageInfo so the client gets the structured
+	// shape it expects (matching the Bun server's response).
+	pageBytes, err := json.Marshal(result.Data)
+	if err != nil {
+		apiError(w, 500, "failed to encode page info")
+		return
+	}
+	var page api.PageInfo
+	if err := json.Unmarshal(pageBytes, &page); err != nil {
+		apiError(w, 500, "failed to decode page info")
+		return
+	}
+	apiOK(w, page)
 }
 
 // screenshotTimeout bounds how long GET /api/screenshot waits for the

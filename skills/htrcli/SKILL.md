@@ -1,12 +1,12 @@
 ---
 name: htrcli
-description: HTR Ncontrol CLI (htcli) usage guide. Read this before running any htcli commands. Covers connecting to the HTR Ncontrol server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select), extracting text and data, taking screenshots (viewport, full page, annotated), getting accessibility tree snapshots with @eN refs, executing JavaScript, managing browser sessions, and running the native messaging daemon. Use when the user asks to control a browser, interact with a website, fill a form, click something, extract data, take a screenshot, or automate any browser task via HTR Ncontrol.
+description: HTR NControl CLI (htcli) usage guide. Read this before running any htcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select), extracting text and data, taking screenshots (viewport, full page, annotated), getting accessibility tree snapshots with @eN refs, executing JavaScript, managing browser sessions, and running the native messaging daemon. Use when the user asks to control a browser, interact with a website, fill a form, click something, extract data, take a screenshot, or automate any browser task via HTR NControl.
 allowed-tools: Bash(htcli:*), Bash(go run ./cmd/htcli:*), Bash(make htcli-*)
 ---
 
-# htcli — HTR Ncontrol CLI
+# htcli — HTR NControl CLI
 
-Go CLI for controlling browser tabs via the HTR Ncontrol remote control
+Go CLI for controlling browser tabs via the HTR NControl remote control
 API. Supports Chrome and Firefox.
 
 ```
@@ -189,6 +189,7 @@ htcli find "#login-form"                # find element and return info
 
 ```bash
 htcli page                              # URL, title, viewport, scroll position
+htcli page --json                       # machine-readable
 ```
 
 Output:
@@ -196,6 +197,8 @@ Output:
 URL:      https://example.com/login
 Title:    Example - Login
 Domain:   example.com
+Ready:    complete                      # document.readyState
+History:  3 entries                     # window.history.length
 Viewport: 1280x720
 Document: 1280x2400
 Scroll:   0, 350
@@ -348,10 +351,16 @@ htcli --tab 123 click @e5
 
 ```bash
 htcli open https://example.com          # navigate to URL
-htcli back                              # browser back
-htcli forward                           # browser forward
+htcli back                              # browser back (errors if no history)
+htcli forward                           # browser forward (errors if no history)
 htcli reload                            # reload page
 ```
+
+All navigation commands block until the new page reaches
+`document.readyState === "complete"` (up to 25s). `back` and `forward` return
+an explicit "No previous page in this tab's history" / "No forward page in
+this tab's history" error if the tab has no entry to go to, instead of silently
+succeeding.
 
 ## JavaScript execution
 
@@ -367,9 +376,12 @@ and **multi-statement scripts with an explicit `return`** (e.g.
 promises — `htcli eval "return await fetch('/api').then(r => r.json());"`. A
 script that throws surfaces its own error message in the result.
 
-`eval` runs in the extension's **isolated world**, so it cannot see
-page-context JavaScript globals or variables. To evaluate code in the page's
-own context, use the `debuggerEval` action instead.
+`eval` runs in the **page's main world** (via Chrome DevTools Protocol) on
+both transports, so it can see page-context JavaScript globals, React state,
+and closures that an isolated-world script cannot. Async/await, multi-statement
+scripts, and any return value are supported natively. On Firefox
+(`chrome.debugger` unavailable) `eval` returns an explicit error — use
+`debugEval` (Chrome-only) for a fallback path that still works on Firefox.
 
 ## Fetching and downloading (no popup)
 
@@ -495,7 +507,7 @@ htcli screenshot debug.png               # visual state
 
 ### "No tabs connected"
 
-The HTR Ncontrol extension must be open and connected to the server.
+The HTR NControl extension must be open and connected to the server.
 1. Open Chrome/Firefox with the extension installed
 2. Click the extension icon or open the side panel
 3. Ensure remote control is enabled

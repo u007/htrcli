@@ -261,7 +261,7 @@ function handleClick(event: MouseEvent): void {
 	if (!interactiveElement) return;
 
 	// Don't track clicks on the extension's own UI
-	if (interactiveElement.closest("[data-how-to-recorder-ignore]")) {
+	if (interactiveElement.closest("[data-htrncontrol-ignore]")) {
 		return;
 	}
 

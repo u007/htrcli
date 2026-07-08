@@ -98,6 +98,9 @@ var pressCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if err := commandError(result); err != nil {
+			return err
+		}
 
 		if output.JSONOutput {
 			output.PrintJSON(result)
@@ -162,6 +165,9 @@ var scrollCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if err := commandError(result); err != nil {
+			return err
+		}
 
 		if output.JSONOutput {
 			output.PrintJSON(result)
@@ -182,6 +188,16 @@ var clearCmd = &cobra.Command{
 	},
 }
 
+// commandError converts a failed command result into a CLI error so the
+// process exits non-zero with the extension's error message instead of
+// printing a success line.
+func commandError(result *api.CommandResult) error {
+	if result.Success {
+		return nil
+	}
+	return fmt.Errorf("%s", result.Error)
+}
+
 func runInteract(action, selector, value string) error {
 	c := GetClient()
 	result, err := c.ExecuteCommand(GetTabID(), api.Command{
@@ -191,6 +207,9 @@ func runInteract(action, selector, value string) error {
 		Value:  value,
 	})
 	if err != nil {
+		return err
+	}
+	if err := commandError(result); err != nil {
 		return err
 	}
 

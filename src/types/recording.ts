@@ -58,11 +58,15 @@ export interface RecordingSession {
 	trackedTabIds: number[];
 }
 
-// Connection mode tracked by native host
-// - "native": connected and communicating with the daemon
-// - "disconnected": transient — relay exited (daemon down), retrying with backoff
-// - "unavailable": permanent — host not installed/forbidden, or max retries exceeded
-export type ConnectionMode = "native" | "disconnected" | "unavailable";
+// Connection mode tracked by the background and surfaced to the UI.
+// - "native": connected via native messaging (htcli relay → daemon)
+// - "ws": connected directly to the remote-control server over WebSocket
+//         (content-script fallback when native messaging is unavailable)
+// - "disconnected": transient — relay exited (daemon down) or WS dropped,
+//         retrying with backoff
+// - "unavailable": permanent — host not installed/forbidden, max retries
+//         exceeded, or no WS server configured
+export type ConnectionMode = "native" | "ws" | "disconnected" | "unavailable";
 
 // Message types for communication between components
 export type MessageType =
@@ -87,7 +91,10 @@ export type MessageType =
 	| "HIGHLIGHT_ELEMENT"
 	| "HIDE_HIGHLIGHT"
 	| "CONNECTION_STATUS"
-	| "RECONNECT_NATIVE";
+	| "RECONNECT_NATIVE"
+	| "WS_CONNECTION_STATUS"
+	| "ENABLE_WS_REMOTE_CONTROL"
+	| "CDP_EVAL";
 
 // Base message structure
 export interface BaseMessage {
@@ -218,6 +225,23 @@ export interface ConnectionStatusMessage extends BaseMessage {
 	mode: ConnectionMode;
 }
 
+// WebSocket connection status from a content script (content script → background).
+// `mode` is "ws" when the content script's WebSocket to the remote-control
+// server is open, and "disconnected" when it has dropped. The background
+// folds this into the unified connection mode shown in the UI.
+export interface WsConnectionStatusMessage extends BaseMessage {
+	type: "WS_CONNECTION_STATUS";
+	mode: "ws" | "disconnected";
+}
+
+// Ask a content script to enable its WebSocket remote-control fallback
+// (background → content script). Used when native messaging is unavailable
+// so the tab can connect to the server directly over WebSocket.
+export interface EnableWsRemoteControlMessage extends BaseMessage {
+	type: "ENABLE_WS_REMOTE_CONTROL";
+	serverUrl?: string;
+}
+
 // Union type for all messages
 export type RecordingMessage =
 	| StartRecordingMessage
@@ -238,7 +262,9 @@ export type RecordingMessage =
 	| ContentScriptReadyMessage
 	| HighlightElementMessage
 	| HideHighlightMessage
-	| ConnectionStatusMessage;
+	| ConnectionStatusMessage
+	| WsConnectionStatusMessage
+	| EnableWsRemoteControlMessage;
 
 // Export format types
 export interface ExportedStep {

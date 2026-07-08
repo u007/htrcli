@@ -1,5 +1,5 @@
 /**
- * Native Messaging Host integration for the HTR Ncontrol extension.
+ * Native Messaging Host integration for the HTR NControl extension.
  * Manages the connection to the htcli native host via Chrome Native Messaging.
  */
 
@@ -431,6 +431,231 @@ const NAV_ACTIONS = new Set(["navigate", "reload", "goBack", "goForward"]);
 // caller gets a clean error instead of a transport timeout.
 const NAV_LOAD_TIMEOUT_MS = 25000;
 
+// Actions whose page-side default behavior can start a navigation (link click,
+// form submit via Enter, modal button that routes). These get post-action load
+// settling; fill/check/select do not navigate on their own (Enter-to-submit
+// goes through pressKey).
+const SETTLING_ACTIONS = new Set([
+	"click",
+	"dblclick",
+	"rightclick",
+	"pressKey",
+]);
+
+/**
+ * Shape of a `chrome.tabs.onUpdated` listener that this module needs to
+ * intercept for tests. Matches the real Chrome signature; the real
+ * `chrome.tabs.onUpdated.addListener` accepts a `(tabId, changeInfo, tab)`
+ * callback where `changeInfo` is `chrome.tabs.TabChangeInfo` and `tab` is
+ * `chrome.tabs.Tab`. Test injection calls the listener with objects that
+ * have at least `{ status?, url? }` populated; narrowing is done at the
+ * wrapper (`chromeDeps`) so the watcher code can read the full shape.
+ */
+export type TabUpdateListener = (
+	tabId: number,
+	changeInfo: chrome.tabs.TabChangeInfo,
+	tab: chrome.tabs.Tab,
+) => void;
+
+/**
+ * Test-injection seam: callers (typically unit tests) provide their own
+ * `addListener`/`removeListener` and fire synthetic events into the recorded
+ * listeners. The recorded listeners will be the real `TabUpdateListener`
+ * signatures; tests only need to populate the fields they exercise
+ * (`status`, `url`).
+ */
+export interface TabWatcherDeps {
+	addListener: (fn: TabUpdateListener) => void;
+	removeListener: (fn: TabUpdateListener) => void;
+}
+
+/**
+ * Wait until `tabId` reports a `status: "complete"` update (or a same-document
+ * URL change, which has no loading→complete cycle), bounded by `timeoutMs`.
+ * Shared by `navigateAndWaitForLoad` and the post-action navigation watcher so
+ * there is a single implementation of the "wait for page load" logic.
+ * Returns a `cancel` that removes the listener early.
+ */
+export function waitForTabComplete(
+	tabId: number,
+	deps: TabWatcherDeps,
+	onComplete: (tab: chrome.tabs.Tab) => void,
+	onError: (err: Error) => void,
+	timeoutMs: number,
+): () => void {
+	let done = false;
+	const listener: TabUpdateListener = (updatedTabId, changeInfo, tab) => {
+		if (done || updatedTabId !== tabId) return;
+		if (
+			changeInfo.status === "complete" ||
+			(changeInfo.url !== undefined && tab.status === "complete")
+		) {
+			done = true;
+			clearTimeout(timer);
+			deps.removeListener(listener);
+			onComplete(tab);
+		}
+	};
+	const timer = setTimeout(() => {
+		if (done) return;
+		done = true;
+		deps.removeListener(listener);
+		onError(new Error(`page did not finish loading within ${timeoutMs}ms`));
+	}, timeoutMs);
+	deps.addListener(listener);
+	return () => {
+		if (done) return;
+		done = true;
+		clearTimeout(timer);
+		deps.removeListener(listener);
+	};
+}
+
+export interface NavigationWatcher {
+	/** Resolve "completed" if a navigation started and finished, else "none". */
+	settle(windowMs: number): Promise<"none" | "completed">;
+	/** Stop watching and remove the listener. */
+	cancel(): void;
+	/**
+	 * Record the URL the action was running against. When a `loading` event
+	 * arrives, the watcher compares the event's URL to this baseline. A
+	 * background navigation on the same URL (ad refresh, polling reload) is
+	 * treated as unrelated and the watcher ignores it. Pass the URL
+	 * immediately after the action's result returns and before calling
+	 * `settle()`. When unset (or when the baseline is "about:blank"), the
+	 * watcher falls back to the original "any loading event counts" behavior.
+	 */
+	setBaseline(url: string | undefined): void;
+}
+
+/**
+ * Watch a tab for a navigation *triggered by* an action. The listener is
+ * attached immediately (before the action is dispatched) so a fast navigation
+ * is never missed. After the action's result returns, call `settle(windowMs)`:
+ *   - "none" if no `loading` transition was observed within the window;
+ *   - "completed" if a `loading` transition was seen and the page then finished
+ *     loading (bounded by `loadTimeoutMs`); rejects if the load never completes.
+ * `cancel()` removes the listener on any early-exit path.
+ *
+ * Use `setBaseline(url)` to teach the watcher what URL the action was
+ * running against. Once set, a `loading` event whose URL still matches the
+ * baseline is treated as an unrelated page reload (e.g. an ad refresh) and
+ * does NOT count as an action-triggered navigation.
+ */
+export function watchForTriggeredNavigation(
+	tabId: number,
+	deps: TabWatcherDeps,
+	loadTimeoutMs = NAV_LOAD_TIMEOUT_MS,
+): NavigationWatcher {
+	let loadingSeen = false;
+	let baselineUrl: string | undefined;
+	let finished = false;
+	let mainListener: TabUpdateListener | null = null;
+	let completeCancel: (() => void) | null = null;
+	let settleResolve: ((v: "none" | "completed") => void) | null = null;
+	let settleReject: ((e: Error) => void) | null = null;
+	let windowTimer: ReturnType<typeof setTimeout> | null = null;
+
+	const removeMain = () => {
+		if (mainListener) {
+			deps.removeListener(mainListener);
+			mainListener = null;
+		}
+	};
+
+	const beginComplete = () => {
+		if (completeCancel) return;
+		completeCancel = waitForTabComplete(
+			tabId,
+			deps,
+			() => {
+				finished = true;
+				if (windowTimer) clearTimeout(windowTimer);
+				removeMain();
+				settleResolve?.("completed");
+			},
+			(err) => {
+				finished = true;
+				if (windowTimer) clearTimeout(windowTimer);
+				removeMain();
+				settleReject?.(err);
+			},
+			loadTimeoutMs,
+		);
+	};
+
+	mainListener = (updatedTabId, changeInfo) => {
+		if (finished || updatedTabId !== tabId) return;
+		if (changeInfo.status === "loading") {
+			// If the page has its own background navigation (ad refresh, polling
+			// reload) the new URL is the same as the pre-action URL — ignore it.
+			// The action's real navigation will produce a different URL.
+			//
+			// When changeInfo.url is undefined (the very first loading event
+			// for a tab sometimes omits it), we can't correlate, so ignore the
+			// event when a baseline is set. The risk is missing a real
+			// navigation; the cost is a 500ms settle wait. A baseline being
+			// unset is the signal that the caller doesn't have URL info, in
+			// which case fall back to the original "any loading event counts"
+			// behavior.
+			if (baselineUrl !== undefined) {
+				if (changeInfo.url === undefined || changeInfo.url === baselineUrl) {
+					return;
+				}
+			}
+			loadingSeen = true;
+			beginComplete();
+		}
+	};
+	deps.addListener(mainListener);
+
+	const setBaseline = (url: string | undefined) => {
+		baselineUrl = url;
+	};
+
+	const settle = (windowMs: number): Promise<"none" | "completed"> => {
+		return new Promise((resolve, reject) => {
+			settleResolve = resolve;
+			settleReject = reject;
+			windowTimer = setTimeout(() => {
+				if (finished) return;
+				if (!loadingSeen) {
+					finished = true;
+					removeMain();
+					resolve("none");
+				} else {
+					// Loading started but hasn't completed yet — keep waiting.
+					// Leave the main listener attached so the eventual `complete`
+					// event still resolves the promise.
+					windowTimer = null;
+				}
+			}, windowMs);
+		});
+	};
+
+	const cancel = () => {
+		finished = true;
+		if (windowTimer) clearTimeout(windowTimer);
+		removeMain();
+		completeCancel?.();
+		if (settleResolve) {
+			settleResolve("none");
+			settleReject = null;
+		}
+	};
+
+	return { settle, cancel, setBaseline };
+}
+
+/** Real `chrome.tabs.onUpdated` wiring, used by the background relay path.
+ *  The cast at the add/remove call site is unavoidable — Chrome's typed
+ *  listener uses a different overload than the one this module wants to
+ *  pass through — but inside the module we now have the full Tab shape. */
+const chromeDeps: TabWatcherDeps = {
+	addListener: (fn) => chrome.tabs.onUpdated.addListener(fn),
+	removeListener: (fn) => chrome.tabs.onUpdated.removeListener(fn),
+};
+
 async function initiateNavigation(
 	tabId: number,
 	payload: Command,
@@ -459,41 +684,19 @@ function navigateAndWaitForLoad(
 	payload: Command,
 ): Promise<chrome.tabs.Tab> {
 	return new Promise((resolve, reject) => {
-		let settled = false;
-		const listener = (
-			updatedTabId: number,
-			changeInfo: chrome.tabs.TabChangeInfo,
-			tab: chrome.tabs.Tab,
-		) => {
-			if (settled || updatedTabId !== tabId) return;
-			// Full page load, or same-document navigation (hash / history API)
-			// which changes the URL without a loading→complete cycle.
-			if (
-				changeInfo.status === "complete" ||
-				(changeInfo.url !== undefined && tab.status === "complete")
-			) {
-				cleanup();
-				resolve(tab);
-			}
-		};
-		const timer = setTimeout(() => {
-			cleanup();
-			reject(
-				new Error(
-					`${payload.action}: page did not finish loading within ${NAV_LOAD_TIMEOUT_MS}ms`,
-				),
-			);
-		}, NAV_LOAD_TIMEOUT_MS);
-		const cleanup = () => {
-			settled = true;
-			clearTimeout(timer);
-			chrome.tabs.onUpdated.removeListener(listener);
-		};
-		// Listener must be attached before initiating so fast loads aren't missed
-		chrome.tabs.onUpdated.addListener(listener);
+		// Attach the completion watcher before initiating so fast loads aren't
+		// missed (fast-load-no-miss). Shares the implementation with the
+		// post-action navigation watcher via `waitForTabComplete`.
+		const cancel = waitForTabComplete(
+			tabId,
+			chromeDeps,
+			(tab) => resolve(tab),
+			reject,
+			NAV_LOAD_TIMEOUT_MS,
+		);
+		// Initiate the navigation; on failure reject (initiate-failure).
 		initiateNavigation(tabId, payload).catch((err) => {
-			if (settled) return;
-			cleanup();
+			cancel();
 			reject(err instanceof Error ? err : new Error(String(err)));
 		});
 	});
@@ -505,17 +708,51 @@ async function handleNavigationCommand(
 ): Promise<void> {
 	const start = Date.now();
 	try {
-		const tab = await navigateAndWaitForLoad(tabId, payload);
-		sendToNative({
-			type: "command_result",
-			tabId,
-			payload: {
-				id: payload.id,
-				success: true,
-				data: { url: tab.url, title: tab.title },
-				duration: Date.now() - start,
-			} as CommandResult,
-		});
+		// For goBack/goForward, snapshot the URL first so we can detect a
+		// silent no-op (chrome.tabs.goBack returns immediately even when
+		// there's no history). If no navigation starts within 800ms and the
+		// URL is unchanged, fail with an explicit error rather than waiting
+		// 25s for a load that will never come.
+		const isHistoryAction =
+			payload.action === "goBack" || payload.action === "goForward";
+		let preUrl: string | undefined;
+		if (isHistoryAction) {
+			const pre = await chrome.tabs.get(tabId);
+			preUrl = pre.url;
+		}
+
+		// noopAfterTimeout returns a handle with a `cancel()` that clears the
+		// pending 800ms timer and the underlying race promise. Capture the
+		// handle so the loser branch of the race is cleaned up the moment the
+		// winner resolves — without this, a stray setTimeout fires 800ms after
+		// a real navigation completes and calls chrome.tabs.get for no reason.
+		const noopHandle = isHistoryAction
+			? noopAfterTimeout(
+					tabId,
+					preUrl as string,
+					payload.action as "goBack" | "goForward",
+				)
+			: null;
+
+		try {
+			const tab = await Promise.race<chrome.tabs.Tab>([
+				navigateAndWaitForLoad(tabId, payload),
+				noopHandle ? noopHandle.promise : new Promise<never>(() => {}),
+			]);
+
+			sendToNative({
+				type: "command_result",
+				tabId,
+				payload: {
+					id: payload.id,
+					success: true,
+					data: { url: tab.url, title: tab.title },
+					duration: Date.now() - start,
+				} as CommandResult,
+			});
+		} finally {
+			noopHandle?.cancel();
+		}
 	} catch (err) {
 		console.error(`[NativeHost] ${payload.action} failed:`, err);
 		replyError(
@@ -524,6 +761,53 @@ async function handleNavigationCommand(
 			err instanceof Error ? err.message : String(err),
 		);
 	}
+}
+
+/**
+ * Race a goBack/goForward against a short "did anything change?" timer. If
+ * the tab URL is still `preUrl` after 800ms and no error fired, the action
+ * was a silent no-op (no history) — fail loudly so callers see a clear
+ * "no previous page" message instead of a 25s timeout.
+ *
+ * Returns a handle with a `cancel()` method the caller MUST invoke after the
+ * race resolves. Without it, the setTimeout would still fire 800ms after a
+ * real navigation completes, calling chrome.tabs.get for no reason (and
+ * potentially logging an error if the tab is closed by then).
+ */
+function noopAfterTimeout(
+	tabId: number,
+	preUrl: string,
+	action: "goBack" | "goForward",
+): { promise: Promise<never>; cancel: () => void } {
+	let timer: ReturnType<typeof setTimeout> | null = null;
+	const promise = new Promise<never>((_, reject) => {
+		timer = setTimeout(async () => {
+			timer = null;
+			try {
+				const post = await chrome.tabs.get(tabId);
+				if (post.url === preUrl) {
+					reject(
+						new Error(
+							action === "goBack"
+								? "No previous page in this tab's history"
+								: "No forward page in this tab's history",
+						),
+					);
+				}
+			} catch (err) {
+				reject(err);
+			}
+		}, 800);
+	});
+	return {
+		promise,
+		cancel: () => {
+			if (timer !== null) {
+				clearTimeout(timer);
+				timer = null;
+			}
+		},
+	};
 }
 
 async function sendCommandToTab(
@@ -542,6 +826,22 @@ async function sendCommandToTab(
 		await handleDebuggerEval(tabId, payload);
 		return;
 	}
+	// On Chrome, route `evaluate` through CDP so the script runs in the page's
+	// main world (not the content script's isolated world) and isTrusted, with
+	// no `new Function` CSP issues. On Firefox `chrome.debugger` is undefined,
+	// so the content-script `new Function` path handles it there.
+	if (payload.action === "evaluate" && typeof chrome.debugger !== "undefined") {
+		await handleDebuggerEval(tabId, payload);
+		return;
+	}
+
+	// For actions whose default behavior can start a navigation, watch the tab
+	// for a triggered load. The watcher is created once, before the first
+	// sendMessage attempt, so a fast navigation is never missed.
+	const settling = SETTLING_ACTIONS.has(payload.action);
+	const watcher = settling
+		? watchForTriggeredNavigation(tabId, chromeDeps, NAV_LOAD_TIMEOUT_MS)
+		: null;
 
 	const sendMsg = (): Promise<CommandResult | null> =>
 		new Promise((resolve) => {
@@ -558,6 +858,7 @@ async function sendCommandToTab(
 			);
 		});
 
+	const start = Date.now();
 	let result = await sendMsg();
 
 	if (result === null) {
@@ -572,6 +873,7 @@ async function sendCommandToTab(
 			});
 			await new Promise((r) => setTimeout(r, 300));
 		} catch (err) {
+			watcher?.cancel();
 			console.warn("[NativeHost] content script injection failed:", err);
 			replyError(tabId, payload.id, "tab not available");
 			return;
@@ -580,8 +882,34 @@ async function sendCommandToTab(
 	}
 
 	if (result === null) {
+		watcher?.cancel();
 		replyError(tabId, payload.id, "tab not available");
 		return;
+	}
+
+	// Settle: if the action triggered a navigation, wait for it to finish
+	// loading before reporting success.
+	if (watcher) {
+		// Hand the watcher the pre-action URL so it can ignore background
+		// navigations on the same URL (ad refresh, polling reload) that
+		// would otherwise hang settle for the full 25s.
+		watcher.setBaseline(result.pageInfo?.url);
+		try {
+			const outcome = await watcher.settle(500);
+			if (outcome === "completed") {
+				// Include the load time in the reported duration.
+				result = { ...result, duration: Date.now() - start };
+			}
+		} catch (err) {
+			replyError(
+				tabId,
+				payload.id,
+				`${payload.action} started a navigation that never finished loading: ${
+					err instanceof Error ? err.message : String(err)
+				}`,
+			);
+			return;
+		}
 	}
 
 	sendToNative({

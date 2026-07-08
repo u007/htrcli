@@ -51,16 +51,21 @@ type TabInfo struct {
 }
 
 // PageInfo contains information about the current page state.
+// Field names mirror the extension's PageInfo; new fields added on the
+// extension side must be mirrored here (the daemon's /api/page returns
+// the live PageInfo and the client decodes it back into this struct).
 type PageInfo struct {
 	URL            string  `json:"url"`
 	Title          string  `json:"title"`
 	Domain         string  `json:"domain"`
+	ReadyState     string  `json:"readyState,omitempty"`
 	ScrollX        float64 `json:"scrollX"`
 	ScrollY        float64 `json:"scrollY"`
 	ViewportWidth  int     `json:"viewportWidth"`
 	ViewportHeight int     `json:"viewportHeight"`
 	DocumentHeight int     `json:"documentHeight"`
 	DocumentWidth  int     `json:"documentWidth"`
+	HistoryLength  int     `json:"historyLength,omitempty"`
 }
 
 // ApiResponse is the standard response envelope from the server.

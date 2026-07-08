@@ -1,10 +1,10 @@
-# AGENTS.md - How-To Recorder
+# AGENTS.md - HTR NControl
 
 Guidelines for AI coding agents working in this Chrome extension codebase.
 
 ## Project Overview
 
-How-To Recorder is a browser extension that records user interactions (clicks, inputs, navigation) with screenshots and optional audio narration, then exports them as step-by-step documentation. The same source code ships as a **Chrome extension** (MV3) and a **Firefox extension** (MV3 with `sidebar_action`); see `firefox/` for the Firefox build.
+HTR NControl is a browser extension that records user interactions (clicks, inputs, navigation) with screenshots and optional audio narration, then exports them as step-by-step documentation. The same source code ships as a **Chrome extension** (MV3) and a **Firefox extension** (MV3 with `sidebar_action`); see `firefox/` for the Firefox build.
 
 ### Architecture
 
@@ -130,14 +130,14 @@ export function generateMarkdown(session: RecordingSession): string {
 ### Error Handling
 
 - Use try/catch for async Chrome API calls
-- Log errors with `console.error` or `console.warn` with `[How-To Recorder]` prefix
+- Log errors with `console.error` or `console.warn` with `[HTR NControl]` prefix
 - Gracefully handle extension context invalidation (extension reload)
 
 ```typescript
 try {
   const response = await chrome.runtime.sendMessage({ type: 'GET_STATE' })
 } catch (error) {
-  console.warn('[How-To Recorder] Failed to send message:', error)
+  console.warn('[HTR NControl] Failed to send message:', error)
 }
 ```
 

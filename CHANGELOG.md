@@ -9,6 +9,30 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.2.9 [2026.07.09]
+
+- feat: rebrand "How-To Recorder" → "HTR NControl" across extension, server, htcli, docs, and CI artifacts (manifests, options HTML, package names, `htrcontrol.zip` / `htrncontrol-firefox.xpi`)
+- feat: WebSocket transport as a transparent fallback when native messaging is unavailable — content script auto-connects to the remote-control server if the native host is down (Firefox, host not installed, daemon down); side panel shows **Online** for either transport
+- feat: per-install random bearer token (32-byte hex, `htr_` prefix) generated on first install; legacy `htr_aia_2026` default rotated on next launch with a one-shot migration marker
+- feat: server (`bun run server` and `htcli serve`) read token from `HTR_BEARER_TOKEN_FILE` → `$XDG_CONFIG_HOME/htrcontrol/token` → `~/.config/htrcontrol/token` for one-step "make the server match the extension"
+- feat: Options page gains **Regenerate** and **Copy** buttons for the bearer token with usage hint
+- feat: `evaluate` action routed through CDP `Runtime.evaluate` on Chrome (page main world, no `new Function` CSP issue) with explicit error on Firefox; multi-statement and `await` scripts supported
+- feat: `commandExecutor.test.ts` and `elementFinder.test.ts` exercise auto-wait, actionability, `wait` timeout semantics, `scrollTo` settling, and `evaluate` async/multi-statement handling (happy-dom harness)
+- feat: `watchForTriggeredNavigation` state machine (`src/background/navigationWatch.test.ts`) — pure-logic unit tests for the new post-action settling helper
+- feat: htcli daemon exposes `GET /api/page` (mirrors the Bun server's endpoint), returning the active tab's `PageInfo` (URL, title, viewport, readyState, history length)
+- feat: `htcli eval` and other commands now exit non-zero on a `success: false` result with the extension's error message, instead of printing a success line
+- feat: `getPageInfo` reports `document.readyState` and `window.history.length` so the server can detect load completion and `goBack`/`goForward` no-op cases
+- fix: `goBack`/`goForward` no longer hang 25s on a no-op (no history); race against an 800ms URL-equality check returns "No previous/forward page in this tab's history" with the timer cleanly cancelled on the winner branch
+- fix: post-action navigation settling ignores background page reloads (ad refresh, polling reload) on the same URL via `watcher.setBaseline(result.pageInfo?.url)` — the watcher no longer hangs for 25s on every click against such pages
+- fix: extension connection mode in side panel reflects WS state (`"ws"` indicator) in addition to native messaging; the `CONNECTION_STATUS` listener and `setConnectionChangeCallback` paths are documented as complementary
+- fix: `safeHistoryLength` no longer swallows all errors — `TypeError` (happy-dom null-frame) is silenced, other errors are logged
+- fix: typed `EVALUATE_VIA_CDP: CommandAction = "evaluateViaCdp"` constant on both server and extension so a future rename fails the build rather than silently breaking the dispatch
+- fix: `TabUpdateListener` and `waitForTabComplete` use the full `chrome.tabs.TabChangeInfo` / `chrome.tabs.Tab` types — no narrowing at the chrome API wrapper
+- chore: `displayName` casing unified to `HTR NControl` (capital C) across server banner, package manifests, and CLI help
+- docs: `skills/htrcli/SKILL.md` and `htcli/README.md` updated to reflect new back/forward no-op error messages, `page --json` output, eval semantics (main world, multi-statement, `await`)
+- docs: `firefox/README.md` documents the WebSocket fallback path for users without the native host
+- docs: `docs/superpowers/plans/2026-07-08-playwright-parity/` plan preserved; legacy `2026-06-27-native-messaging` plan + spec removed (work merged in earlier commits)
+
 ## 0.2.8 [2026.07.07]
 
 - fix: add Firefox fallback in `CDP_NAVIGATE` background handler — use `chrome.tabs.update` when `chrome.debugger` is unavailable instead of crashing on the undefined API

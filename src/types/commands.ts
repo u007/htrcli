@@ -155,7 +155,11 @@ export type CommandAction =
 	| "debuggerEval"
 	| "openTab"
 	| "closeTab"
-	| "cdpNavigate";
+	| "cdpNavigate"
+	/** Internal: server uses this to route `evaluate` through CDP. Content
+	 *  script forwards to background, which calls Runtime.evaluate. Keeps the
+	 *  user's `evaluate` action surface intact. */
+	| "evaluateViaCdp";
 
 // ─── Command ────────────────────────────────────────────────────────
 
@@ -197,12 +201,18 @@ export interface PageInfo {
 	url: string;
 	title: string;
 	domain: string;
+	/** document.readyState — used by the server to detect load completion */
+	readyState?: string;
 	scrollX: number;
 	scrollY: number;
 	viewportWidth: number;
 	viewportHeight: number;
 	documentHeight: number;
 	documentWidth: number;
+	/** window.history.length — used by the background to detect
+	 *  goBack/goForward availability. -1 means the page didn't report
+	 *  it (e.g. content script didn't load in time). */
+	historyLength?: number;
 }
 
 // ─── Tab Info ───────────────────────────────────────────────────────

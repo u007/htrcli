@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import "./Options.css";
 
 const DEFAULT_SERVER_URL = "wss://127.0.0.1:3845";
-const DEFAULT_TOKEN = "htr_aia_2026";
 const STORAGE_KEYS = ["remoteControlServer", "remoteControlToken"];
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -15,13 +14,29 @@ interface TabInfo {
 	favIconUrl?: string;
 }
 
+/**
+ * Generate a per-install random token client-side. 32 bytes hex (64 chars)
+ * prefixed with `htr_` so it's identifiable. The background script does the
+ * same on first install; this fallback is used by the Options page's
+ * "Regenerate" button so users can rotate without reloading the extension.
+ */
+async function generateClientToken(): Promise<string> {
+	const bytes = new Uint8Array(32);
+	crypto.getRandomValues(bytes);
+	const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(
+		"",
+	);
+	return `htr_${hex}`;
+}
+
 export const Options = (): JSX.Element => {
 	const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
-	const [token, setToken] = useState(DEFAULT_TOKEN);
+	const [token, setToken] = useState("");
 	const [enabled, setEnabled] = useState(true);
 	const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 	const [saveError, setSaveError] = useState<string | null>(null);
 	const [tabs, setTabs] = useState<TabInfo[]>([]);
+	const [copyStatus, setCopyStatus] = useState<"idle" | "copied">("idle");
 	const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	const refreshTabs = useCallback(async (): Promise<void> => {
@@ -33,7 +48,7 @@ export const Options = (): JSX.Element => {
 				setTabs(res.tabs);
 			}
 		} catch (error) {
-			console.warn("[How-To Recorder] Failed to load connected tabs:", error);
+			console.warn("[HTR NControl] Failed to load connected tabs:", error);
 		}
 	}, []);
 
@@ -68,7 +83,7 @@ export const Options = (): JSX.Element => {
 				}
 			} catch (error) {
 				console.warn(
-					"[How-To Recorder] Failed to load remote control settings:",
+					"[HTR NControl] Failed to load remote control settings:",
 					error,
 				);
 			}
@@ -126,7 +141,7 @@ export const Options = (): JSX.Element => {
 			clearSuccessTimeout();
 			const message = error instanceof Error ? error.message : String(error);
 			console.warn(
-				"[How-To Recorder] Failed to save remote control settings:",
+				"[HTR NControl] Failed to save remote control settings:",
 				error,
 			);
 			setSaveStatus("error");
@@ -136,7 +151,7 @@ export const Options = (): JSX.Element => {
 
 	return (
 		<main>
-			<h3>How-To Recorder Settings</h3>
+			<h3>HTR NControl Settings</h3>
 
 			<section className="section tabs-section">
 				<div className="tabs-header">
@@ -208,16 +223,55 @@ export const Options = (): JSX.Element => {
 						</label>
 						<label>
 							Bearer Token
-							<input
-								type="text"
-								value={token}
-								disabled={saveStatus === "saving"}
-								onChange={(e) => {
-									resetFeedback();
-									setToken(e.target.value);
-								}}
-								placeholder="htr_aia_2026"
-							/>
+							<div className="token-row">
+								<input
+									type="text"
+									value={token}
+									disabled={saveStatus === "saving"}
+									onChange={(e) => {
+										resetFeedback();
+										setToken(e.target.value);
+									}}
+									placeholder="(generated on first install)"
+								/>
+								<button
+									type="button"
+									className="btn-sm"
+									onClick={async () => {
+										const fresh = await generateClientToken();
+										setToken(fresh);
+										resetFeedback();
+									}}
+									disabled={saveStatus === "saving"}
+									title="Generate a new random token"
+								>
+									Regenerate
+								</button>
+								<button
+									type="button"
+									className="btn-sm"
+									onClick={async () => {
+										try {
+											await navigator.clipboard.writeText(token);
+											setCopyStatus("copied");
+											setTimeout(() => setCopyStatus("idle"), 1500);
+										} catch {
+											// Clipboard may be unavailable (insecure context);
+											// the user can still copy manually.
+										}
+									}}
+									disabled={!token || saveStatus === "saving"}
+									title="Copy token to clipboard"
+								>
+									{copyStatus === "copied" ? "Copied!" : "Copy"}
+								</button>
+							</div>
+							<p className="hint">
+								Per-install token. Set the same value as{" "}
+								<code>HTR_BEARER_TOKEN</code> when starting the server (
+								<code>make serve</code> or <code>bun run server</code>) so they
+								match. Rotate by clicking Regenerate and updating the server.
+							</p>
 						</label>
 					</div>
 				)}

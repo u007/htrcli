@@ -31,7 +31,7 @@ make build           # htcli-build + ext-build
 
 # htcli native-messaging daemon (alternative to the Bun server on :3845)
 htcli install --browser chrome  --extension-id <id>   # register native host (Chrome)
-htcli install --browser firefox --extension-id how-to-recorder@stevenstaylor.dev
+htcli install --browser firefox --extension-id htrcontrol@mercstudio.com
 htcli serve          # run daemon: HTTP :3845 + Unix socket relay (Chrome+Firefox)
 
 # Utility
@@ -99,6 +99,6 @@ Go CLI (Go 1.22+). Wraps the server HTTP API. Config stored at `~/.htcli/config.
 - **Linting/formatting**: Biome with tabs, double quotes. Run `bun run check:fix` before committing.
 - **Message passing**: All cross-component messages use typed interfaces from `src/types/recording.ts`. Add new message types to the `MessageType` union + create a matching interface.
 - **Async message listeners**: Always `return true` from `chrome.runtime.onMessage.addListener` callbacks that respond asynchronously.
-- **Error prefix**: `console.error/warn('[How-To Recorder] ...')` in extension code.
+- **Error prefix**: `console.error/warn('[HTR NControl] ...')` in extension code.
 - **Tests**: Bun's built-in runner. Test files: `*.test.ts`. Currently sparse — server tests in `server/auth.test.ts`, content script tests in `src/contentScript/commandExecutor.test.ts`.
 - **Build output**: Chrome → `build/`, Firefox → `firefox/build/`.

@@ -22,9 +22,9 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "htcli",
-	Short: "How-To Recorder CLI - control browser tabs remotely",
-	Long: `htcli is a CLI for controlling browser tabs via the How-To Recorder
-remote control API. Requires the How-To Recorder Chrome extension and
+	Short: "HTR NControl CLI - control browser tabs remotely",
+	Long: `htcli is a CLI for controlling browser tabs via the HTR NControl
+remote control API. Requires the HTR NControl Chrome extension and
 server running.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,

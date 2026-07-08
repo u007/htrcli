@@ -1,18 +1,42 @@
 /**
- * Connection Manager for the How-To Recorder extension.
+ * Connection Manager for the HTR NControl extension.
  * Auto-detects native messaging vs WebSocket and provides a unified interface.
  */
 
 import {
 	connectToServer,
 	disconnectFromServer,
+	setConnectionChangeCallback,
 	setTabId,
 	isConnected as wsIsConnected,
 } from "./wsClient";
 
-type ConnectionMode = "native" | "ws" | "disconnected";
+type ConnectionMode = "native" | "ws" | "disconnected" | "unavailable";
 
 let mode: ConnectionMode = "disconnected";
+// Tracks whether we've reported a connected WS to the background, so we only
+// send status transitions (not every reconnect attempt).
+let reportedWs = false;
+
+// Report the WebSocket connection state to the background, which folds it
+// into the unified connection mode shown in the side panel. We only report
+// "ws" once the socket is actually open and "disconnected" once it drops,
+// so a flapping socket doesn't spam status messages.
+function reportWsStatus(connected: boolean): void {
+	if (connected && !reportedWs) {
+		reportedWs = true;
+		chrome.runtime
+			.sendMessage({ type: "WS_CONNECTION_STATUS", mode: "ws" })
+			.catch(() => {});
+	} else if (!connected && reportedWs) {
+		reportedWs = false;
+		chrome.runtime
+			.sendMessage({ type: "WS_CONNECTION_STATUS", mode: "disconnected" })
+			.catch(() => {});
+	}
+}
+
+setConnectionChangeCallback(reportWsStatus);
 
 // ─── Init ───────────────────────────────────────────────────────────
 
@@ -96,10 +120,28 @@ async function checkAutoConnectWS(): Promise<void> {
 }
 
 // ─── Listen for status changes from background ────────────────────
-
+//
+// This listener and `setConnectionChangeCallback(reportWsStatus)` in the
+// init section are two complementary channels that both keep `mode` in
+// sync, but cover different directions:
+//
+//   - `setConnectionChangeCallback` (line ~39) is the LIVE channel: the
+//     WebSocket client pushes open/close transitions UP to the background
+//     via `WS_CONNECTION_STATUS` messages. The background uses them to
+//     compute the unified connection mode for the side panel.
+//   - This `chrome.runtime.onMessage` listener is the PUSHED channel: the
+//     background broadcasts `CONNECTION_STATUS` DOWN when its own
+//     `nativeHostMode` changes (daemon connect/disconnect, etc.). The
+//     handler reacts to those transitions by switching between native and
+//     the WebSocket auto-connect fallback.
+//
+// The two paths are not strictly redundant: the callback only knows
+// about THIS tab's WS state, while the listener knows about the
+// background's view of the native host. They meet in `mode` so the rest
+// of the content script can use one value.
 chrome.runtime.onMessage.addListener((message) => {
 	if (message?.type === "CONNECTION_STATUS") {
-		if (message.mode === "native" && mode !== "native") {
+		if (message.mode === "native") {
 			mode = "native";
 			if (wsIsConnected()) disconnectFromServer();
 			console.log("[ConnectionManager] Switched to native messaging");
@@ -111,7 +153,13 @@ chrome.runtime.onMessage.addListener((message) => {
 					url: window.location.href,
 				})
 				.catch(() => {});
-		} else if (message.mode === "unavailable" && mode === "native") {
+			return;
+		}
+
+		// Any non-native mode (ws / disconnected / unavailable) means native
+		// messaging is not the active transport. If we were previously on
+		// native, switch to the WebSocket fallback so the tab stays connected.
+		if (mode === "native") {
 			mode = "disconnected";
 			checkAutoConnectWS();
 		}

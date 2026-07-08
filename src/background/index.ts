@@ -14,6 +14,7 @@ import type {
 	AddAnnotationMessage,
 	Annotation,
 	ClickEventMessage,
+	ConnectionMode,
 	DeleteAnnotationMessage,
 	InputEventMessage,
 	RecordingMessage,
@@ -22,12 +23,13 @@ import type {
 	RecordingStep,
 	StartRecordingMessage,
 	UpdateAnnotationMessage,
+	WsConnectionStatusMessage,
 } from "../types/recording";
 import {
-	getConnectionMode,
 	registerTab,
 	retryConnect,
 	setScreenshotCapturer,
+	setStatusListener,
 	startNativeHost,
 } from "./nativeHost";
 
@@ -77,7 +79,7 @@ async function migrateFromChromeStorage(): Promise<void> {
 	if (migratedToIndexedDB) return;
 
 	console.log(
-		"[How-To Recorder] Migrating sessions from chrome.storage.local to IndexedDB...",
+		"[HTR NControl] Migrating sessions from chrome.storage.local to IndexedDB...",
 	);
 
 	try {
@@ -94,7 +96,7 @@ async function migrateFromChromeStorage(): Promise<void> {
 
 			if (!session) {
 				console.warn(
-					`[How-To Recorder] Session ${meta.id} not found in chrome.storage.local, skipping`,
+					`[HTR NControl] Session ${meta.id} not found in chrome.storage.local, skipping`,
 				);
 				continue;
 			}
@@ -113,7 +115,7 @@ async function migrateFromChromeStorage(): Promise<void> {
 			}
 
 			console.log(
-				`[How-To Recorder] Migrated session ${meta.id} (${session.steps.length} steps, ${session.annotations.length} annotations)`,
+				`[HTR NControl] Migrated session ${meta.id} (${session.steps.length} steps, ${session.annotations.length} annotations)`,
 			);
 		}
 
@@ -128,25 +130,81 @@ async function migrateFromChromeStorage(): Promise<void> {
 		// Mark migration as complete
 		await chrome.storage.local.set({ migratedToIndexedDB: true });
 		console.log(
-			`[How-To Recorder] Migration complete: ${sessionIndex.length} sessions migrated`,
+			`[HTR NControl] Migration complete: ${sessionIndex.length} sessions migrated`,
 		);
 	} catch (error) {
-		console.error("[How-To Recorder] Migration failed:", error);
+		console.error("[HTR NControl] Migration failed:", error);
 		// Don't set the flag so it retries on next startup
 	}
 }
 
-console.log("[How-To Recorder] Background service worker started");
+console.log("[HTR NControl] Background service worker started");
+
+// One-shot migration marker. Set after rewriting the legacy wss:// default
+// to ws://, so the rewrite only happens once per install and the change is
+// auditable from the chrome.storage.local state inspector.
+const WSS_DEFAULT_REWRITE_FLAG = "wssDefaultRewritten";
+
+/**
+ * Generate a per-install random bearer token and return it. Used the first
+ * time a user opens Options so the token on disk is unique per install
+ * rather than a public, hardcoded string. 32 bytes hex = 64 chars.
+ */
+async function generateInstallToken(): Promise<string> {
+	const bytes = new Uint8Array(32);
+	crypto.getRandomValues(bytes);
+	const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(
+		"",
+	);
+	return `htr_${hex}`;
+}
 
 // Seed default remote-control settings on first install so tabs auto-connect.
-chrome.storage.local.get(["remoteControlServer"], (result) => {
-	if (!result.remoteControlServer) {
-		chrome.storage.local.set({
-			remoteControlServer: "wss://127.0.0.1:3845",
-			remoteControlToken: "htr_aia_2026",
-		});
-	}
-});
+chrome.storage.local.get(
+	["remoteControlServer", WSS_DEFAULT_REWRITE_FLAG],
+	async (result) => {
+		if (!result.remoteControlServer) {
+			// First install: write a per-install token so users on shared hosts
+			// (multi-user systems, containers, dev VMs) are not exposed to a
+			// public default token. The token is shown in the Options page.
+			const token = await generateInstallToken();
+			chrome.storage.local.set({
+				remoteControlServer: "ws://127.0.0.1:3845",
+				remoteControlToken: token,
+			});
+		} else if (
+			result.remoteControlServer === "wss://127.0.0.1:3845" &&
+			!result[WSS_DEFAULT_REWRITE_FLAG]
+		) {
+			// Legacy default: the server only speaks plain ws:// unless TLS
+			// certs are configured, so a wss:// default could never connect.
+			// Rewrite it once, mark the migration so we don't repeat it, and
+			// log so the change shows up in the service worker console.
+			console.log(
+				"[HTR NControl] Migrating legacy wss:// default to ws:// (one-shot)",
+			);
+			chrome.storage.local.set({
+				remoteControlServer: "ws://127.0.0.1:3845",
+				[WSS_DEFAULT_REWRITE_FLAG]: true,
+			});
+		} else if (
+			result.remoteControlToken === "htr_aia_2026" &&
+			!result[WSS_DEFAULT_REWRITE_FLAG]
+		) {
+			// Legacy default token (shipped in earlier builds). Rotate to a
+			// per-install token so the public default does not linger for
+			// users who never opened Options. Mark the migration.
+			console.log(
+				"[HTR NControl] Rotating legacy default token to per-install value",
+			);
+			const token = await generateInstallToken();
+			chrome.storage.local.set({
+				remoteControlToken: token,
+				[WSS_DEFAULT_REWRITE_FLAG]: true,
+			});
+		}
+	},
+);
 
 // Run migration on startup
 migrateFromChromeStorage();
@@ -156,6 +214,36 @@ let currentSession: RecordingSession | null = null;
 
 // Track which tabs have content scripts ready
 const readyTabs = new Set<number>();
+
+// Unified connection state, surfaced to the side panel / content scripts.
+// `nativeHostMode` comes from the native-messaging host; `wsConnected`
+// tracks whether at least one content script has an open WebSocket to the
+// remote-control server. The effective mode is:
+//   - "native"       if the native host is connected
+//   - "ws"           if native is down but a WebSocket is connected
+//   - nativeHostMode otherwise (transient "disconnected" or "unavailable")
+let nativeHostMode: ConnectionMode = "unavailable";
+let wsConnected = false;
+
+function computeConnectionMode(): ConnectionMode {
+	if (nativeHostMode === "native") return "native";
+	if (wsConnected) return "ws";
+	return nativeHostMode;
+}
+
+function broadcastConnectionStatus(): void {
+	const mode = computeConnectionMode();
+	const payload = { type: "CONNECTION_STATUS" as const, mode };
+	// Side panel (may not be open — ignore errors).
+	chrome.runtime.sendMessage(payload).catch(() => {});
+	// Content scripts — they use this to decide native vs WebSocket fallback.
+	chrome.tabs.query({}, (tabs) => {
+		for (const tab of tabs) {
+			if (tab.id == null) continue;
+			chrome.tabs.sendMessage(tab.id, payload).catch(() => {});
+		}
+	});
+}
 
 // Generate unique IDs
 function generateUniqueId(prefix: string = ""): string {
@@ -170,7 +258,7 @@ async function captureScreenshot(tabId: number): Promise<string | undefined> {
 		// Get the tab to find its windowId
 		const tab = await chrome.tabs.get(tabId);
 		if (!tab.windowId) {
-			console.warn("[How-To Recorder] Tab has no windowId");
+			console.warn("[HTR NControl] Tab has no windowId");
 			return undefined;
 		}
 
@@ -180,7 +268,7 @@ async function captureScreenshot(tabId: number): Promise<string | undefined> {
 		});
 		return dataUrl;
 	} catch (error) {
-		console.warn("[How-To Recorder] Failed to capture screenshot:", error);
+		console.warn("[HTR NControl] Failed to capture screenshot:", error);
 		return undefined;
 	}
 }
@@ -201,7 +289,7 @@ async function highlightElement(
 		await new Promise((resolve) => setTimeout(resolve, 100));
 		return true;
 	} catch (error) {
-		console.warn("[How-To Recorder] Failed to highlight element:", error);
+		console.warn("[HTR NControl] Failed to highlight element:", error);
 		return false;
 	}
 }
@@ -213,7 +301,7 @@ async function hideHighlightInTab(tabId: number): Promise<void> {
 	try {
 		await chrome.tabs.sendMessage(tabId, { type: "HIDE_HIGHLIGHT" });
 	} catch (error) {
-		console.warn("[How-To Recorder] Failed to hide highlight:", error);
+		console.warn("[HTR NControl] Failed to hide highlight:", error);
 	}
 }
 
@@ -252,11 +340,11 @@ async function enableRecordingInTab(
 			type: "ENABLE_RECORDING",
 			startTime,
 		});
-		console.log(`[How-To Recorder] Recording enabled in tab ${tabId}`);
+		console.log(`[HTR NControl] Recording enabled in tab ${tabId}`);
 	} catch (error) {
 		// Tab might not have content script loaded, try to inject it
 		console.warn(
-			`[How-To Recorder] Could not enable recording in tab ${tabId}:`,
+			`[HTR NControl] Could not enable recording in tab ${tabId}:`,
 			error,
 		);
 		try {
@@ -271,7 +359,7 @@ async function enableRecordingInTab(
 			});
 		} catch (injectError) {
 			console.warn(
-				`[How-To Recorder] Could not inject content script in tab ${tabId}:`,
+				`[HTR NControl] Could not inject content script in tab ${tabId}:`,
 				injectError,
 			);
 		}
@@ -284,10 +372,10 @@ async function enableRecordingInTab(
 async function disableRecordingInTab(tabId: number): Promise<void> {
 	try {
 		await chrome.tabs.sendMessage(tabId, { type: "DISABLE_RECORDING" });
-		console.log(`[How-To Recorder] Recording disabled in tab ${tabId}`);
+		console.log(`[HTR NControl] Recording disabled in tab ${tabId}`);
 	} catch (error) {
 		console.warn(
-			`[How-To Recorder] Could not disable recording in tab ${tabId}:`,
+			`[HTR NControl] Could not disable recording in tab ${tabId}:`,
 			error,
 		);
 	}
@@ -349,7 +437,7 @@ async function startRecording(
 	// Save session metadata to storage
 	await saveSessionMetadata();
 
-	console.log("[How-To Recorder] Recording started:", currentSession.id);
+	console.log("[HTR NControl] Recording started:", currentSession.id);
 
 	return currentSession;
 }
@@ -359,7 +447,7 @@ async function startRecording(
  */
 async function stopRecording(): Promise<RecordingSession | null> {
 	if (!currentSession) {
-		console.warn("[How-To Recorder] No active recording to stop");
+		console.warn("[HTR NControl] No active recording to stop");
 		return null;
 	}
 
@@ -375,11 +463,11 @@ async function stopRecording(): Promise<RecordingSession | null> {
 	try {
 		await saveSessionMetadata();
 	} catch (error) {
-		console.error("[How-To Recorder] Failed to save session metadata:", error);
+		console.error("[HTR NControl] Failed to save session metadata:", error);
 	}
 
 	const finishedSession = currentSession;
-	console.log("[How-To Recorder] Recording stopped:", finishedSession.id);
+	console.log("[HTR NControl] Recording stopped:", finishedSession.id);
 
 	return finishedSession;
 }
@@ -694,7 +782,7 @@ async function ensureContentScriptsInjected(): Promise<void> {
 			(t) => typeof t.url === "string" && /^https?:\/\//.test(t.url),
 		);
 	} catch (err) {
-		console.warn("[How-To Recorder] tabs.query failed:", err);
+		console.warn("[HTR NControl] tabs.query failed:", err);
 		return;
 	}
 
@@ -709,7 +797,7 @@ async function ensureContentScriptsInjected(): Promise<void> {
 				});
 			} catch (err) {
 				console.warn(
-					`[How-To Recorder] executeScript failed for tab ${tab.id} (${tab.url}):`,
+					`[HTR NControl] executeScript failed for tab ${tab.id} (${tab.url}):`,
 					err,
 				);
 			}
@@ -786,7 +874,9 @@ chrome.runtime.onMessage.addListener(
 			| { type: "PRINT_TO_PDF"; tabId: number }
 			| { type: "OPEN_TAB"; url: string; sessionData?: string }
 			| { type: "CDP_NAVIGATE"; tabId: number; url: string }
-			| { type: "CLOSE_TAB"; tabId: number },
+			| { type: "CLOSE_TAB"; tabId: number }
+			| { type: "CDP_EVAL"; tabId: number; expression: string }
+			| WsConnectionStatusMessage,
 		sender,
 		sendResponse,
 	) => {
@@ -808,7 +898,7 @@ chrome.runtime.onMessage.addListener(
 						const session = await stopRecording();
 						sendResponse({ success: true, session });
 					} catch (error) {
-						console.error("[How-To Recorder] Failed to stop recording:", error);
+						console.error("[HTR NControl] Failed to stop recording:", error);
 						sendResponse({ success: false, error: String(error) });
 					}
 					break;
@@ -834,7 +924,7 @@ chrome.runtime.onMessage.addListener(
 				case "INPUT_EVENT": {
 					const msg = message as InputEventMessage;
 					console.log(
-						"[How-To Recorder] Received INPUT_EVENT:",
+						"[HTR NControl] Received INPUT_EVENT:",
 						msg.element?.selector,
 						"value:",
 						msg.isSensitive ? "(sensitive)" : msg.value,
@@ -854,7 +944,7 @@ chrome.runtime.onMessage.addListener(
 						sendResponse({ success: true, step });
 					} else {
 						console.warn(
-							"[How-To Recorder] INPUT_EVENT received but no sender.tab.id",
+							"[HTR NControl] INPUT_EVENT received but no sender.tab.id",
 						);
 						sendResponse({ success: false, error: "No tab id" });
 					}
@@ -906,6 +996,18 @@ chrome.runtime.onMessage.addListener(
 								currentSession.trackedTabIds.push(sender.tab.id);
 							}
 						}
+						// Native messaging is the preferred transport, but if it
+						// isn't connected (host not installed, daemon down, or
+						// Firefox where it may be unavailable) fall back to a
+						// direct WebSocket connection to the remote-control
+						// server so the tab can still be controlled.
+						if (nativeHostMode !== "native") {
+							chrome.tabs
+								.sendMessage(sender.tab.id, {
+									type: "ENABLE_WS_REMOTE_CONTROL",
+								})
+								.catch(() => {});
+						}
 					}
 					sendResponse({ success: true });
 					break;
@@ -954,7 +1056,7 @@ chrome.runtime.onMessage.addListener(
 							(t) => typeof t.url === "string" && /^https?:\/\//.test(t.url),
 						);
 					} catch (err) {
-						console.warn("[How-To Recorder] probe tabs.query failed:", err);
+						console.warn("[HTR NControl] probe tabs.query failed:", err);
 					}
 					await Promise.all(
 						probeTabs.map(async (tab) => {
@@ -968,7 +1070,7 @@ chrome.runtime.onMessage.addListener(
 								void registerNativeTab(tab.id, tab);
 							} catch (err) {
 								console.warn(
-									`[How-To Recorder] Probe failed for tab ${tab.id} (${tab.url}):`,
+									`[HTR NControl] Probe failed for tab ${tab.id} (${tab.url}):`,
 									err,
 								);
 							}
@@ -1018,7 +1120,7 @@ chrome.runtime.onMessage.addListener(
 				case "GET_CONNECTION_STATUS":
 					sendResponse({
 						type: "CONNECTION_STATUS",
-						mode: getConnectionMode(),
+						mode: computeConnectionMode(),
 					});
 					return true;
 
@@ -1026,6 +1128,14 @@ chrome.runtime.onMessage.addListener(
 					retryConnect();
 					sendResponse({ success: true });
 					return true;
+
+				case "WS_CONNECTION_STATUS": {
+					const msg = message as WsConnectionStatusMessage;
+					wsConnected = msg.mode === "ws";
+					broadcastConnectionStatus();
+					sendResponse({ success: true });
+					return true;
+				}
 
 				case "GET_TAB_ID":
 					sendResponse({ tabId: sender.tab?.id ?? 0 });
@@ -1081,7 +1191,7 @@ chrome.runtime.onMessage.addListener(
 							}
 						}
 					} catch (error) {
-						console.error("[How-To Recorder] PRINT_TO_PDF error:", error);
+						console.error("[HTR NControl] PRINT_TO_PDF error:", error);
 						sendResponse({
 							ok: false,
 							error: error instanceof Error ? error.message : String(error),
@@ -1115,7 +1225,7 @@ chrome.runtime.onMessage.addListener(
 						}
 						sendResponse({ ok: resp.ok, status: resp.status, data });
 					} catch (error) {
-						console.error("[How-To Recorder] FETCH_URL error:", error);
+						console.error("[HTR NControl] FETCH_URL error:", error);
 						sendResponse({
 							ok: false,
 							error: error instanceof Error ? error.message : String(error),
@@ -1182,7 +1292,7 @@ chrome.runtime.onMessage.addListener(
 						}
 						sendResponse({ ok: true, tabId });
 					} catch (error) {
-						console.error("[How-To Recorder] OPEN_TAB error:", error);
+						console.error("[HTR NControl] OPEN_TAB error:", error);
 						sendResponse({
 							ok: false,
 							error: error instanceof Error ? error.message : String(error),
@@ -1216,7 +1326,7 @@ chrome.runtime.onMessage.addListener(
 							sendResponse({ ok: true });
 						}
 					} catch (error) {
-						console.error("[How-To Recorder] CDP_NAVIGATE error:", error);
+						console.error("[HTR NControl] CDP_NAVIGATE error:", error);
 						sendResponse({
 							ok: false,
 							error: error instanceof Error ? error.message : String(error),
@@ -1231,7 +1341,60 @@ chrome.runtime.onMessage.addListener(
 						await chrome.tabs.remove(msg.tabId);
 						sendResponse({ ok: true });
 					} catch (error) {
-						console.error("[How-To Recorder] CLOSE_TAB error:", error);
+						console.error("[HTR NControl] CLOSE_TAB error:", error);
+						sendResponse({
+							ok: false,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					break;
+				}
+
+				case "CDP_EVAL": {
+					const msg = message as {
+						type: "CDP_EVAL";
+						tabId: number;
+						expression: string;
+					};
+					try {
+						if (typeof chrome.debugger === "undefined") {
+							sendResponse({
+								ok: false,
+								error:
+									"CDP_EVAL is not supported on Firefox (chrome.debugger API unavailable).",
+							});
+							return;
+						}
+						const target = { tabId: msg.tabId };
+						await chrome.debugger.attach(target, "1.3");
+						try {
+							type EvalResult = {
+								result: { type: string; value: unknown };
+								exceptionDetails?: unknown;
+							};
+							const res = (await chrome.debugger.sendCommand(
+								target,
+								"Runtime.evaluate",
+								{
+									expression: msg.expression,
+									awaitPromise: true,
+									returnByValue: true,
+								},
+							)) as EvalResult;
+							if (res.exceptionDetails) {
+								sendResponse({
+									ok: false,
+									error: `JS exception: ${JSON.stringify(res.exceptionDetails)}`,
+									data: undefined,
+								});
+								return;
+							}
+							sendResponse({ ok: true, data: res.result.value });
+						} finally {
+							await chrome.debugger.detach(target);
+						}
+					} catch (error) {
+						console.error("[HTR NControl] CDP_EVAL error:", error);
 						sendResponse({
 							ok: false,
 							error: error instanceof Error ? error.message : String(error),
@@ -1247,7 +1410,7 @@ chrome.runtime.onMessage.addListener(
 
 		handleAsync().catch((error) => {
 			console.error(
-				"[How-To Recorder] Unhandled error in message handler:",
+				"[HTR NControl] Unhandled error in message handler:",
 				error,
 			);
 		});
@@ -1278,7 +1441,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 			tabId,
 		);
 
-		console.log("[How-To Recorder] Navigation detected:", tab.url);
+		console.log("[HTR NControl] Navigation detected:", tab.url);
 	}
 });
 
@@ -1305,7 +1468,7 @@ chrome.tabs.onCreated.addListener(async (tab) => {
 			}
 		});
 
-		console.log("[How-To Recorder] New tab opened from tracked tab:", tab.id);
+		console.log("[HTR NControl] New tab opened from tracked tab:", tab.id);
 	}
 });
 
@@ -1317,12 +1480,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 		const index = currentSession.trackedTabIds.indexOf(tabId);
 		if (index !== -1) {
 			currentSession.trackedTabIds.splice(index, 1);
-			console.log("[How-To Recorder] Tracked tab closed:", tabId);
+			console.log("[HTR NControl] Tracked tab closed:", tabId);
 
 			// If all tracked tabs are closed, stop recording
 			if (currentSession.trackedTabIds.length === 0) {
 				console.log(
-					"[How-To Recorder] All tracked tabs closed, stopping recording",
+					"[HTR NControl] All tracked tabs closed, stopping recording",
 				);
 				stopRecording()
 					.then((session) => {
@@ -1335,7 +1498,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 					})
 					.catch((error) => {
 						console.error(
-							"[How-To Recorder] Failed to auto-stop recording:",
+							"[HTR NControl] Failed to auto-stop recording:",
 							error,
 						);
 					});
@@ -1366,6 +1529,14 @@ chrome.sidePanel
 // Start native host connection
 setScreenshotCapturer(captureScreenshotForUpload);
 startNativeHost();
+
+// Fold native-host status into the unified connection mode. Any change
+// (connect, transient disconnect, or permanent failure) re-broadcasts a
+// single status to the side panel and content scripts.
+setStatusListener((mode) => {
+	nativeHostMode = mode;
+	broadcastConnectionStatus();
+});
 
 // Connect already-open tabs on install/enable and on browser startup.
 // Declarative content scripts only run on navigation, so without this a

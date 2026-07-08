@@ -25,6 +25,18 @@ function ConnectionIndicator() {
 		);
 	}
 
+	if (connectionStatus === "ws") {
+		return (
+			<span
+				className="connection-indicator online"
+				title="Server connected (WebSocket)"
+			>
+				<span className="ci-dot" />
+				<span className="ci-label">Online</span>
+			</span>
+		);
+	}
+
 	if (connectionStatus === "disconnected") {
 		return (
 			<span
@@ -58,7 +70,7 @@ function SidePanelContent() {
 	return (
 		<div className="sidepanel">
 			<header className="sidepanel-header">
-				<h1>How-To Recorder</h1>
+				<h1>HTR NControl</h1>
 				<span className="sidepanel-version">v{pkg.version}</span>
 				<ConnectionIndicator />
 			</header>

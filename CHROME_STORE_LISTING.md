@@ -2,7 +2,7 @@
 
 ## Extension Description
 
-**How-To Recorder** is a Chrome extension that helps you create step-by-step documentation by automatically recording your browser interactions. Perfect for creating tutorials, training materials, bug reports, and user guides.
+**HTR NControl** is a Chrome extension that helps you create step-by-step documentation by automatically recording your browser interactions. Perfect for creating tutorials, training materials, bug reports, and user guides.
 
 ### Key Features:
 • **Automatic Screenshot Capture** - Takes screenshots as you click, type, and navigate
@@ -35,7 +35,7 @@ All processing happens locally on your device. Your data never leaves your brows
 
 ### Data Collection and Storage
 
-How-To Recorder does **not collect, transmit, or store any user data on external servers**. All extension functionality operates entirely within your browser on your local device.
+HTR NControl does **not collect, transmit, or store any user data on external servers**. All extension functionality operates entirely within your browser on your local device.
 
 ### What We Store Locally
 
@@ -46,7 +46,7 @@ The extension stores the following data **only on your device** using Chrome's l
 
 This data is stored using Chrome's Storage API and remains on your device. You can delete all stored data at any time by:
 1. Opening Chrome Settings → Privacy and Security → Site Settings → View permissions and data stored across sites
-2. Searching for "How-To Recorder"
+2. Searching for "HTR NControl"
 3. Clicking "Remove" to clear all data
 
 ### What We Do NOT Collect
@@ -82,7 +82,7 @@ We may update this privacy policy occasionally. The "Last Updated" date at the t
 
 ### Contact
 
-For privacy concerns or questions, contact: github+how-to-recorder@stevenstaylor.dev
+For privacy concerns or questions, contact: github+htrcontrol@mercstudio.com
 
 ---
 

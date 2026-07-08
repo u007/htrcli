@@ -6,7 +6,7 @@ import type {
 } from "../types/recording";
 
 /**
- * Test fixtures for How-To Recorder tests
+ * Test fixtures for HTR NControl tests
  */
 
 // Sample element info

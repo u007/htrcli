@@ -1,6 +1,6 @@
-# htcli — HTR Ncontrol CLI
+# htcli — HTR NControl CLI
 
-Go CLI for controlling browser tabs via the [HTR Ncontrol](https://github.com/u007/htrncontrol) remote control API.
+Go CLI for controlling browser tabs via the [HTR NControl](https://github.com/u007/htrncontrol) remote control API.
 
 `htcli` is an HTTP client that talks to a server on port 3845. There are two
 interchangeable transports for that server — pick one:
@@ -66,7 +66,7 @@ over HTTP, so they are not limited by the 1 MB native-messaging frame size.
 ## Quick Start
 
 ```bash
-# 1. Start the HTR Ncontrol server
+# 1. Start the HTR NControl server
 cd /path/to/htrncontrol
 bun run server
 
@@ -106,13 +106,16 @@ htcli tabs get <id>                       # Get tab info
 
 ```bash
 htcli open <url>                          # Navigate to URL
-htcli back                                # Go back
-htcli forward                             # Go forward
+htcli back                                # Go back (errors if no history)
+htcli forward                             # Go forward (errors if no history)
 htcli reload                              # Reload page
 ```
 
 All navigation commands wait for the destination page to finish loading
-(`document.readyState === "complete"`, up to 25s) before returning.
+(`document.readyState === "complete"`, up to 25s) before returning. `back` and
+`forward` fail with an explicit "No previous/forward page in this tab's
+history" error when the tab has no entry to navigate to, instead of silently
+succeeding.
 
 ### Interaction
 
@@ -163,8 +166,10 @@ htcli command <json>                      # Raw JSON command
 `eval` accepts both single expressions (`htcli eval "document.title"`) and
 **multi-statement scripts with an explicit `return`** (e.g.
 `htcli eval "const n = 2; return n * 2;"`); it also supports `await` for
-promises. It runs in the extension's **isolated world**, so page-context
-globals/variables are not visible — use `debuggerEval` for page-context code.
+promises. It runs in the **page's main world** (via Chrome DevTools Protocol),
+so page-context globals, React state, and closures are all visible. On
+Firefox (`chrome.debugger` unavailable) `eval` returns an explicit error
+message; on Chrome both the daemon and the Bun server use the same path.
 
 ### Selector Syntax
 
@@ -204,7 +209,7 @@ Priority: flags > env vars (`HTCLI_SERVER`, `HTCLI_TOKEN`) > config file > defau
 
 ## Requirements
 
-- [HTR Ncontrol](https://github.com/u007/htrncontrol) extension installed (Chrome or Firefox)
+- [HTR NControl](https://github.com/u007/htrncontrol) extension installed (Chrome or Firefox)
 - A server on :3845 — either the Bun server (`bun run server`) or the native-messaging daemon (`htcli serve`)
 - Go 1.22+ (for building from source)
 

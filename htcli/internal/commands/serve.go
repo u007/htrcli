@@ -5,6 +5,8 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -23,7 +25,11 @@ var serveCmd = &cobra.Command{
 
 		bearerToken := os.Getenv("HTR_BEARER_TOKEN")
 		if bearerToken == "" {
-			bearerToken = viper.GetString("token")
+			if fileToken := readBearerTokenFile(); fileToken != "" {
+				bearerToken = fileToken
+			} else {
+				bearerToken = viper.GetString("token")
+			}
 		}
 		port := 3845
 		if p := os.Getenv("HTR_PORT"); p != "" {
@@ -83,6 +89,38 @@ func splitComma(s string) []string {
 	}
 	out = append(out, s[start:])
 	return out
+}
+
+// readBearerTokenFile reads a token from a file path. Checks
+// HTR_BEARER_TOKEN_FILE first, then $XDG_CONFIG_HOME/htrcontrol/token, then
+// ~/.config/htrcontrol/token, then ~/.htrcontrol/token. Mirrors the Bun
+// server's readTokenFile so the same per-install token (shown in the
+// extension's Options page) is picked up by `make serve` and `htcli serve`.
+//
+// Returns "" if no readable file is found or all candidates are empty.
+func readBearerTokenFile() string {
+	var candidates []string
+	if v := os.Getenv("HTR_BEARER_TOKEN_FILE"); v != "" {
+		candidates = append(candidates, v)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+			candidates = append(candidates, filepath.Join(xdg, "htrcontrol", "token"))
+		}
+		candidates = append(candidates, filepath.Join(home, ".config", "htrcontrol", "token"))
+		candidates = append(candidates, filepath.Join(home, ".htrcontrol", "token"))
+	}
+	for _, p := range candidates {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		text := strings.TrimSpace(string(data))
+		if text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 func init() {

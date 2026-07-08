@@ -10,7 +10,7 @@ node_modules
 /build
 /package
 /firefox/build
-/firefox/how-to-recorder-firefox.xpi
+/firefox/htrncontrol-firefox.xpi
 
 # CI/CD artifacts
 *.crx
@@ -39,3 +39,9 @@ htcli/htcli
 
 # compiled binaries
 htcli/bin/
+/bin
+
+# OKF knowledge bundle (tooling scaffolding, not project content)
+docs/.okf.lock
+/docs/index.md
+/docs/log.md

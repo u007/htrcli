@@ -1,8 +1,8 @@
 {
-	"name": "how-to-recorder-server",
-	"displayName": "How-To Recorder Server",
+	"name": "htrncontrol-server",
+	"displayName": "HTR NControl Server",
 	"version": "0.1.0",
-	"description": "HTTP/WebSocket API server for remote controlling browser tabs via the How-To Recorder extension",
+	"description": "HTTP/WebSocket API server for remote controlling browser tabs via the HTR NControl extension",
 	"type": "module",
 	"license": "MIT",
 	"scripts": {

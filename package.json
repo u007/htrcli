@@ -1,6 +1,6 @@
 {
 	"name": "htrncontrol",
-	"displayName": "HTR Ncontrol",
+	"displayName": "HTR NControl",
 	"version": "0.3.0",
 	"author": "Ahren Stevens-Taylor <ahren@mercstudio.com>, James Tan <james.tan@aims-research.com>",
 	"description": "Create step-by-step documentation by recording browser interactions with screenshots",

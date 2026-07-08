@@ -11,6 +11,7 @@
 import type {
 	BoundingBox,
 	Command,
+	CommandAction,
 	CommandResult,
 	PageInfo,
 	RemoteElementInfo,
@@ -25,6 +26,15 @@ import {
 	waitForElement,
 } from "./elementFinder";
 import { generateXPath } from "./xpathGenerator";
+
+/**
+ * Internal action used by the server to route a user's `evaluate` request
+ * through the content script → background → CDP path. Mirrors the matching
+ * `evaluateViaCdp` entry on the server side (`server/index.ts`). Using a
+ * typed const here so a future rename on either side fails the TypeScript
+ * build rather than silently breaking the case dispatch.
+ */
+const EVALUATE_VIA_CDP: CommandAction = "evaluateViaCdp";
 
 // ─── Main Entry Point ─────────────────────────────────────────────
 
@@ -282,6 +292,13 @@ async function executeAction(command: Command): Promise<unknown> {
 				options?.tabId as number,
 				requireValue(value, action),
 			);
+		case EVALUATE_VIA_CDP:
+			// Server-routed CDP evaluation. Forward to the background, which
+			// owns the `chrome.debugger` connection and runs
+			// `Runtime.evaluate` in the page's main world. Returns the
+			// value to the caller; the result is shaped like any other
+			// CommandResult data field.
+			return handleEvaluateViaCdp(requireValue(value, action));
 
 		default:
 			throw new Error(`Unknown action: ${action}`);
@@ -881,6 +898,45 @@ function handleEvaluate(script: string): unknown {
 	return (async () => compiled())();
 }
 
+/**
+ * Forward a `Runtime.evaluate` request to the background script. The
+ * background owns the `chrome.debugger` connection; the content script acts
+ * as a passthrough. On Firefox (no `chrome.debugger`), the background will
+ * reply with an explicit error and we re-throw it so callers see a clear
+ * message instead of a silent fallback to the isolated-world path.
+ */
+async function handleEvaluateViaCdp(expression: string): Promise<unknown> {
+	if (!expression) throw new Error("evaluateViaCdp: expression is required");
+	if (typeof chrome.runtime?.sendMessage !== "function") {
+		throw new Error("evaluateViaCdp: chrome.runtime.sendMessage unavailable");
+	}
+	const tabId = await new Promise<number>((resolve) => {
+		chrome.runtime.sendMessage(
+			{ type: "GET_CURRENT_TAB_ID" },
+			(response: { tabId: number } | undefined) =>
+				resolve(response?.tabId ?? 0),
+		);
+	});
+	if (!tabId)
+		throw new Error("evaluateViaCdp: could not resolve current tab id");
+	return new Promise<unknown>((resolve, reject) => {
+		chrome.runtime.sendMessage(
+			{ type: "CDP_EVAL", tabId, expression },
+			(resp: { ok: boolean; data?: unknown; error?: string } | undefined) => {
+				if (!resp) {
+					reject(new Error("evaluateViaCdp: no response from background"));
+					return;
+				}
+				if (!resp.ok) {
+					reject(new Error(resp.error ?? "evaluateViaCdp: background error"));
+					return;
+				}
+				resolve(resp.data);
+			},
+		);
+	});
+}
+
 async function handlePrintToPDF(targetTabId?: number): Promise<unknown> {
 	let tabId = targetTabId;
 	if (!tabId) {
@@ -1108,6 +1164,21 @@ function handleUnhighlight(): void {
 	window.dispatchEvent(new CustomEvent("htrncontrol:unhighlight"));
 }
 
+function safeHistoryLength(): number {
+	try {
+		const length = window.history?.length;
+		return typeof length === "number" ? length : 0;
+	} catch (err) {
+		// happy-dom's `window.history` getter can throw a TypeError when the
+		// browser frame isn't fully initialized. Real pages don't throw here,
+		// so an unexpected exception is interesting — log it so a future bug
+		// isn't silently swallowed.
+		if (err instanceof TypeError) return 0;
+		console.warn("[HTR NControl] safeHistoryLength: unexpected error:", err);
+		return 0;
+	}
+}
+
 // ─── Page Info ─────────────────────────────────────────────────────
 
 function getPageInfo(): PageInfo {
@@ -1122,6 +1193,12 @@ function getPageInfo(): PageInfo {
 		viewportHeight: window.innerHeight,
 		documentHeight: document.documentElement.scrollHeight,
 		documentWidth: document.documentElement.scrollWidth,
+		// happy-dom's `window.history` getter can throw a TypeError when the
+		// browser frame isn't fully initialized. Guard so the rest of the
+		// PageInfo still comes through (the goBack/goForward pre-check only
+		// uses this as a hint; a missing value is fine — the runtime race is
+		// authoritative).
+		historyLength: safeHistoryLength(),
 	};
 }
 

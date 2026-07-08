@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "how-to-recorder-server",
+      "name": "htrncontrol-server",
       "dependencies": {
         "ws": "^8.16.0",
       },

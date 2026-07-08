@@ -1,5 +1,5 @@
 /**
- * How-To Recorder Server
+ * HTR NControl Server
  *
  * HTTP + WebSocket API server for remote controlling browser tabs.
  * The Chrome extension connects to this server via WebSocket,
@@ -28,6 +28,7 @@ import {
 import type {
 	ApiResponse,
 	Command,
+	CommandAction,
 	CommandRequest,
 	CommandResult,
 	ExtensionMessage,
@@ -35,6 +36,19 @@ import type {
 	ServerMessage,
 	TabInfo,
 } from "./types";
+
+// Navigation actions destroy the content script mid-flight: it acks the command
+// before the page unloads, so the raw command_result arrives instantly (~0ms)
+// while the page is still loading. For these actions the server must wait for
+// the navigation to actually finish (see waitForNavigation below).
+const NAV_ACTIONS = new Set(["navigate", "reload", "goBack", "goForward"]);
+
+// Internal action used by the server to route a user's `evaluate` request
+// through the content script → background → CDP path. Mirrors the matching
+// `evaluateViaCdp` entry in `src/types/commands.ts`. Kept as a typed const
+// so a future rename on either side fails the TypeScript build rather than
+// silently breaking the dispatch.
+const EVALUATE_VIA_CDP: CommandAction = "evaluateViaCdp";
 
 // ─── Configuration ─────────────────────────────────────────────────
 
@@ -69,6 +83,9 @@ const connectedTabs = new Map<
 		ws: ServerWebSocket<WebSocketData>;
 		tabInfo: TabInfo;
 		lastHeartbeat: number;
+		/** When this tab's content script registered — a registration newer than
+		 * a navigation command means the page reloaded (navigation committed). */
+		registeredAt: number;
 	}
 >();
 
@@ -155,6 +172,7 @@ function handleExtensionMessage(
 					ws,
 					tabInfo: message.tabInfo,
 					lastHeartbeat: Date.now(),
+					registeredAt: Date.now(),
 				});
 				console.log(
 					`📋 Tab registered: ${message.tabId} - ${message.tabInfo.title} (${message.tabInfo.url})`,
@@ -421,6 +439,139 @@ async function sendCommandToTab(
 	command: Command,
 	timeoutMs = DEFAULT_COMMAND_TIMEOUT,
 ): Promise<CommandResult | null> {
+	if (!connectedTabs.has(tabId)) return null;
+	// Route `evaluate` through the content-script→background→CDP path. This
+	// gives the script the page's main world (vs. the content script's
+	// isolated world) and bypasses the MV3 CSP that blocks `new Function`.
+	// On Firefox the background's CDP_EVAL handler returns an explicit error
+	// and the user sees it; no silent fallback.
+	if (command.action === "evaluate") {
+		return dispatchCommand(
+			tabId,
+			{ ...command, action: EVALUATE_VIA_CDP },
+			timeoutMs,
+		);
+	}
+	if (!NAV_ACTIONS.has(command.action)) {
+		return dispatchCommand(tabId, command, timeoutMs);
+	}
+
+	// ─── Navigation: dispatch, then wait for the page to finish loading ──
+	const startedAt = Date.now();
+
+	// Snapshot the real current URL (tabInfo.url can be stale after SPA routing)
+	const before = await dispatchCommand(
+		tabId,
+		{ id: generateCommandId(), action: "getPageInfo" },
+		2000,
+	);
+	if (!before?.success) {
+		return {
+			id: command.id,
+			success: false,
+			error: `Cannot ${command.action}: page is not responding (${before?.error ?? "no result"})`,
+		};
+	}
+	const urlBefore = (before.data as PageInfo).url;
+
+	const result = await dispatchCommand(tabId, command, timeoutMs);
+	if (!result) return null;
+	// The content script acks before the page unloads; "Tab disconnected" just
+	// means teardown won the race — both mean the navigation was initiated.
+	if (!result.success && result.error !== "Tab disconnected") {
+		return result;
+	}
+
+	// goBack/goForward no-op fast-path: window.history.back()/forward() return
+	// instantly even when there's no history. If the URL is unchanged ~1s
+	// later, the action was a silent no-op — fail loudly rather than wait the
+	// full 25s for a load that will never come.
+	if (command.action === "goBack" || command.action === "goForward") {
+		await Bun.sleep(1000);
+		const after = await dispatchCommand(
+			tabId,
+			{ id: generateCommandId(), action: "getPageInfo" },
+			2000,
+		);
+		const afterUrl = after?.success ? (after.data as PageInfo).url : undefined;
+		if (afterUrl === urlBefore) {
+			return {
+				id: command.id,
+				success: false,
+				error:
+					command.action === "goBack"
+						? "No previous page in this tab's history"
+						: "No forward page in this tab's history",
+				duration: Date.now() - startedAt,
+			};
+		}
+	}
+
+	return waitForNavigation(tabId, command, urlBefore, startedAt, timeoutMs);
+}
+
+/**
+ * Wait until a navigation initiated at `startedAt` has finished loading.
+ *
+ * Completion is detected by polling getPageInfo on the tab until
+ * document.readyState === "complete" AND either:
+ *   - the tab re-registered after the command (full page load → new content
+ *     script → new register message), covering reload/goBack/same-URL loads, or
+ *   - the URL changed from the pre-navigation URL, covering same-document
+ *     navigations (hash / history API) that never reload the content script.
+ *
+ * Requires an extension build that reports pageInfo.readyState — older builds
+ * will time out here (rebuild + reload the extension).
+ */
+async function waitForNavigation(
+	tabId: number,
+	command: Command,
+	urlBefore: string,
+	startedAt: number,
+	timeoutMs: number,
+): Promise<CommandResult> {
+	// Stay under htcli's 30s HTTP client timeout so callers get a clean error
+	const deadline = startedAt + Math.min(timeoutMs, 25000);
+
+	while (Date.now() < deadline) {
+		const conn = connectedTabs.get(tabId);
+		if (conn) {
+			const reRegistered = conn.registeredAt > startedAt;
+			const info = await dispatchCommand(
+				tabId,
+				{ id: generateCommandId(), action: "getPageInfo" },
+				2000,
+			);
+			const page = info?.success ? (info.data as PageInfo) : undefined;
+			if (
+				page?.readyState === "complete" &&
+				(reRegistered || page.url !== urlBefore)
+			) {
+				return {
+					id: command.id,
+					success: true,
+					data: { url: page.url, title: page.title },
+					duration: Date.now() - startedAt,
+					pageInfo: page,
+				};
+			}
+		}
+		await Bun.sleep(400);
+	}
+
+	return {
+		id: command.id,
+		success: false,
+		error: `${command.action}: page did not finish loading within ${Math.min(timeoutMs, 25000)}ms`,
+		duration: Date.now() - startedAt,
+	};
+}
+
+function dispatchCommand(
+	tabId: number,
+	command: Command,
+	timeoutMs: number,
+): Promise<CommandResult> | null {
 	const conn = connectedTabs.get(tabId);
 	if (!conn) return null;
 
@@ -520,7 +671,7 @@ const _server = Bun.serve<WebSocketData>({
 
 console.log(`
 ╔══════════════════════════════════════════════════════════╗
-║           How-To Recorder Server v0.1.0                 ║
+║           HTR NControl Server v0.1.0                 ║
 ╠══════════════════════════════════════════════════════════╣
 ║                                                          ║
 ║  HTTP API:  ${TLS_ENABLED ? "https" : "http"}://${HOST}:${PORT}                      ║

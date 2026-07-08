@@ -1,4 +1,4 @@
-# How-To Recorder
+# HTR NControl
 
 A browser extension that records user interactions (clicks, inputs, navigation) with screenshots and optional audio narration, then exports them as step-by-step documentation.
 
@@ -20,8 +20,8 @@ The same source code ships as a **Chrome extension** (Manifest V3) and a **Firef
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/AStevensTaylor/how-to-recorder.git
-   cd how-to-recorder
+   git clone https://github.com/AStevensTaylor/htrncontrol.git
+   cd htrncontrol
    ```
 
 2. **Install dependencies**
@@ -64,13 +64,13 @@ Firefox uses the same `bun` toolchain with a separate `firefox/` workspace that 
    ```bash
    bun run firefox:zip
    ```
-   This writes `firefox/how-to-recorder-firefox.xpi`, ready for [addons.mozilla.org](https://addons.mozilla.org) upload.
+   This writes `firefox/htrncontrol-firefox.xpi`, ready for [addons.mozilla.org](https://addons.mozilla.org) upload.
 
 See [`firefox/README.md`](./firefox/README.md) for the full architecture, the polyfill strategy, and how the Chrome and Firefox builds share one source tree.
 
 ### From Release
 
-1. Download the latest `.crx` file from [Releases](https://github.com/AStevensTaylor/how-to-recorder/releases)
+1. Download the latest `.crx` file from [Releases](https://github.com/AStevensTaylor/htrncontrol/releases)
 2. Open `chrome://extensions/`
 3. Enable "Developer mode"
 4. Drag and drop the `.crx` file onto the extensions page
@@ -94,7 +94,7 @@ See [`firefox/README.md`](./firefox/README.md) for the full architecture, the po
 
 ## Remote Control
 
-How-To Recorder includes a built-in remote control system that allows external tools (like AI agents) to control browser tabs via an HTTP/WebSocket API.
+HTR NControl includes a built-in remote control system that allows external tools (like AI agents) to control browser tabs via an HTTP/WebSocket API.
 
 ### Quick Start
 
@@ -310,7 +310,7 @@ MIT License - see [LICENSE](./LICENSE) for details.
 
 ## Authors
 
-- **Ahren Stevens-Taylor** — Original author <github+how-to-recorder@stevenstaylor.dev>
+- **Ahren Stevens-Taylor** — Original author <github+htrcontrol@mercstudio.com>
 - **James Tan** — Owner, remote control system <james.tan@aims-research.com>
 
 ## Acknowledgments

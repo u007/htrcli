@@ -173,7 +173,7 @@ function recordInputChange(
 	};
 
 	console.log(
-		"[How-To Recorder] Recording input:",
+		"[HTR NControl] Recording input:",
 		elementInfo.selector,
 		"value:",
 		isSensitive ? "(sensitive)" : value,
@@ -204,7 +204,7 @@ function handleInputEvent(event: Event): void {
 	}
 
 	// Don't track extension's own UI
-	if (target.closest("[data-how-to-recorder-ignore]")) {
+	if (target.closest("[data-htrncontrol-ignore]")) {
 		return;
 	}
 
@@ -217,7 +217,7 @@ function handleInputEvent(event: Event): void {
 	}
 
 	console.log(
-		"[How-To Recorder] Input event detected on:",
+		"[HTR NControl] Input event detected on:",
 		target.tagName,
 		target instanceof HTMLInputElement ? target.type : "",
 	);

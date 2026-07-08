@@ -1,9 +1,13 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { authorize, authorizeWs, loadAuthConfig } from "./auth";
 
 describe("Auth", () => {
 	describe("loadAuthConfig", () => {
 		const originalEnv = process.env;
+		let tmpDir: string;
 
 		beforeEach(() => {
 			process.env = { ...originalEnv };
@@ -11,6 +15,21 @@ describe("Auth", () => {
 			delete process.env.HTR_ALLOWED_IPS;
 			delete process.env.HTR_ENABLE_BEARER_TOKEN;
 			delete process.env.HTR_BEARER_TOKEN;
+			delete process.env.HTR_BEARER_TOKEN_FILE;
+			delete process.env.XDG_CONFIG_HOME;
+			// Use an isolated temp dir so tests don't pick up a real
+			// ~/.config/htrcontrol/token from the developer's machine.
+			tmpDir = mkdtempSync(join(tmpdir(), "htr-auth-test-"));
+			process.env.HOME = tmpDir;
+			process.env.USERPROFILE = tmpDir;
+		});
+
+		afterEach(() => {
+			try {
+				rmSync(tmpDir, { recursive: true, force: true });
+			} catch {
+				// best-effort cleanup
+			}
 		});
 
 		it("should return default config when no env vars set", () => {
@@ -29,6 +48,37 @@ describe("Auth", () => {
 			process.env.HTR_BEARER_TOKEN = "my-secret-token";
 			const config = loadAuthConfig();
 			expect(config.bearerToken).toBe("my-secret-token");
+		});
+
+		it("should use bearer token from HTR_BEARER_TOKEN_FILE", () => {
+			const tokenFile = join(tmpDir, "my-token");
+			writeFileSync(tokenFile, "from-file\n");
+			process.env.HTR_BEARER_TOKEN_FILE = tokenFile;
+			const config = loadAuthConfig();
+			expect(config.bearerToken).toBe("from-file");
+		});
+
+		it("should use bearer token from XDG_CONFIG_HOME/htrcontrol/token", () => {
+			const dir = join(tmpDir, ".config", "htrcontrol");
+			mkdirSync(dir, { recursive: true });
+			writeFileSync(join(dir, "token"), "xdg-token");
+			process.env.XDG_CONFIG_HOME = join(tmpDir, ".config");
+			const config = loadAuthConfig();
+			expect(config.bearerToken).toBe("xdg-token");
+		});
+
+		it("should fall back to auto-generation when no token source is set", () => {
+			const config = loadAuthConfig();
+			expect(config.bearerToken.length).toBe(32);
+		});
+
+		it("env var wins over token file", () => {
+			const tokenFile = join(tmpDir, "my-token");
+			writeFileSync(tokenFile, "from-file");
+			process.env.HTR_BEARER_TOKEN_FILE = tokenFile;
+			process.env.HTR_BEARER_TOKEN = "from-env";
+			const config = loadAuthConfig();
+			expect(config.bearerToken).toBe("from-env");
 		});
 
 		it("should disable IP whitelist from env", () => {

@@ -13,7 +13,7 @@ import (
 const hostManifestName = "com.howtorecorder.host.json"
 
 // firefoxExtensionID is the add-on ID Firefox passes as the second argument.
-const firefoxExtensionID = "how-to-recorder@stevenstaylor.dev"
+const firefoxExtensionID = "htrcontrol@mercstudio.com"
 
 // isNativeHostLaunch reports whether the browser spawned us as a native
 // messaging host. Detection differs per browser:
@@ -22,7 +22,7 @@ const firefoxExtensionID = "how-to-recorder@stevenstaylor.dev"
 //     add-on ID as argv[2].
 //
 // We only inspect the native-messaging positions, not every argument, so a
-// normal CLI invocation like `htcli install --extension-id how-to-recorder@...`
+// normal CLI invocation like `htcli install --extension-id htrncontrol@...`
 // does not get misclassified as a browser launch.
 //
 // Misdetecting this matters: if we fall through to the cobra CLI, its help/error

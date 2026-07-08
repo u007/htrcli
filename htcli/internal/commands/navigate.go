@@ -22,6 +22,9 @@ var openCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if err := commandError(result); err != nil {
+			return err
+		}
 
 		if output.JSONOutput {
 			output.PrintJSON(result)
@@ -43,6 +46,9 @@ var backCmd = &cobra.Command{
 			Action: "goBack",
 		})
 		if err != nil {
+			return err
+		}
+		if err := commandError(result); err != nil {
 			return err
 		}
 
@@ -68,6 +74,9 @@ var forwardCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if err := commandError(result); err != nil {
+			return err
+		}
 
 		if output.JSONOutput {
 			output.PrintJSON(result)
@@ -89,6 +98,9 @@ var reloadCmd = &cobra.Command{
 			Action: "reload",
 		})
 		if err != nil {
+			return err
+		}
+		if err := commandError(result); err != nil {
 			return err
 		}
 

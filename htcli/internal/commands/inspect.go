@@ -77,6 +77,9 @@ var getAttrCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if err := commandError(result); err != nil {
+			return err
+		}
 
 		if output.JSONOutput {
 			output.PrintJSON(result)
@@ -186,6 +189,12 @@ var pageInfoCmd = &cobra.Command{
 		fmt.Printf("URL:      %s\n", page.URL)
 		fmt.Printf("Title:    %s\n", page.Title)
 		fmt.Printf("Domain:   %s\n", page.Domain)
+		if page.ReadyState != "" {
+			fmt.Printf("Ready:    %s\n", page.ReadyState)
+		}
+		if page.HistoryLength > 0 {
+			fmt.Printf("History:  %d entries\n", page.HistoryLength)
+		}
 		fmt.Printf("Viewport: %dx%d\n", page.ViewportWidth, page.ViewportHeight)
 		fmt.Printf("Document: %dx%d\n", page.DocumentWidth, page.DocumentHeight)
 		fmt.Printf("Scroll:   %.0f, %.0f\n", page.ScrollX, page.ScrollY)
@@ -205,6 +214,9 @@ var evalCmd = &cobra.Command{
 			Value:  args[0],
 		})
 		if err != nil {
+			return err
+		}
+		if err := commandError(result); err != nil {
 			return err
 		}
 
@@ -248,6 +260,9 @@ func runInspect(action, selector string) error {
 		Target: parseSelector(selector),
 	})
 	if err != nil {
+		return err
+	}
+	if err := commandError(result); err != nil {
 		return err
 	}
 

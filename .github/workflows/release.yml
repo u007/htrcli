@@ -101,7 +101,7 @@ jobs:
         run: |
           # Pack extension using Chrome
           google-chrome --pack-extension=./build --pack-extension-key=./key.pem
-          mv build.crx how-to-recorder-v${{ steps.package_version.outputs.version }}.crx
+          mv build.crx htrncontrol-v${{ steps.package_version.outputs.version }}.crx
 
       - name: Create GitHub Release
         if: steps.check_tag.outputs.exists == 'false'
@@ -123,8 +123,8 @@ jobs:
             
             Or install from the Chrome Web Store: [Link will be available after review]
           files: |
-            how-to-recorder-v${{ steps.package_version.outputs.version }}.crx
-            how-to-recorder.zip
+            htrncontrol-v${{ steps.package_version.outputs.version }}.crx
+            htrncontrol.zip
           draft: false
           prerelease: false
         env:
@@ -148,10 +148,10 @@ jobs:
           curl -X PUT \
             -H "Authorization: Bearer ${{ steps.oauth_token.outputs.token }}" \
             -H "x-goog-api-version: 2" \
-            -H "Content-Length: $(stat -c%s how-to-recorder-v${{ steps.package_version.outputs.version }}.crx)" \
+            -H "Content-Length: $(stat -c%s htrncontrol-v${{ steps.package_version.outputs.version }}.crx)" \
             -H "X-Goog-Upload-Protocol: raw" \
-            -H "X-Goog-Upload-File-Name: how-to-recorder-v${{ steps.package_version.outputs.version }}.crx" \
-            -T how-to-recorder-v${{ steps.package_version.outputs.version }}.crx \
+            -H "X-Goog-Upload-File-Name: htrncontrol-v${{ steps.package_version.outputs.version }}.crx" \
+            -T htrncontrol-v${{ steps.package_version.outputs.version }}.crx \
             "https://www.googleapis.com/upload/chromewebstore/v1.1/items/${{ secrets.CHROME_EXTENSION_ID }}"
 
       - name: Publish to Chrome Web Store

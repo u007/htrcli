@@ -11,5 +11,5 @@ const _manifest = JSON.parse(
 
 gulp
 	.src("build/**", { encoding: false })
-	.pipe(file("how-to-recorder.zip"))
+	.pipe(file("htrncontrol.zip"))
 	.pipe(gulp.dest("."));

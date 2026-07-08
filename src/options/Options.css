@@ -133,6 +133,17 @@ button:disabled {
 	font-size: 0.75rem;
 }
 
+.token-row {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+}
+
+.token-row input {
+	flex: 1;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 .tab-list {
 	list-style: none;
 	margin: 0;

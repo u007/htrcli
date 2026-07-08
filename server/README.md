@@ -1,6 +1,6 @@
-# How-To Recorder Server
+# HTR NControl Server
 
-HTTP + WebSocket API server for remote controlling browser tabs via the How-To Recorder Chrome extension.
+HTTP + WebSocket API server for remote controlling browser tabs via the HTR NControl Chrome extension.
 
 ## Architecture
 

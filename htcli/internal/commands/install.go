@@ -81,7 +81,7 @@ var installCmd = &cobra.Command{
 			id := installExtensionID
 			manifest := firefoxManifest{
 				Name:              hostName,
-				Description:       "How-To Recorder native messaging host",
+				Description:       "HTR NControl native messaging host",
 				Path:              htcliPath,
 				Type:              "stdio",
 				AllowedExtensions: []string{id},
@@ -91,7 +91,7 @@ var installCmd = &cobra.Command{
 			id := "chrome-extension://" + strings.TrimPrefix(installExtensionID, "chrome-extension://") + "/"
 			manifest := chromeManifest{
 				Name:           hostName,
-				Description:    "How-To Recorder native messaging host",
+				Description:    "HTR NControl native messaging host",
 				Path:           htcliPath,
 				Type:           "stdio",
 				AllowedOrigins: []string{id},
@@ -137,7 +137,7 @@ func nativeMessagingDir(browser string) (string, error) {
 }
 
 func init() {
-	installCmd.Flags().StringVar(&installExtensionID, "extension-id", "", "Extension ID (Chrome: from chrome://extensions; Firefox: e.g. how-to-recorder@stevenstaylor.dev)")
+	installCmd.Flags().StringVar(&installExtensionID, "extension-id", "", "Extension ID (Chrome: from chrome://extensions; Firefox: e.g. htrcontrol@mercstudio.com)")
 	installCmd.Flags().BoolVar(&installUninstall, "uninstall", false, "Remove the native host manifest")
 	installCmd.Flags().StringVar(&installBrowser, "browser", "chrome", "Target browser: chrome or firefox")
 	rootCmd.AddCommand(installCmd)

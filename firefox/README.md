@@ -1,6 +1,6 @@
 # Firefox Build
 
-A Firefox port of the How-To Recorder Chrome extension.
+A Firefox port of the HTR NControl Chrome extension.
 
 ## Architecture
 
@@ -96,7 +96,7 @@ The extension is loaded for the current session. Reload by clicking
 bun run firefox:zip
 ```
 
-This produces `firefox/how-to-recorder-firefox.xpi`, ready to upload
+This produces `firefox/htrncontrol-firefox.xpi`, ready to upload
 to [addons.mozilla.org](https://addons.mozilla.org) or distribute
 directly (Firefox will install unsigned XPIs with a confirmation
 prompt; for AMO submission, sign the XPI first).
@@ -123,7 +123,7 @@ add-on after each change (`bun run firefox:build` is fast — sub-second).
 | Permissions       | + `sidePanel`                       | (no `sidePanel`; `sidebar_action` is a UI key)     |
 | `chrome.*` API    | Native                              | Aliased to `browser.*` via `webextension-polyfill` |
 | Service worker    | Yes                                 | Yes                                                |
-| `.zip` artifact   | `how-to-recorder.zip`               | `how-to-recorder-firefox.xpi` (Firefox convention) |
+| `.zip` artifact   | `htrncontrol.zip`               | `htrncontrol-firefox.xpi` (Firefox convention) |
 
 Everything else — recording state, IndexedDB sessions, exports, the
 `htcli` native messaging host, screenshots, sensitive-field masking,
@@ -137,7 +137,7 @@ messaging, register the native host for Firefox (Firefox uses
 `allowed_extensions` + the add-on ID, not Chrome's `allowed_origins`):
 
 ```bash
-htcli install --browser firefox --extension-id how-to-recorder@stevenstaylor.dev
+htcli install --browser firefox --extension-id htrcontrol@mercstudio.com
 ```
 
 This writes the host manifest to
@@ -152,3 +152,34 @@ at once; commands route to whichever browser owns the target tab. See the
 > The add-on ID comes from `browser_specific_settings.gecko.id` in the
 > built `manifest.json`. The native host requires the `nativeMessaging`
 > permission, which the manifest already declares.
+
+### Remote control without native messaging (WebSocket fallback)
+
+Native messaging is the preferred transport, but it requires the `htcli`
+host to be installed and the `htcli serve` daemon to be running. If native
+messaging is unavailable on Firefox (host not installed, daemon down, or the
+add-on ID not allowed), the extension **automatically falls back to a direct
+WebSocket connection** to the remote-control server. You do **not** need to
+register a native host to use remote control in this mode.
+
+To use the WebSocket fallback, run the Bun API server (which speaks the
+extension's WebSocket protocol) instead of `htcli serve`:
+
+```bash
+bun run server          # HTTP + WebSocket on ws://127.0.0.1:3845
+```
+
+The extension connects to the URL stored in `remoteControlServer`
+(Options page). The default is `ws://127.0.0.1:3845` — note the **plain
+`ws://` scheme**, not `wss://`: the server only enables TLS if `cert.pem` /
+`key.pem` are present. If you have configured TLS, set the URL to
+`wss://127.0.0.1:3845` in Options.
+
+> `htcli serve` does **not** expose the WebSocket endpoint (it only offers
+> the HTTP API plus the native-messaging relay), so the WebSocket fallback
+> only works against `bun run server`. Use `htcli serve` for the native-
+> messaging path, or `bun run server` for the WebSocket path.
+
+The side-panel connection indicator now reflects whichever transport is
+active: **Online** for native messaging or WebSocket, **Reconnecting…** while
+a transient connection is retried, and **Offline** when neither is available.

@@ -27,7 +27,7 @@ import {
 	stopInputTracking,
 } from "./inputHandler";
 
-console.info("[How-To Recorder] Content script loaded");
+console.info("[HTR NControl] Content script loaded");
 
 // ─── Recording State ─────────────────────────────────────────────
 
@@ -46,7 +46,7 @@ let remoteControlEnabled = false;
 function sendToBackground(message: RecordingMessage): void {
 	chrome.runtime.sendMessage(message).catch((error) => {
 		// Extension context may be invalidated if extension is reloaded
-		console.warn("[How-To Recorder] Failed to send message:", error);
+		console.warn("[HTR NControl] Failed to send message:", error);
 	});
 }
 
@@ -71,7 +71,7 @@ function handleInputEvent(message: InputEventMessage): void {
  */
 function startRecording(startTime?: number): void {
 	if (isRecording) {
-		console.warn("[How-To Recorder] Recording already active");
+		console.warn("[HTR NControl] Recording already active");
 		return;
 	}
 
@@ -82,7 +82,7 @@ function startRecording(startTime?: number): void {
 	startClickTracking(recordingStartTime, handleClickEvent);
 	startInputTracking(recordingStartTime, handleInputEvent);
 
-	console.info("[How-To Recorder] Recording started");
+	console.info("[HTR NControl] Recording started");
 }
 
 /**
@@ -90,7 +90,7 @@ function startRecording(startTime?: number): void {
  */
 function stopRecording(): void {
 	if (!isRecording) {
-		console.warn("[How-To Recorder] No active recording to stop");
+		console.warn("[HTR NControl] No active recording to stop");
 		return;
 	}
 
@@ -107,7 +107,7 @@ function stopRecording(): void {
 	isRecording = false;
 	recordingStartTime = null;
 
-	console.info("[How-To Recorder] Recording stopped");
+	console.info("[HTR NControl] Recording stopped");
 }
 
 // ─── Command Handling ─────────────────────────────────────────────
@@ -121,7 +121,7 @@ async function handleCommand(
 	sendResponse: (response: CommandResult) => void,
 ): Promise<void> {
 	console.info(
-		`[How-To Recorder] Executing command: ${command.action} (${command.id})`,
+		`[HTR NControl] Executing command: ${command.action} (${command.id})`,
 	);
 
 	try {
@@ -139,13 +139,13 @@ async function handleCommand(
 				}
 			} catch {
 				// Screenshot capture might fail, that's ok
-				console.warn("[How-To Recorder] Screenshot capture failed");
+				console.warn("[HTR NControl] Screenshot capture failed");
 			}
 		}
 
 		sendResponse(result);
 	} catch (error) {
-		console.error("[How-To Recorder] Command execution failed:", error);
+		console.error("[HTR NControl] Command execution failed:", error);
 		sendResponse({
 			id: command.id,
 			success: false,
@@ -172,13 +172,13 @@ async function getTabId(): Promise<number> {
  */
 function enableRemoteControl(_serverUrl?: string): void {
 	if (remoteControlEnabled) {
-		console.warn("[How-To Recorder] Remote control already enabled");
+		console.warn("[HTR NControl] Remote control already enabled");
 		return;
 	}
 
 	remoteControlEnabled = true;
 	connectRemote();
-	console.info("[How-To Recorder] Remote control enabled");
+	console.info("[HTR NControl] Remote control enabled");
 }
 
 /**
@@ -191,7 +191,7 @@ function disableRemoteControl(): void {
 
 	remoteControlEnabled = false;
 	disconnectRemote();
-	console.info("[How-To Recorder] Remote control disabled");
+	console.info("[HTR NControl] Remote control disabled");
 }
 
 // ─── Message Handler ──────────────────────────────────────────────
@@ -205,6 +205,7 @@ function handleMessage(
 		| { type: "EXECUTE_COMMAND"; command: Command; tabId?: number }
 		| { type: "ENABLE_REMOTE_CONTROL"; serverUrl?: string }
 		| { type: "DISABLE_REMOTE_CONTROL" }
+		| { type: "ENABLE_WS_REMOTE_CONTROL"; serverUrl?: string }
 		| { type: "GET_CURRENT_TAB_ID" },
 	_sender: chrome.runtime.MessageSender,
 	sendResponse: (response?: unknown) => void,
@@ -241,13 +242,13 @@ function handleMessage(
 					sendResponse({ success: true });
 				} else {
 					console.warn(
-						"[How-To Recorder] Element not found for selector:",
+						"[HTR NControl] Element not found for selector:",
 						highlightMsg.selector,
 					);
 					sendResponse({ success: false, error: "Element not found" });
 				}
 			} catch (error) {
-				console.warn("[How-To Recorder] Failed to highlight element:", error);
+				console.warn("[HTR NControl] Failed to highlight element:", error);
 				sendResponse({ success: false, error: String(error) });
 			}
 			break;
@@ -278,6 +279,16 @@ function handleMessage(
 			break;
 		}
 
+		case "ENABLE_WS_REMOTE_CONTROL": {
+			const msg = message as {
+				type: "ENABLE_WS_REMOTE_CONTROL";
+				serverUrl?: string;
+			};
+			enableRemoteControl(msg.serverUrl);
+			sendResponse({ success: true });
+			break;
+		}
+
 		case "DISABLE_REMOTE_CONTROL":
 			disableRemoteControl();
 			sendResponse({ success: true });
@@ -301,28 +312,28 @@ function handleMessage(
 //
 // The message listener must be (re-)registered on every execution so it
 // survives extension reloads: after a reload the old extension context is
-// invalidated and its listeners silently die, but `__howToRecorderInitialized`
+// invalidated and its listeners silently die, but `__htrncontrolInitialized`
 // persists on `window` (the page was not reloaded). removeListener is a
 // no-op if the function isn't registered, preventing double-registration.
 interface ContentScriptWindow extends Window {
-	__howToRecorderInitialized?: boolean;
+	__htrncontrolInitialized?: boolean;
 }
 const contentWindow = window as ContentScriptWindow;
 
 chrome.runtime.onMessage.removeListener(handleMessage);
 chrome.runtime.onMessage.addListener(handleMessage);
 
-if (!contentWindow.__howToRecorderInitialized) {
-	contentWindow.__howToRecorderInitialized = true;
+if (!contentWindow.__htrncontrolInitialized) {
+	contentWindow.__htrncontrolInitialized = true;
 
 	// Highlight event listeners (driven by the command executor).
-	window.addEventListener("how-to-recorder:highlight", ((e: CustomEvent) => {
+	window.addEventListener("htrncontrol:highlight", ((e: CustomEvent) => {
 		if (e.detail?.element) {
 			showHighlight(e.detail.element);
 		}
 	}) as EventListener);
 
-	window.addEventListener("how-to-recorder:unhighlight", () => {
+	window.addEventListener("htrncontrol:unhighlight", () => {
 		hideHighlight();
 	});
 
@@ -360,3 +371,9 @@ function announceReady(attemptsLeft = 5): void {
 		});
 }
 announceReady();
+
+// Auto-enable remote control. The connection manager first checks whether
+// native messaging is active (preferred) and, if not, falls back to a direct
+// WebSocket connection to the remote-control server. This is what lets the
+// extension connect on Firefox where native messaging may be unavailable.
+connectRemote();

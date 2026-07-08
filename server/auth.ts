@@ -1,5 +1,5 @@
 /**
- * Authentication & Authorization for the How-To Recorder Server
+ * Authentication & Authorization for the HTR NControl Server
  *
  * Supports two modes (both enabled by default):
  *   1. IP Whitelist - Only allows connections from whitelisted IPs
@@ -8,6 +8,8 @@
  * Both can be enabled simultaneously (both must pass).
  * A random token is auto-generated on each server start if not provided.
  */
+
+import { readFileSync } from "node:fs";
 
 // ─── Configuration ─────────────────────────────────────────────────
 
@@ -30,15 +32,56 @@ const DEFAULT_ALLOWED_IPS = [
 ];
 
 /**
- * Load auth config from environment variables
+ * Load auth config from environment variables.
+ *
+ * Token resolution order (first match wins):
+ *   1. `HTR_BEARER_TOKEN` env var (explicit, used by `make serve` and CI)
+ *   2. The first existing file in `HTR_BEARER_TOKEN_FILE` (if set) or
+ *      `$XDG_CONFIG_HOME/htrcontrol/token` then `~/.htrcontrol/token` — so
+ *      users running the server locally can drop the per-install token
+ *      shown in the Options page into a file once and forget about it.
+ *   3. Auto-generated random token (printed once at startup)
  */
 export function loadAuthConfig(): AuthConfig {
 	return {
 		enableIpWhitelist: parseBool(process.env.HTR_ENABLE_IP_WHITELIST, true),
 		allowedIps: parseList(process.env.HTR_ALLOWED_IPS, DEFAULT_ALLOWED_IPS),
 		enableBearerToken: parseBool(process.env.HTR_ENABLE_BEARER_TOKEN, true),
-		bearerToken: process.env.HTR_BEARER_TOKEN || generateToken(),
+		bearerToken:
+			process.env.HTR_BEARER_TOKEN || readTokenFile() || generateToken(),
 	};
+}
+
+/**
+ * Read a token from a file path. Checks `HTR_BEARER_TOKEN_FILE` first, then
+ * the XDG config dir, then the legacy home-dir location. Returns undefined
+ * if no readable file is found. Trims whitespace so a trailing newline in
+ * the file (from an editor save) does not break the comparison.
+ */
+function readTokenFile(): string | undefined {
+	const candidates: string[] = [];
+	if (process.env.HTR_BEARER_TOKEN_FILE) {
+		candidates.push(process.env.HTR_BEARER_TOKEN_FILE);
+	}
+	const xdg = process.env.XDG_CONFIG_HOME;
+	if (xdg) candidates.push(`${xdg}/htrcontrol/token`);
+	const home = process.env.HOME ?? process.env.USERPROFILE;
+	if (home) candidates.push(`${home}/.config/htrcontrol/token`);
+	if (home) candidates.push(`${home}/.htrcontrol/token`);
+
+	for (const path of candidates) {
+		try {
+			// Sync read — auth config is loaded once at startup, before the
+			// server accepts connections, so an async read would require
+			// restructuring loadAuthConfig's call sites. readFileSync throws
+			// on missing/unreadable files, which the try/catch absorbs.
+			const text = readFileSync(path, "utf8").trim();
+			if (text) return text;
+		} catch {
+			// File unreadable / no permission / unsupported platform — try next.
+		}
+	}
+	return undefined;
 }
 
 /**

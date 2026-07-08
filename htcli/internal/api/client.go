@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Client is an HTTP client for the How-To Recorder server.
+// Client is an HTTP client for the HTR NControl server.
 type Client struct {
 	BaseURL    string
 	Token      string

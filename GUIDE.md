@@ -8,7 +8,7 @@ messaging relay instead of WebSocket.
 ## 1. Build & load the extension
 
 ```bash
-cd /Users/james/www/how-to-recorder
+cd /Users/james/www/htrncontrol
 bun install
 bun run build        # → build/
 ```
@@ -30,7 +30,7 @@ make build            # → htcli/bin/htcli
 `exec.LookPath`, so make sure the binary is on `PATH`:
 
 ```bash
-export PATH="$PATH:/Users/james/www/how-to-recorder/htcli/bin"
+export PATH="$PATH:/Users/james/www/htrncontrol/htcli/bin"
 ```
 
 ## 3. Register the native messaging host
@@ -99,9 +99,14 @@ instance at once; commands route to whichever browser owns the target tab.
 ```bash
 bun run firefox:build
 # Load firefox/build/manifest.json via about:debugging#/runtime/this-firefox
-htcli install --browser firefox --extension-id how-to-recorder@stevenstaylor.dev
+htcli install --browser firefox --extension-id htrcontrol@mercstudio.com
 # Reload the add-on in about:debugging, then htcli serve is already covering it
 ```
+
+If you don't install the native host (or the daemon isn't running), the
+Firefox extension automatically falls back to a direct WebSocket connection
+to the Bun server — see **Alternative: Bun server** below. The side-panel
+indicator shows **Online** for either transport.
 
 ## Alternative: Bun server instead of `htcli serve`
 

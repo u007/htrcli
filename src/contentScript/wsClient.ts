@@ -34,6 +34,16 @@ let serverUrl = DEFAULT_SERVER_URL;
 // Module-level real tab ID (set by connectionManager once known)
 let realTabId: number | null = null;
 
+// Optional callback fired whenever the socket opens (true) or closes (false).
+// The connection manager uses this to report status to the background.
+let connectionChangeCallback: ((connected: boolean) => void) | null = null;
+
+export function setConnectionChangeCallback(
+	cb: ((connected: boolean) => void) | null,
+): void {
+	connectionChangeCallback = cb;
+}
+
 // ─── Public API ────────────────────────────────────────────────────
 
 /**
@@ -48,15 +58,16 @@ export function connectToServer(url?: string): void {
 	}
 
 	isConnecting = true;
-	console.log(`[How-To Recorder] Connecting to server: ${serverUrl}`);
+	console.log(`[HTR NControl] Connecting to server: ${serverUrl}`);
 
 	try {
 		ws = new WebSocket(serverUrl);
 
 		ws.onopen = () => {
-			console.log("[How-To Recorder] Connected to remote control server");
+			console.log("[HTR NControl] Connected to remote control server");
 			isConnecting = false;
 			reconnectDelay = RECONNECT_DELAY;
+			connectionChangeCallback?.(true);
 
 			// Register this tab with the server
 			registerTab();
@@ -70,28 +81,26 @@ export function connectToServer(url?: string): void {
 				const message = JSON.parse(event.data) as ServerMessage;
 				handleServerMessage(message);
 			} catch (error) {
-				console.error(
-					"[How-To Recorder] Failed to parse server message:",
-					error,
-				);
+				console.error("[HTR NControl] Failed to parse server message:", error);
 			}
 		};
 
 		ws.onclose = (event) => {
 			console.log(
-				`[How-To Recorder] Disconnected from server (code: ${event.code}, reason: ${event.reason})`,
+				`[HTR NControl] Disconnected from server (code: ${event.code}, reason: ${event.reason})`,
 			);
 			isConnecting = false;
 			stopHeartbeat();
+			connectionChangeCallback?.(false);
 			scheduleReconnect();
 		};
 
 		ws.onerror = (error) => {
-			console.warn("[How-To Recorder] WebSocket error:", error);
+			console.warn("[HTR NControl] WebSocket error:", error);
 			isConnecting = false;
 		};
 	} catch (error) {
-		console.warn("[How-To Recorder] Failed to connect to server:", error);
+		console.warn("[HTR NControl] Failed to connect to server:", error);
 		isConnecting = false;
 		scheduleReconnect();
 	}
@@ -152,7 +161,7 @@ function handleServerMessage(message: ServerMessage): void {
 			break;
 
 		case "disconnect":
-			console.log("[How-To Recorder] Server requested disconnect");
+			console.log("[HTR NControl] Server requested disconnect");
 			disconnectFromServer();
 			break;
 	}
@@ -164,7 +173,7 @@ async function handleCommand(
 ): Promise<void> {
 	const startTime = Date.now();
 	console.log(
-		`[How-To Recorder] Executing remote command: ${command.action} (${command.id})`,
+		`[HTR NControl] Executing remote command: ${command.action} (${command.id})`,
 	);
 
 	try {
@@ -189,7 +198,7 @@ async function handleCommand(
 		// Send result back to server
 		sendResult(command.id, result);
 	} catch (error) {
-		console.error("[How-To Recorder] Command execution failed:", error);
+		console.error("[HTR NControl] Command execution failed:", error);
 		sendResult(command.id, {
 			id: command.id,
 			success: false,
@@ -280,7 +289,7 @@ function stopHeartbeat(): void {
 function scheduleReconnect(): void {
 	if (reconnectTimer) return;
 
-	console.log(`[How-To Recorder] Reconnecting in ${reconnectDelay / 1000}s...`);
+	console.log(`[HTR NControl] Reconnecting in ${reconnectDelay / 1000}s...`);
 
 	reconnectTimer = setTimeout(() => {
 		reconnectTimer = null;

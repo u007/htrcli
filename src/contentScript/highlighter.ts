@@ -28,8 +28,8 @@ function getHighlightOverlay(): HTMLDivElement {
 	}
 
 	highlightOverlay = document.createElement("div");
-	highlightOverlay.id = "how-to-recorder-highlight";
-	highlightOverlay.setAttribute("data-how-to-recorder-ignore", "true");
+	highlightOverlay.id = "htrncontrol-highlight";
+	highlightOverlay.setAttribute("data-htrncontrol-ignore", "true");
 
 	Object.assign(highlightOverlay.style, HIGHLIGHT_STYLES);
 	highlightOverlay.style.display = "none";

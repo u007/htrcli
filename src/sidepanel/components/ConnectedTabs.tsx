@@ -31,7 +31,7 @@ export function ConnectedTabs() {
 				setTabs(res.tabs);
 			}
 		} catch (err) {
-			console.warn("[How-To Recorder] GET_READY_TABS failed:", err);
+			console.warn("[HTR NControl] GET_READY_TABS failed:", err);
 		}
 	}, []);
 
@@ -48,7 +48,7 @@ export function ConnectedTabs() {
 			});
 			setHasAccess(granted);
 		} catch (err) {
-			console.warn("[How-To Recorder] permissions.contains failed:", err);
+			console.warn("[HTR NControl] permissions.contains failed:", err);
 			setHasAccess(true);
 		}
 	}, []);
@@ -75,7 +75,7 @@ export function ConnectedTabs() {
 			}
 		} catch (err) {
 			// User dismissed the prompt or the API is unavailable.
-			console.warn("[How-To Recorder] permissions.request failed:", err);
+			console.warn("[HTR NControl] permissions.request failed:", err);
 		} finally {
 			setRequesting(false);
 		}
