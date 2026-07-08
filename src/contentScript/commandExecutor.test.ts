@@ -1,5 +1,7 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import "../test/domSetup";
 import type { Command, CommandAction } from "../types/commands";
+import { executeCommand } from "./commandExecutor";
 
 // Test command validation logic (extracted from commandExecutor)
 const ACTIONS_REQUIRING_TARGET = new Set([
@@ -232,5 +234,90 @@ describe("Command Validation", () => {
 			};
 			expect(validateCommand(cmd).valid).toBe(false);
 		});
+	});
+});
+
+describe("interaction auto-wait (DOM)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	function makeButton(id: string, disabled = false): HTMLButtonElement {
+		const el = document.createElement("button");
+		el.id = id;
+		if (disabled) el.disabled = true;
+		document.body.appendChild(el);
+		return el;
+	}
+
+	it("click succeeds on an element that appears shortly after the call", async () => {
+		const target = { selector: "#late" };
+		setTimeout(() => {
+			makeButton("late");
+		}, 100);
+
+		const result = await executeCommand({
+			id: "c1",
+			action: "click",
+			target,
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("click on a never-appearing selector fails with 'not found' wording", async () => {
+		const start = Date.now();
+		const result = await executeCommand({
+			id: "c2",
+			action: "click",
+			target: { selector: "#ghost" },
+			options: { timeout: 200 },
+		});
+		const elapsed = Date.now() - start;
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/not found/i);
+		// Duration should be roughly the 200ms timeout, not the 5s default.
+		expect(elapsed).toBeLessThan(1500);
+	});
+
+	it("fill on a disabled input fails with 'disabled' wording", async () => {
+		makeButton("disabled-btn", true);
+		const result = await executeCommand({
+			id: "c3",
+			action: "fill",
+			target: { selector: "#disabled-btn" },
+			value: "x",
+			options: { timeout: 200 },
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/disabled/i);
+	});
+
+	it("honors a short options.timeout (200ms) instead of the 5s default", async () => {
+		const start = Date.now();
+		await executeCommand({
+			id: "c4",
+			action: "hover",
+			target: { selector: "#missing" },
+			options: { timeout: 200 },
+		});
+		const elapsed = Date.now() - start;
+		expect(elapsed).toBeLessThan(1500);
+	});
+
+	it("getText on a missing element still fails instantly (probing semantics)", async () => {
+		const start = Date.now();
+		const result = await executeCommand({
+			id: "c5",
+			action: "getText",
+			target: { selector: "#nope" },
+		});
+		const elapsed = Date.now() - start;
+		expect(result.success).toBe(false);
+		// Probing actions must not wait — should fail well under the 5s default.
+		expect(elapsed).toBeLessThan(500);
 	});
 });

@@ -21,6 +21,7 @@ import {
 	findElement,
 	findElementInfo,
 	getElementInfo,
+	waitForActionableElement,
 	waitForElement,
 } from "./elementFinder";
 import { generateXPath } from "./xpathGenerator";
@@ -82,6 +83,17 @@ function requireValue(value: string | undefined, action: string): string {
 	return value;
 }
 
+/**
+ * Resolve the wait budget (ms) for an interaction action from its options.
+ * Defaults to 5000ms (matching `waitForActionableElement`) and is capped at
+ * 20000ms so a single action can never consume the whole transport budget.
+ */
+function waitTimeout(options?: Command["options"]): number {
+	const t = options?.timeout;
+	if (typeof t !== "number" || t <= 0) return 5000;
+	return Math.min(t, 20000);
+}
+
 async function executeAction(command: Command): Promise<unknown> {
 	const { action, target, value, options } = command;
 
@@ -136,47 +148,76 @@ async function executeAction(command: Command): Promise<unknown> {
 				requireTarget(target, action),
 				options?.button as string,
 				options?.count as number,
+				waitTimeout(options),
 			);
 		case "dblclick":
-			return handleClick(requireTarget(target, action), "left", 2);
+			return handleClick(
+				requireTarget(target, action),
+				"left",
+				2,
+				waitTimeout(options),
+			);
 		case "rightclick":
-			return handleClick(requireTarget(target, action), "right", 1);
+			return handleClick(
+				requireTarget(target, action),
+				"right",
+				1,
+				waitTimeout(options),
+			);
 		case "hover":
-			return handleHover(requireTarget(target, action));
+			return handleHover(requireTarget(target, action), waitTimeout(options));
 		case "focus":
-			return handleFocus(requireTarget(target, action));
+			return handleFocus(requireTarget(target, action), waitTimeout(options));
 		case "blur":
-			return handleBlur(requireTarget(target, action));
+			return handleBlur(requireTarget(target, action), waitTimeout(options));
 		case "scrollTo":
-			return handleScrollTo(requireTarget(target, action));
+			return handleScrollTo(
+				requireTarget(target, action),
+				waitTimeout(options),
+			);
 		case "fill":
 			return handleFill(
 				requireTarget(target, action),
 				requireValue(value, action),
+				waitTimeout(options),
 			);
 		case "type":
 			return handleType(
 				requireTarget(target, action),
 				requireValue(value, action),
+				waitTimeout(options),
 			);
 		case "clear":
-			return handleClear(requireTarget(target, action));
+			return handleClear(requireTarget(target, action), waitTimeout(options));
 		case "select":
 			return handleSelect(
 				requireTarget(target, action),
 				requireValue(value, action),
+				waitTimeout(options),
 			);
 		case "check":
-			return handleCheck(requireTarget(target, action), true);
+			return handleCheck(
+				requireTarget(target, action),
+				true,
+				waitTimeout(options),
+			);
 		case "uncheck":
-			return handleCheck(requireTarget(target, action), false);
+			return handleCheck(
+				requireTarget(target, action),
+				false,
+				waitTimeout(options),
+			);
 		case "pressKey":
 			return handlePressKey(
 				requireTarget(target, action),
 				requireValue(value, action),
+				waitTimeout(options),
 			);
 		case "selectText":
-			return handleSelectText(requireTarget(target, action));
+			return handleSelectText(
+				requireTarget(target, action),
+				waitTimeout(options),
+			);
 
 		// ─── Navigation ───────────────────────────────────────────────
 		case "navigate":
@@ -208,7 +249,10 @@ async function executeAction(command: Command): Promise<unknown> {
 
 		// ─── Highlight ────────────────────────────────────────────────
 		case "highlight":
-			return handleHighlight(requireTarget(target, action));
+			return handleHighlight(
+				requireTarget(target, action),
+				waitTimeout(options),
+			);
 		case "unhighlight":
 			return handleUnhighlight();
 
@@ -354,9 +398,21 @@ function handleXPath(target: TargetSelector): string | null {
 
 // ─── Interaction Handlers ──────────────────────────────────────────
 
-function handleClick(target: TargetSelector, button = "left", count = 1): void {
-	const element = findElement(target);
-	if (!element) throw new Error("Element not found");
+async function handleClick(
+	target: TargetSelector,
+	button = "left",
+	count = 1,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: true,
+	});
+
+	// Scroll into view FIRST (instant, centered) so the synthesized events land
+	// on the element's real geometry. Dispatching before scrolling is the wrong
+	// order and can miss an off-viewport target.
+	element.scrollIntoView({ behavior: "auto", block: "center" });
 
 	const rect = element.getBoundingClientRect();
 	const x = rect.left + rect.width / 2;
@@ -394,14 +450,16 @@ function handleClick(target: TargetSelector, button = "left", count = 1): void {
 			new MouseEvent("dblclick", eventInit),
 		);
 	}
-
-	// Scroll element into view if needed
-	element.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-function handleHover(target: TargetSelector): void {
-	const element = findElement(target);
-	if (!element) throw new Error("Element not found");
+async function handleHover(
+	target: TargetSelector,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: false,
+	});
 
 	const rect = element.getBoundingClientRect();
 	const x = rect.left + rect.width / 2;
@@ -423,27 +481,50 @@ function handleHover(target: TargetSelector): void {
 	);
 }
 
-function handleFocus(target: TargetSelector): void {
-	const element = findElement(target);
-	if (!element) throw new Error("Element not found");
+async function handleFocus(
+	target: TargetSelector,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: false,
+	});
 	(element as HTMLElement).focus();
 }
 
-function handleBlur(target: TargetSelector): void {
-	const element = findElement(target);
-	if (!element) throw new Error("Element not found");
+async function handleBlur(
+	target: TargetSelector,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: false,
+	});
 	(element as HTMLElement).blur();
 }
 
-function handleScrollTo(target: TargetSelector): void {
-	const element = findElement(target);
-	if (!element) throw new Error("Element not found");
+async function handleScrollTo(
+	target: TargetSelector,
+	timeoutMs = 5000,
+): Promise<void> {
+	// Auto-wait for the target to be visible (no enabled requirement); the
+	// instant/settled scroll behavior is finalized in the scrollTo correctness fix.
+	const element = await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: false,
+	});
 	element.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
-function handleFill(target: TargetSelector, value: string): void {
-	const element = findElement(target);
-	if (!element) throw new Error("Element not found");
+async function handleFill(
+	target: TargetSelector,
+	value: string,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = (await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: true,
+	})) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 
 	if (
 		element instanceof HTMLInputElement ||
@@ -480,9 +561,15 @@ function handleFill(target: TargetSelector, value: string): void {
 	}
 }
 
-function handleType(target: TargetSelector, value: string): void {
-	const element = findElement(target);
-	if (!element) throw new Error("Element not found");
+async function handleType(
+	target: TargetSelector,
+	value: string,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = (await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: true,
+	})) as HTMLInputElement | HTMLTextAreaElement;
 
 	if (
 		element instanceof HTMLInputElement ||
@@ -535,9 +622,14 @@ function handleType(target: TargetSelector, value: string): void {
 	}
 }
 
-function handleClear(target: TargetSelector): void {
-	const element = findElement(target);
-	if (!element) throw new Error("Element not found");
+async function handleClear(
+	target: TargetSelector,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = (await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: true,
+	})) as HTMLInputElement | HTMLTextAreaElement;
 
 	if (
 		element instanceof HTMLInputElement ||
@@ -552,9 +644,15 @@ function handleClear(target: TargetSelector): void {
 	}
 }
 
-function handleSelect(target: TargetSelector, value: string): void {
-	const element = findElement(target);
-	if (!element) throw new Error("Element not found");
+async function handleSelect(
+	target: TargetSelector,
+	value: string,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = (await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: true,
+	})) as HTMLSelectElement;
 
 	if (element instanceof HTMLSelectElement) {
 		(element as HTMLSelectElement).focus();
@@ -575,9 +673,15 @@ function handleSelect(target: TargetSelector, value: string): void {
 	}
 }
 
-function handleCheck(target: TargetSelector, checked: boolean): void {
-	const element = findElement(target);
-	if (!element) throw new Error("Element not found");
+async function handleCheck(
+	target: TargetSelector,
+	checked: boolean,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = (await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: true,
+	})) as HTMLInputElement;
 
 	if (element instanceof HTMLInputElement) {
 		(element as HTMLInputElement).focus();
@@ -597,11 +701,17 @@ function handleCheck(target: TargetSelector, checked: boolean): void {
 	}
 }
 
-function handlePressKey(target: TargetSelector, key: string): void {
-	const element = findElement(target);
-	if (!element) throw new Error("Element not found");
+async function handlePressKey(
+	target: TargetSelector,
+	key: string,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = (await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: true,
+	})) as HTMLElement;
 
-	(element as HTMLElement).focus();
+	element.focus();
 
 	const keyDownEvent = new KeyboardEvent("keydown", {
 		bubbles: true,
@@ -614,13 +724,18 @@ function handlePressKey(target: TargetSelector, key: string): void {
 		code: `Key${key}`,
 	});
 
-	(element as HTMLElement).dispatchEvent(keyDownEvent);
-	(element as HTMLElement).dispatchEvent(keyUpEvent);
+	element.dispatchEvent(keyDownEvent);
+	element.dispatchEvent(keyUpEvent);
 }
 
-function handleSelectText(target: TargetSelector): void {
-	const element = findElement(target);
-	if (!element) throw new Error("Element not found");
+async function handleSelectText(
+	target: TargetSelector,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: false,
+	});
 
 	if (
 		element instanceof HTMLInputElement ||
@@ -888,13 +1003,20 @@ async function handleFetchViaBackground(
 
 // ─── Highlight Handlers ────────────────────────────────────────────
 
-function handleHighlight(target: TargetSelector): RemoteElementInfo | null {
-	const element = findElement(target);
-	if (!element) return null;
+async function handleHighlight(
+	target: TargetSelector,
+	timeoutMs = 5000,
+): Promise<RemoteElementInfo | null> {
+	// Auto-wait for the target to be visible (no enabled requirement) before
+	// highlighting it.
+	const element = await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: false,
+	});
 
 	// Dispatch custom event for the highlighter to pick up
 	window.dispatchEvent(
-		new CustomEvent("how-to-recorder:highlight", {
+		new CustomEvent("htrncontrol:highlight", {
 			detail: { element },
 		}),
 	);
@@ -903,7 +1025,7 @@ function handleHighlight(target: TargetSelector): RemoteElementInfo | null {
 }
 
 function handleUnhighlight(): void {
-	window.dispatchEvent(new CustomEvent("how-to-recorder:unhighlight"));
+	window.dispatchEvent(new CustomEvent("htrncontrol:unhighlight"));
 }
 
 // ─── Page Info ─────────────────────────────────────────────────────
@@ -913,6 +1035,7 @@ function getPageInfo(): PageInfo {
 		url: window.location.href,
 		title: document.title,
 		domain: window.location.hostname,
+		readyState: document.readyState,
 		scrollX: window.scrollX,
 		scrollY: window.scrollY,
 		viewportWidth: window.innerWidth,
