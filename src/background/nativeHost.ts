@@ -1,9 +1,10 @@
 /**
- * Native Messaging Host integration for the How-To Recorder extension.
+ * Native Messaging Host integration for the HTR Ncontrol extension.
  * Manages the connection to the htcli native host via Chrome Native Messaging.
  */
 
 import type { Command, CommandResult, TabInfo } from "../types/commands";
+import type { ConnectionMode } from "../types/recording";
 import { AIA_API_KEY } from "../utils/aiaConfig";
 
 const HOST_NAME = "com.howtorecorder.host";
@@ -175,23 +176,18 @@ function syncRegisteredTabs(): void {
 	});
 }
 
+// The background registers a listener so the native host doesn't broadcast
+// on its own. This lets the background fold the native-host mode together
+// with the content-script WebSocket status into a single unified mode that
+// is then broadcast once to the side panel and content scripts.
+let statusListener: ((mode: ConnectionMode) => void) | null = null;
+
+export function setStatusListener(fn: (mode: ConnectionMode) => void): void {
+	statusListener = fn;
+}
+
 function broadcastStatus(): void {
-	const payload = { type: "CONNECTION_STATUS" as const, mode: connectionMode };
-
-	// Broadcast to all content scripts
-	chrome.tabs.query({}, (tabs) => {
-		for (const tab of tabs) {
-			if (tab.id == null) continue;
-			chrome.tabs.sendMessage(tab.id, payload).catch(() => {
-				// Content script may not be loaded on this tab — ignore
-			});
-		}
-	});
-
-	// Also broadcast to the side panel so the UI can show online/offline status
-	chrome.runtime.sendMessage(payload).catch(() => {
-		// Side panel may not be open — ignore
-	});
+	statusListener?.(connectionMode);
 }
 
 interface NativeCommandMessage {
@@ -329,7 +325,9 @@ async function handleFetchInPage(
 				xhr.open(fetchMethod, fetchUrl, false /* synchronous */);
 				// Binary-safe: treat response bytes as Latin-1 raw chars
 				xhr.overrideMimeType("text/plain; charset=x-user-defined");
-				Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+				Object.entries(headers).forEach(([k, v]) => {
+					xhr.setRequestHeader(k, v);
+				});
 				xhr.withCredentials = true;
 				xhr.send(fetchBody !== null ? JSON.stringify(fetchBody) : null);
 				const status = xhr.status;
@@ -420,10 +418,122 @@ async function handleDebuggerEval(
 	}
 }
 
+// ─── Navigation with load-wait ────────────────────────────────────
+// Navigation actions are handled here (not in the content script) because the
+// content script is destroyed by the navigation and can only reply before the
+// page unloads — making "navigate" resolve instantly without waiting for the
+// load. The background persists across navigations, so it can initiate via the
+// tabs API and wait for onUpdated status "complete" (Playwright waitUntil:load
+// equivalent). Works on Firefox too (tabs API via polyfill, no CDP needed).
+
+const NAV_ACTIONS = new Set(["navigate", "reload", "goBack", "goForward"]);
+// Under htcli's 30s HTTP timeout and the daemon's 30s command timeout, so the
+// caller gets a clean error instead of a transport timeout.
+const NAV_LOAD_TIMEOUT_MS = 25000;
+
+async function initiateNavigation(
+	tabId: number,
+	payload: Command,
+): Promise<void> {
+	switch (payload.action) {
+		case "navigate":
+			if (!payload.value) throw new Error("navigate requires a URL");
+			await chrome.tabs.update(tabId, { url: payload.value });
+			return;
+		case "reload":
+			await chrome.tabs.reload(tabId);
+			return;
+		case "goBack":
+			await chrome.tabs.goBack(tabId);
+			return;
+		case "goForward":
+			await chrome.tabs.goForward(tabId);
+			return;
+		default:
+			throw new Error(`not a navigation action: ${payload.action}`);
+	}
+}
+
+function navigateAndWaitForLoad(
+	tabId: number,
+	payload: Command,
+): Promise<chrome.tabs.Tab> {
+	return new Promise((resolve, reject) => {
+		let settled = false;
+		const listener = (
+			updatedTabId: number,
+			changeInfo: chrome.tabs.TabChangeInfo,
+			tab: chrome.tabs.Tab,
+		) => {
+			if (settled || updatedTabId !== tabId) return;
+			// Full page load, or same-document navigation (hash / history API)
+			// which changes the URL without a loading→complete cycle.
+			if (
+				changeInfo.status === "complete" ||
+				(changeInfo.url !== undefined && tab.status === "complete")
+			) {
+				cleanup();
+				resolve(tab);
+			}
+		};
+		const timer = setTimeout(() => {
+			cleanup();
+			reject(
+				new Error(
+					`${payload.action}: page did not finish loading within ${NAV_LOAD_TIMEOUT_MS}ms`,
+				),
+			);
+		}, NAV_LOAD_TIMEOUT_MS);
+		const cleanup = () => {
+			settled = true;
+			clearTimeout(timer);
+			chrome.tabs.onUpdated.removeListener(listener);
+		};
+		// Listener must be attached before initiating so fast loads aren't missed
+		chrome.tabs.onUpdated.addListener(listener);
+		initiateNavigation(tabId, payload).catch((err) => {
+			if (settled) return;
+			cleanup();
+			reject(err instanceof Error ? err : new Error(String(err)));
+		});
+	});
+}
+
+async function handleNavigationCommand(
+	tabId: number,
+	payload: Command,
+): Promise<void> {
+	const start = Date.now();
+	try {
+		const tab = await navigateAndWaitForLoad(tabId, payload);
+		sendToNative({
+			type: "command_result",
+			tabId,
+			payload: {
+				id: payload.id,
+				success: true,
+				data: { url: tab.url, title: tab.title },
+				duration: Date.now() - start,
+			} as CommandResult,
+		});
+	} catch (err) {
+		console.error(`[NativeHost] ${payload.action} failed:`, err);
+		replyError(
+			tabId,
+			payload.id,
+			err instanceof Error ? err.message : String(err),
+		);
+	}
+}
+
 async function sendCommandToTab(
 	tabId: number,
 	payload: Command,
 ): Promise<void> {
+	if (NAV_ACTIONS.has(payload.action)) {
+		await handleNavigationCommand(tabId, payload);
+		return;
+	}
 	if (payload.action === "fetchInPage") {
 		await handleFetchInPage(tabId, payload);
 		return;
