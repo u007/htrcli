@@ -140,6 +140,11 @@ the element never becomes actionable the command fails with a descriptive error
 (`find`, `get text`, `get value`, …) keep instant, probing semantics and do
 not wait.
 
+The `wait` command also waits for its target to appear (default 5s, tunable
+via `--timeout`). **Breaking change:** it now fails with an error if the
+element never appears, instead of returning a "not found" null that callers
+treated as "keep going". Update any script that relied on the old null result.
+
 ### Inspection
 
 ```bash
@@ -154,6 +159,12 @@ htcli page                                # Get page info
 htcli eval <javascript>                   # Execute JS
 htcli command <json>                      # Raw JSON command
 ```
+
+`eval` accepts both single expressions (`htcli eval "document.title"`) and
+**multi-statement scripts with an explicit `return`** (e.g.
+`htcli eval "const n = 2; return n * 2;"`); it also supports `await` for
+promises. It runs in the extension's **isolated world**, so page-context
+globals/variables are not visible — use `debuggerEval` for page-context code.
 
 ### Selector Syntax
 

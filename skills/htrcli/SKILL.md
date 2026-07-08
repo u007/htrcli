@@ -361,6 +361,16 @@ htcli eval "document.querySelectorAll('a').length"
 htcli eval "window.scrollTo(0, 0)"
 ```
 
+`eval` now supports both single expressions (`htcli eval "document.title"`)
+and **multi-statement scripts with an explicit `return`** (e.g.
+`htcli eval "const n = 2; return n * 2;"`). Scripts may also `await`
+promises — `htcli eval "return await fetch('/api').then(r => r.json());"`. A
+script that throws surfaces its own error message in the result.
+
+`eval` runs in the extension's **isolated world**, so it cannot see
+page-context JavaScript globals or variables. To evaluate code in the page's
+own context, use the `debuggerEval` action instead.
+
 ## Fetching and downloading (no popup)
 
 These commands fetch data or save files **without triggering browser download popups** — everything runs silently via the extension background.
