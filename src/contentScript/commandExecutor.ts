@@ -18,6 +18,7 @@ import type {
 	TargetSelector,
 } from "../types/commands";
 import { AIA_API_KEY } from "../utils/aiaConfig";
+import { resolveKey } from "../utils/keyMap";
 import {
 	findElement,
 	findElementInfo,
@@ -35,6 +36,64 @@ import { generateXPath } from "./xpathGenerator";
  * build rather than silently breaking the case dispatch.
  */
 const EVALUATE_VIA_CDP: CommandAction = "evaluateViaCdp";
+
+/**
+ * Actions relayed to the background for trusted (CDP) input on Chrome.
+ * These are the only interaction actions whose default behavior benefits
+ * from trusted events. `scrollTo`/`fill`/etc. keep their synthetic path
+ * everywhere (they already produce correct results without `isTrusted`).
+ */
+const CDP_INPUT_RELAY_ACTIONS = new Set<CommandAction>([
+	"click",
+	"dblclick",
+	"rightclick",
+	"pressKey",
+	"type",
+]);
+
+/**
+ * Whether the trusted (CDP) input path is available. On Chrome `chrome.debugger`
+ * exists; on Firefox (and other browsers without it) it does not, so we keep the
+ * synthetic path there. Guarded so an undeclared `chrome` (unit-test realm) is
+ * also treated as unavailable.
+ */
+function cdpInputAvailable(): boolean {
+	return (
+		typeof chrome !== "undefined" && typeof chrome.debugger !== "undefined"
+	);
+}
+
+/**
+ * Relay a click/pressKey/type command to the background, which owns the
+ * `chrome.debugger` connection and dispatches trusted CDP input. Returns the
+ * background's `CommandResult`, or `null` when the background reports that CDP
+ * input is unsupported (so the caller can fall back to the synthetic path).
+ */
+async function relayCdpInput(command: Command): Promise<CommandResult | null> {
+	const response = await new Promise<CommandResult | null>((resolve) => {
+		chrome.runtime.sendMessage(
+			{ type: "CDP_INPUT", command },
+			(result: CommandResult) => {
+				if (chrome.runtime.lastError) {
+					resolve(null);
+					return;
+				}
+				resolve(result ?? null);
+			},
+		);
+	});
+	if (!response) return null;
+	// The background signals "unsupported" (e.g. Firefox without the debugger)
+	// with this sentinel in the error string — fall back to synthetic input.
+	if (
+		!response.success &&
+		typeof response.error === "string" &&
+		response.error.includes("CDP_INPUT_UNSUPPORTED")
+	) {
+		return null;
+	}
+	return response;
+}
 
 // ─── Main Entry Point ─────────────────────────────────────────────
 
@@ -109,6 +168,19 @@ async function executeAction(command: Command): Promise<unknown> {
 
 	// At this point, target/value have been validated for actions that need them.
 	// requireTarget/requireValue provide type-safe non-null returns.
+	// On Chrome, trusted (CDP) input is dispatched by the background. The WS/HTTP
+	// path reaches the content script here; the native-host path is routed in
+	// `sendCommandToTab` (background) and never invokes these handlers, so this
+	// branch only affects the server/WebSocket path. Relay click/dblclick/
+	// rightclick/pressKey/type and return the background's result. On Firefox (no
+	// `chrome.debugger`) — or if the background reports CDP input unsupported —
+	// `relayCdpInput` returns null and we fall through to the synthetic handlers
+	// below (which are also upgraded to emit pointer events and correct key codes).
+	if (CDP_INPUT_RELAY_ACTIONS.has(action) && cdpInputAvailable()) {
+		const relayed = await relayCdpInput(command);
+		if (relayed) return relayed;
+	}
+
 	switch (action) {
 		// ─── Finding / Inspection ─────────────────────────────────────
 		case "find":
@@ -466,25 +538,52 @@ async function handleClick(
 		bubbles: true,
 		cancelable: true,
 		view: window,
-		button: button === "right" ? 2 : button === "middle" ? 1 : 0,
+		button: button === "right" ? 2 : 0,
 		clientX: x,
 		clientY: y,
 	};
 
-	// Dispatch the full mouse event sequence (matching browser event order)
+	const pointerButton = button === "right" ? 2 : 0;
+	const pointerInit: PointerEventInit = {
+		bubbles: true,
+		cancelable: true,
+		view: window,
+		pointerId: 1,
+		pointerType: "mouse",
+		button: pointerButton,
+		buttons: pointerButton,
+		clientX: x,
+		clientY: y,
+	};
+	const makePointer = (type: string) =>
+		typeof PointerEvent !== "undefined"
+			? new PointerEvent(type, pointerInit)
+			: new MouseEvent(type, eventInit);
+
+	// Full event sequence matching real browser order: pointer events are
+	// dispatched immediately before/after their mouse counterparts (pointerdown
+	// before mousedown, pointerup before mouseup). This is what pages expect and
+	// is required for frameworks that listen to pointer events.
 	const singleClickSequence = [
+		"pointerover",
 		"mouseover",
 		"mouseenter",
+		"pointerdown",
 		"mousedown",
+		"pointerup",
 		"mouseup",
 		"click",
 	];
 
 	for (let i = 0; i < count; i++) {
 		for (const eventType of singleClickSequence) {
-			(element as HTMLElement).dispatchEvent(
-				new MouseEvent(eventType, eventInit),
-			);
+			if (eventType.startsWith("pointer")) {
+				(element as HTMLElement).dispatchEvent(makePointer(eventType));
+			} else {
+				(element as HTMLElement).dispatchEvent(
+					new MouseEvent(eventType, eventInit),
+				);
+			}
 		}
 	}
 
@@ -658,15 +757,25 @@ async function handleType(
 
 		// Type each character
 		for (const char of value) {
+			// Resolve the physical key code from the descriptor (correct for
+			// letters, digits, and symbols) instead of the old hand-built
+			// "Key" + char string. Falls back if the char isn't in the table.
+			const charCode = (() => {
+				try {
+					return resolveKey(char).code;
+				} catch {
+					return `Key${char.toUpperCase()}`;
+				}
+			})();
 			const keyDownEvent = new KeyboardEvent("keydown", {
 				bubbles: true,
 				key: char,
-				code: `Key${char.toUpperCase()}`,
+				code: charCode,
 			});
 			const keyPressEvent = new KeyboardEvent("keypress", {
 				bubbles: true,
 				key: char,
-				code: `Key${char.toUpperCase()}`,
+				code: charCode,
 			});
 			const inputEvent = new InputEvent("beforeinput", {
 				bubbles: true,
@@ -681,7 +790,7 @@ async function handleType(
 			const keyUpEvent = new KeyboardEvent("keyup", {
 				bubbles: true,
 				key: char,
-				code: `Key${char.toUpperCase()}`,
+				code: charCode,
 			});
 
 			(element as HTMLElement).dispatchEvent(keyDownEvent);
@@ -792,16 +901,19 @@ async function handlePressKey(
 
 	element.focus();
 
-	const keyDownEvent = new KeyboardEvent("keydown", {
+	// Derive the correct `key`/`code`/`windowsVirtualKeyCode` from the descriptor
+	// instead of the old hand-built `"Key" + key` string, which produced wrong
+	// codes for anything that wasn't a single letter (e.g. "Enter" → "KeyEnter").
+	const descriptor = resolveKey(key);
+	const keyInit: KeyboardEventInit = {
 		bubbles: true,
-		key,
-		code: `Key${key}`,
-	});
-	const keyUpEvent = new KeyboardEvent("keyup", {
-		bubbles: true,
-		key,
-		code: `Key${key}`,
-	});
+		key: descriptor.key,
+		code: descriptor.code,
+		keyCode: descriptor.windowsVirtualKeyCode,
+		which: descriptor.windowsVirtualKeyCode,
+	};
+	const keyDownEvent = new KeyboardEvent("keydown", keyInit);
+	const keyUpEvent = new KeyboardEvent("keyup", keyInit);
 
 	element.dispatchEvent(keyDownEvent);
 	element.dispatchEvent(keyUpEvent);

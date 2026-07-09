@@ -529,3 +529,92 @@ describe("prepareClick / prepareKeys (internal CDP preparation)", () => {
 		expect(document.activeElement).toBe(input);
 	});
 });
+
+describe("synthetic input upgrade (Firefox / fallback path)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	function makeButton(id: string) {
+		const el = document.createElement("button");
+		el.id = id;
+		document.body.appendChild(el);
+		return el;
+	}
+
+	function makeInput(id: string) {
+		const el = document.createElement("input");
+		el.id = id;
+		document.body.appendChild(el);
+		return el;
+	}
+
+	it("click dispatches pointerdown before mousedown and pointerup before mouseup", async () => {
+		const btn = makeButton("ptr-btn");
+		const seen: string[] = [];
+		const types = [
+			"pointerover",
+			"mouseover",
+			"mouseenter",
+			"pointerdown",
+			"mousedown",
+			"pointerup",
+			"mouseup",
+			"click",
+		];
+		for (const t of types) {
+			btn.addEventListener(t, () => seen.push(t));
+		}
+
+		const result = await executeCommand({
+			id: "s1",
+			action: "click",
+			target: { selector: "#ptr-btn" },
+		});
+		expect(result.success).toBe(true);
+		expect(seen).toContain("pointerdown");
+		expect(seen).toContain("mousedown");
+		expect(seen).toContain("pointerup");
+		expect(seen).toContain("mouseup");
+		expect(seen.indexOf("pointerdown")).toBeLessThan(seen.indexOf("mousedown"));
+		expect(seen.indexOf("pointerup")).toBeLessThan(seen.indexOf("mouseup"));
+	});
+
+	it("synthetic Enter keydown carries code 'Enter' (not 'KeyEnter')", async () => {
+		const input = makeInput("enter-input");
+		let keydownCode = "";
+		input.addEventListener("keydown", (e) => {
+			keydownCode = e.code;
+		});
+
+		const result = await executeCommand({
+			id: "s2",
+			action: "pressKey",
+			target: { selector: "#enter-input" },
+			value: "Enter",
+		});
+		expect(result.success).toBe(true);
+		expect(keydownCode).toBe("Enter");
+	});
+
+	it("synthetic type emits KeyX code for a letter char", async () => {
+		const input = makeInput("type-input");
+		let keydownCode = "";
+		input.addEventListener("keydown", (e) => {
+			keydownCode = e.code;
+		});
+
+		const result = await executeCommand({
+			id: "s3",
+			action: "type",
+			target: { selector: "#type-input" },
+			value: "a",
+		});
+		expect(result.success).toBe(true);
+		expect(keydownCode).toBe("KeyA");
+	});
+});

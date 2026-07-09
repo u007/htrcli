@@ -25,6 +25,8 @@ import type {
 	UpdateAnnotationMessage,
 	WsConnectionStatusMessage,
 } from "../types/recording";
+import { cdpEvaluate } from "./cdpEval";
+import { dispatchCdpInput } from "./cdpInput";
 import {
 	registerTab,
 	retryConnect,
@@ -1368,28 +1370,12 @@ chrome.runtime.onMessage.addListener(
 						const target = { tabId: msg.tabId };
 						await chrome.debugger.attach(target, "1.3");
 						try {
-							type EvalResult = {
-								result: { type: string; value: unknown };
-								exceptionDetails?: unknown;
-							};
-							const res = (await chrome.debugger.sendCommand(
-								target,
-								"Runtime.evaluate",
-								{
-									expression: msg.expression,
-									awaitPromise: true,
-									returnByValue: true,
-								},
-							)) as EvalResult;
-							if (res.exceptionDetails) {
-								sendResponse({
-									ok: false,
-									error: `JS exception: ${JSON.stringify(res.exceptionDetails)}`,
-									data: undefined,
-								});
-								return;
-							}
-							sendResponse({ ok: true, data: res.result.value });
+							const value = await cdpEvaluate(
+								(method, params) =>
+									chrome.debugger.sendCommand(target, method, params),
+								msg.expression,
+							);
+							sendResponse({ ok: true, data: value });
 						} finally {
 							await chrome.debugger.detach(target);
 						}
@@ -1397,6 +1383,43 @@ chrome.runtime.onMessage.addListener(
 						console.error("[HTR NControl] CDP_EVAL error:", error);
 						sendResponse({
 							ok: false,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					break;
+				}
+
+				case "CDP_INPUT": {
+					const msg = message as { type: "CDP_INPUT"; command: Command };
+					try {
+						if (typeof chrome.debugger === "undefined") {
+							// Firefox: no debugger API — report unsupported so the
+							// content script can fall back to synthetic input.
+							sendResponse({
+								id: msg.command.id,
+								success: false,
+								error:
+									"CDP_INPUT_UNSUPPORTED: chrome.debugger API is unavailable in this browser",
+							});
+							break;
+						}
+						// The content script sent its own tab id via `sender`.
+						const targetTabId = sender.tab?.id;
+						if (typeof targetTabId !== "number") {
+							sendResponse({
+								id: msg.command.id,
+								success: false,
+								error: "CDP_INPUT requires a sender tab id",
+							});
+							break;
+						}
+						const result = await dispatchCdpInput(targetTabId, msg.command);
+						sendResponse(result);
+					} catch (error) {
+						console.error("[HTR NControl] CDP_INPUT error:", error);
+						sendResponse({
+							id: msg.command.id,
+							success: false,
 							error: error instanceof Error ? error.message : String(error),
 						});
 					}

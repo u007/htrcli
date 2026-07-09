@@ -1,4 +1,5 @@
 // Element information captured during interactions
+import type { Command } from "./commands";
 export interface ElementInfo {
 	tag: string;
 	text: string; // Button/link text content
@@ -94,7 +95,11 @@ export type MessageType =
 	| "RECONNECT_NATIVE"
 	| "WS_CONNECTION_STATUS"
 	| "ENABLE_WS_REMOTE_CONTROL"
-	| "CDP_EVAL";
+	| "CDP_EVAL"
+	// Server/WS path relays trusted (CDP) click/pressKey/type to the background,
+	// which owns the debugger connection. The content script sends this and
+	// awaits the CommandResult the background produces.
+	| "CDP_INPUT";
 
 // Base message structure
 export interface BaseMessage {
@@ -242,6 +247,13 @@ export interface EnableWsRemoteControlMessage extends BaseMessage {
 	serverUrl?: string;
 }
 
+// Content script → background: relay a trusted (CDP) input command (click /
+// pressKey / type) to the background, which owns the debugger connection.
+export interface CdpInputMessage extends BaseMessage {
+	type: "CDP_INPUT";
+	command: Command;
+}
+
 // Union type for all messages
 export type RecordingMessage =
 	| StartRecordingMessage
@@ -264,7 +276,8 @@ export type RecordingMessage =
 	| HideHighlightMessage
 	| ConnectionStatusMessage
 	| WsConnectionStatusMessage
-	| EnableWsRemoteControlMessage;
+	| EnableWsRemoteControlMessage
+	| CdpInputMessage;
 
 // Export format types
 export interface ExportedStep {
