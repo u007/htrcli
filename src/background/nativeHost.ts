@@ -6,6 +6,12 @@
 import type { Command, CommandResult, TabInfo } from "../types/commands";
 import type { ConnectionMode } from "../types/recording";
 import { AIA_API_KEY } from "../utils/aiaConfig";
+import { cdpEvaluate } from "./cdpEval";
+import {
+	CDP_INPUT_ACTIONS,
+	ContentScriptNotReadyError,
+	dispatchCdpInput,
+} from "./cdpInput";
 
 const HOST_NAME = "com.howtorecorder.host";
 const RECONNECT_BASE_MS = 1000;
@@ -387,28 +393,15 @@ async function handleDebuggerEval(
 	try {
 		await chrome.debugger.attach({ tabId }, "1.3");
 		try {
-			type EvalResult = {
-				result: { type: string; value: unknown };
-				exceptionDetails?: unknown;
-			};
-			const res = (await chrome.debugger.sendCommand(
-				{ tabId },
-				"Runtime.evaluate",
-				{
-					expression,
-					awaitPromise: true,
-					returnByValue: true,
-				},
-			)) as EvalResult;
-			if (res.exceptionDetails) {
-				throw new Error(
-					`JS exception: ${JSON.stringify(res.exceptionDetails)}`,
-				);
-			}
+			const value = await cdpEvaluate(
+				(method, params) =>
+					chrome.debugger.sendCommand({ tabId }, method, params),
+				expression,
+			);
 			sendToNative({
 				type: "command_result",
 				tabId,
-				payload: { id, success: true, data: res.result.value } as CommandResult,
+				payload: { id, success: true, data: value } as CommandResult,
 			});
 		} finally {
 			await chrome.debugger.detach({ tabId });
@@ -810,6 +803,37 @@ function noopAfterTimeout(
 	};
 }
 
+/**
+ * Dispatch a trusted (CDP) input command, injecting the content script and
+ * retrying once if it isn't ready yet — mirroring the synthetic path's
+ * inject-and-retry below. The debugger attaches/detaches inside `dispatchCdpInput`,
+ * so a navigation triggered by the action never collides with the attach.
+ */
+async function dispatchCdpInputWithRetry(
+	tabId: number,
+	payload: Command,
+): Promise<CommandResult> {
+	try {
+		return await dispatchCdpInput(tabId, payload);
+	} catch (err) {
+		if (!(err instanceof ContentScriptNotReadyError)) throw err;
+		// Content script not ready — inject it and retry once.
+		try {
+			const manifest = chrome.runtime.getManifest();
+			const contentScriptFile =
+				manifest.content_scripts?.[0]?.js?.[0] ?? "assets/chunk-DjFz53LA.js";
+			await chrome.scripting.executeScript({
+				target: { tabId },
+				files: [contentScriptFile],
+			});
+			await new Promise((r) => setTimeout(r, 300));
+		} catch (injectErr) {
+			throw new Error("tab not available");
+		}
+		return await dispatchCdpInput(tabId, payload);
+	}
+}
+
 async function sendCommandToTab(
 	tabId: number,
 	payload: Command,
@@ -837,11 +861,67 @@ async function sendCommandToTab(
 
 	// For actions whose default behavior can start a navigation, watch the tab
 	// for a triggered load. The watcher is created once, before the first
-	// sendMessage attempt, so a fast navigation is never missed.
+	// sendMessage / CDP dispatch attempt, so a fast navigation is never missed.
 	const settling = SETTLING_ACTIONS.has(payload.action);
 	const watcher = settling
 		? watchForTriggeredNavigation(tabId, chromeDeps, NAV_LOAD_TIMEOUT_MS)
 		: null;
+
+	const start = Date.now();
+
+	// ── Trusted (CDP) input on Chrome ───────────────────────────────
+	// On Chrome (`chrome.debugger` exists) click/dblclick/rightclick/pressKey/type
+	// are dispatched as trusted CDP input: the content script prepares the
+	// element (wait actionable, scroll, focus) and reports coords, then we attach
+	// the debugger and dispatch. The debugger detaches *inside* the dispatcher,
+	// before the settle wait below begins — a navigation would otherwise kill the
+	// attach. Firefox has no `chrome.debugger`, so we fall through to the synthetic
+	// content-script path (which is also upgraded to emit pointer events).
+	const cdpDispatchable =
+		typeof chrome.debugger !== "undefined" &&
+		CDP_INPUT_ACTIONS.has(payload.action);
+	if (cdpDispatchable) {
+		let cdpResult: CommandResult;
+		try {
+			cdpResult = await dispatchCdpInputWithRetry(tabId, payload);
+		} catch (err) {
+			watcher?.cancel();
+			replyError(
+				tabId,
+				payload.id,
+				err instanceof Error ? err.message : String(err),
+			);
+			return;
+		}
+		if (watcher) {
+			// Hand the watcher the pre-action URL so it can ignore background
+			// navigations on the same URL (ad refresh, polling reload) that
+			// would otherwise hang settle for the full 25s.
+			watcher.setBaseline(cdpResult.pageInfo?.url);
+			try {
+				const outcome = await watcher.settle(500);
+				if (outcome === "completed") {
+					// Include the load time in the reported duration.
+					cdpResult = { ...cdpResult, duration: Date.now() - start };
+				}
+			} catch (err) {
+				replyError(
+					tabId,
+					payload.id,
+					`${payload.action} started a navigation that never finished loading: ${
+						err instanceof Error ? err.message : String(err)
+					}`,
+				);
+				return;
+			}
+		}
+		sendToNative({
+			type: "command_result",
+			tabId,
+			payload: stripScreenshot(cdpResult),
+		});
+		return;
+	}
 
 	const sendMsg = (): Promise<CommandResult | null> =>
 		new Promise((resolve) => {
@@ -858,7 +938,6 @@ async function sendCommandToTab(
 			);
 		});
 
-	const start = Date.now();
 	let result = await sendMsg();
 
 	if (result === null) {
