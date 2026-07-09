@@ -129,6 +129,11 @@ export type CommandAction =
 	| "uncheck"
 	| "pressKey"
 	| "selectText"
+	// Internal: background asks the content script to prepare an element before a
+	// trusted (CDP) click/key/type dispatch — wait actionable, scroll into view,
+	// focus, and report coords/focus state. Not exposed to users.
+	| "prepareClick"
+	| "prepareKeys"
 	// ─── Navigation ─────────────────────────────────────────────────
 	| "navigate"
 	| "reload"

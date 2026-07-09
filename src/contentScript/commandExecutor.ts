@@ -229,6 +229,22 @@ async function executeAction(command: Command): Promise<unknown> {
 				waitTimeout(options),
 			);
 
+		// ─── Internal CDP preparation (invoked by the background) ─────
+		// These never run on the user-facing path. The background's trusted
+		// (CDP) click/key/type dispatchers call them to wait for the element,
+		// scroll it into view, and (for keys) focus it — then report the
+		// geometry / focus state the CDP dispatch needs.
+		case "prepareClick":
+			return handlePrepareClick(
+				requireTarget(target, action),
+				waitTimeout(options),
+			);
+		case "prepareKeys":
+			return handlePrepareKeys(
+				requireTarget(target, action),
+				waitTimeout(options),
+			);
+
 		// ─── Navigation ───────────────────────────────────────────────
 		case "navigate":
 			return handleNavigate(requireValue(value, action));
@@ -789,6 +805,54 @@ async function handlePressKey(
 
 	element.dispatchEvent(keyDownEvent);
 	element.dispatchEvent(keyUpEvent);
+}
+
+/**
+ * Internal: prepare an element for a trusted (CDP) click.
+ *
+ * Waits for the element to be actionable (visible + enabled), scrolls it into
+ * view (instant, centered), and reports its viewport-center coordinates
+ * (post-scroll, CSS pixels) — exactly the coordinates CDP `Input.dispatchMouseEvent`
+ * expects. Returns `{ x, y }`.
+ */
+async function handlePrepareClick(
+	target: TargetSelector,
+	timeoutMs = 5000,
+): Promise<{ x: number; y: number }> {
+	const element = await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: true,
+	});
+
+	// Scroll into view FIRST (instant, centered) so the reported coordinates
+	// reflect the element's real, on-screen geometry.
+	element.scrollIntoView({ behavior: "auto", block: "center" });
+
+	const rect = element.getBoundingClientRect();
+	const x = rect.left + rect.width / 2;
+	const y = rect.top + rect.height / 2;
+	return { x, y };
+}
+
+/**
+ * Internal: prepare an element for a trusted (CDP) key/type.
+ *
+ * Waits for the element to be actionable, scrolls it into view, focuses it,
+ * and confirms the focus actually landed (so the subsequent CDP key events
+ * reach the right element). Returns `{ focused }`.
+ */
+async function handlePrepareKeys(
+	target: TargetSelector,
+	timeoutMs = 5000,
+): Promise<{ focused: boolean }> {
+	const element = (await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: true,
+	})) as HTMLElement;
+
+	element.scrollIntoView({ behavior: "auto", block: "center" });
+	element.focus();
+	return { focused: document.activeElement === element };
 }
 
 async function handleSelectText(

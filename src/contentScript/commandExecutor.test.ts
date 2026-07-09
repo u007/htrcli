@@ -466,3 +466,66 @@ describe("evaluate action (DOM)", () => {
 		expect(result.error).toMatch(/SyntaxError/);
 	});
 });
+
+describe("prepareClick / prepareKeys (internal CDP preparation)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	function makeButton(id: string, hidden = false): HTMLButtonElement {
+		const el = document.createElement("button");
+		el.id = id;
+		if (hidden) el.style.display = "none";
+		document.body.appendChild(el);
+		return el;
+	}
+
+	function makeInput(id: string): HTMLInputElement {
+		const el = document.createElement("input");
+		el.id = id;
+		document.body.appendChild(el);
+		return el;
+	}
+
+	it("prepareClick returns center coordinates for a visible button", async () => {
+		makeButton("prep-btn");
+		const result = await executeCommand({
+			id: "pc1",
+			action: "prepareClick",
+			target: { selector: "#prep-btn" },
+		});
+		expect(result.success).toBe(true);
+		const data = result.data as { x: number; y: number };
+		// domSetup stubs a 100x50 rect at (0,0), so the center is (50, 25).
+		expect(data).toEqual({ x: 50, y: 25 });
+	});
+
+	it("prepareClick fails with an actionability error for a hidden element", async () => {
+		makeButton("prep-hidden", true);
+		const result = await executeCommand({
+			id: "pc2",
+			action: "prepareClick",
+			target: { selector: "#prep-hidden" },
+			options: { timeout: 200 },
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/not visible/i);
+	});
+
+	it("prepareKeys leaves the target focused", async () => {
+		const input = makeInput("prep-input");
+		const result = await executeCommand({
+			id: "pk1",
+			action: "prepareKeys",
+			target: { selector: "#prep-input" },
+		});
+		expect(result.success).toBe(true);
+		const data = result.data as { focused: boolean };
+		expect(data.focused).toBe(true);
+		expect(document.activeElement).toBe(input);
+	});
+});
