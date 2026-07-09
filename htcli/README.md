@@ -63,6 +63,13 @@ list` shows tabs from both, and `--tab <id>` routes to whichever browser owns
 that tab. Screenshots and large command results (e.g. `fetch` bodies) travel
 over HTTP, so they are not limited by the 1 MB native-messaging frame size.
 
+The daemon pings each relay every 15s (`{"type":"ping"}`); the extension
+replies with `{"type":"heartbeat"}`. Any relay silent for 45s is force-closed
+and its tabs dropped, so stale/duplicate relays (e.g. a browser respawned its
+native host while the old process lingered) clean themselves up. Extensions
+older than this protocol never reply and get reaped every 45s — keep the
+extension and htcli builds in sync.
+
 ## Quick Start
 
 ```bash

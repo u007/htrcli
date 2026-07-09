@@ -3,6 +3,7 @@ package host
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -16,6 +17,12 @@ import (
 func StartUnixSocketServer(d *Daemon, socketPath string) error {
 	if err := ensureSocketParentDir(socketPath); err != nil {
 		return fmt.Errorf("create socket dir: %w", err)
+	}
+	// Only clear a STALE socket file. If another daemon is actively
+	// accepting on it, bail out instead of unlinking it from under them.
+	if probe, err := net.DialTimeout("unix", socketPath, time.Second); err == nil {
+		probe.Close()
+		return fmt.Errorf("another daemon is already accepting on %s", socketPath)
 	}
 	os.Remove(socketPath)
 	ln, err := net.Listen("unix", socketPath)
@@ -49,7 +56,18 @@ func handleRelayConn(d *Daemon, conn net.Conn) {
 	rc := d.AddConn(func(msg []byte) error {
 		return WriteMessage(conn, msg)
 	})
+	d.SetConnCloser(rc, conn.Close)
 	defer d.RemoveConn(rc)
+
+	// Greet the relay with an immediate ping. The extension treats the first
+	// daemon message as proof the daemon is reachable (connectNative alone
+	// succeeds even when it isn't) and only then reports itself connected.
+	if greeting, err := json.Marshal(NativeMessage{Type: "ping"}); err == nil {
+		if err := WriteMessage(conn, greeting); err != nil {
+			log.Printf("[htcli serve] greeting ping failed, dropping relay: %v", err)
+			return
+		}
+	}
 
 	// Read results from relay (extension responses)
 	for {
@@ -61,6 +79,8 @@ func handleRelayConn(d *Daemon, conn net.Conn) {
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			continue
 		}
+		// Any traffic proves the relay+extension are alive.
+		d.TouchConn(rc)
 		switch msg.Type {
 		case "register":
 			var info TabInfo
@@ -73,7 +93,8 @@ func handleRelayConn(d *Daemon, conn net.Conn) {
 				d.ResolveCommand(result.ID, result)
 			}
 		case "heartbeat":
-			// no-op, keeps connection alive
+			// Liveness reply to the daemon's ping; TouchConn above already
+			// refreshed lastSeen, so nothing else to do.
 		}
 	}
 }

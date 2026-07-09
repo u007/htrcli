@@ -38,6 +38,16 @@ var serveCmd = &cobra.Command{
 
 		d := host.NewDaemon()
 
+		// Bind the HTTP port BEFORE touching the unix socket. A second
+		// `htcli serve` used to remove/re-create daemon.sock first and only
+		// then fail on the busy port — destroying the running daemon's
+		// socket on exit and leaving every relay unable to connect.
+		srv := host.NewHTTPServer(d, port, bearerToken, defaultAllowedIPs())
+		ln, err := net.Listen("tcp", srv.Addr)
+		if err != nil {
+			return fmt.Errorf("port %d already in use (another htcli serve or the Bun server running?): %w", port, err)
+		}
+
 		// Start Unix socket server (for relay connections from Chrome)
 		go func() {
 			if err := host.StartUnixSocketServer(d, socketPath); err != nil {
@@ -45,12 +55,13 @@ var serveCmd = &cobra.Command{
 			}
 		}()
 
-		// Start HTTP server
-		srv := host.NewHTTPServer(d, port, bearerToken, defaultAllowedIPs())
-		ln, err := net.Listen("tcp", srv.Addr)
-		if err != nil {
-			return fmt.Errorf("port %d already in use (Bun server running?): %w", port, err)
-		}
+		// Reap stale relays: ping each connection periodically and drop any
+		// that stay silent (e.g. a browser respawned its native host while
+		// the old relay process lingered, leaving duplicate/dead tabs).
+		// The sweeper's lifecycle is owned by the daemon (see d.Stop), so it
+		// terminates cleanly on shutdown instead of leaking until exit.
+		go d.StartSweeper(host.PingInterval, host.StaleAfter)
+		defer d.Stop()
 
 		fmt.Printf("[htcli serve] Listening on http://127.0.0.1:%d\n", port)
 		fmt.Printf("[htcli serve] Unix socket: %s\n", socketPath)

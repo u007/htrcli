@@ -151,6 +151,8 @@ export type CommandAction =
 	// ─── Tab Management ────────────────────────────────────────────
 	| "listTabs"
 	| "getTabInfo"
+	// Background-handled: tabs with a live content script (diagnostics)
+	| "getReadyTabs"
 	| "switchTab"
 	| "getSessionStorage"
 	| "getLocalStorage"

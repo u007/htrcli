@@ -9,6 +9,18 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.4.1 [2026.07.10]
+
+- chore: bump version to 0.4.1
+- feat: htcli daemon pings every relay every 15s and force-reaps any relay silent for 45s, dropping its stale tabs so a browser that respawned its native host (leaving the old relay process lingering) no longer pollutes `Tabs()` with duplicate/dead tabs (`daemon.go` `StartSweeper`/`SweepConns`/`Stop`; `bridge.go` greeting ping + `TouchConn` on every message)
+- fix: `htcli serve` binds the HTTP port *before* the unix socket and refuses to unlink a socket already accepted by a running daemon, so a second `htcli serve` can no longer destroy the live daemon's socket on exit (`serve.go`, `bridge.go`)
+- fix: extension reports "native" only after the daemon's greeting ping confirms the relay↔daemon chain end-to-end, and closes any superseded port so its traffic is ignored — eliminates the eternal reap/reconnect cycle a leaked old port used to cause (`nativeHost.ts` connection-confirmation state machine + single-port guard)
+- feat: extension replies with a heartbeat to daemon pings so it isn't reaped as stale; relay "error" messages are treated as non-confirming (`nativeHost.ts`)
+- feat: native `getReadyTabs` command reports tabs with a live content script for diagnostics via htcli; content-script injection failures now surface the real error (e.g. "Missing host permission", restricted domain) instead of a generic "tab not available" (`nativeHost.ts`, `commands.ts`)
+- feat: side panel shows the outcome of each permission-grant attempt and adds a grant button on the empty/zero-tabs state with Firefox-specific guidance (`ConnectedTabs.tsx`)
+- test: `nativeHost.test.ts` covers the connection-confirmation state machine (stays disconnected until greeting, ignores stale-port messages, relay error does not confirm); `daemon_test.go` covers sweep reaping stale relays and pinging live ones
+- chore: `firefox:build` also builds the content script via the new `firefox/vite.content.config.ts`; `Makefile` `firefox-install` auto-registers the Firefox native host
+
 ## 0.4.0 [2026.07.09]
 
 - chore: bump version to 0.4.0

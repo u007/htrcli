@@ -23,6 +23,9 @@ let reconnectDelay = RECONNECT_BASE_MS;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let connectionMode: "native" | "disconnected" | "unavailable" = "unavailable";
 let reconnectAttempts = 0;
+// True once the daemon has sent at least one message over the current port.
+// connectNative alone is not proof of a working chain — see confirmConnected.
+let portConfirmed = false;
 
 type ScreenshotResult = { data?: string; error?: string };
 type ScreenshotCapturer = (tabId: number) => Promise<ScreenshotResult>;
@@ -41,6 +44,16 @@ export function startNativeHost(): void {
  */
 export function setScreenshotCapturer(fn: ScreenshotCapturer): void {
 	captureScreenshot = fn;
+}
+
+// Provides the background's readyTabs view (tabs with a live content script)
+// for the native `getReadyTabs` action. Registered by background/index.ts
+// (same pattern as setScreenshotCapturer) to avoid a circular import.
+type ReadyTabsProvider = () => Promise<TabInfo[]>;
+let readyTabsProvider: ReadyTabsProvider | null = null;
+
+export function setReadyTabsProvider(fn: ReadyTabsProvider): void {
+	readyTabsProvider = fn;
 }
 
 export function getConnectionMode(): "native" | "disconnected" | "unavailable" {
@@ -76,16 +89,43 @@ function connect(): void {
 		reconnectTimer = null;
 	}
 
+	// Never hold two ports at once. A leaked old port causes an eternal
+	// reap/reconnect cycle: its pings get answered on the NEW port (sendToNative
+	// uses nativePort), so the daemon reaps the old one as stale; its
+	// onDisconnect then used to clobber the healthy port's state and spawn yet
+	// another port, orphaning the previous one — repeating forever.
+	if (nativePort) {
+		const old = nativePort;
+		nativePort = null;
+		try {
+			old.disconnect();
+		} catch (err) {
+			// intentionally not logged as error: disconnecting an already-dead
+			// port throws in some browsers and is harmless here.
+			console.warn("[NativeHost] old port disconnect:", err);
+		}
+	}
+
+	let port: chrome.runtime.Port;
 	try {
-		nativePort = chrome.runtime.connectNative(HOST_NAME);
+		port = chrome.runtime.connectNative(HOST_NAME);
 	} catch (err) {
 		console.warn("[NativeHost] connectNative failed:", err);
 		markUnavailable();
 		return;
 	}
+	nativePort = port;
 
-	nativePort.onMessage.addListener(handleNativeMessage);
-	nativePort.onDisconnect.addListener(() => {
+	port.onMessage.addListener((msg) => {
+		// Ignore traffic from a superseded port so it can't confirm the
+		// connection or trigger replies on the current port.
+		if (nativePort !== port) return;
+		handleNativeMessage(msg as NativeMessage);
+	});
+	port.onDisconnect.addListener(() => {
+		// A stale port's disconnect must not clobber the current port's state.
+		if (nativePort !== port) return;
+
 		const err = chrome.runtime.lastError?.message ?? "unknown";
 		console.warn(`[NativeHost] Disconnected: ${err}`);
 		nativePort = null;
@@ -105,10 +145,31 @@ function connect(): void {
 		scheduleReconnect();
 	});
 
+	// connectNative succeeds even when the daemon is down (the relay spawns,
+	// fails to dial the daemon socket, and only then disconnects the port), so
+	// do NOT report "native" yet. The daemon greets every new relay with a
+	// ping; the first daemon message confirms the chain end-to-end (see
+	// confirmConnected). Until then we stay "disconnected" and keep the
+	// backoff counters untouched so a dead daemon doesn't reset them.
+	portConfirmed = false;
+	// Reflect the awaiting-greeting state. This keeps getConnectionMode()
+	// honest (we have a port but no confirmed daemon) and matches the
+	// "disconnected" contract the rest of the extension expects.
+	connectionMode = "disconnected";
+	console.log("[NativeHost] Port opened, awaiting daemon greeting");
+}
+
+/**
+ * First message from the daemon proves relay↔daemon connectivity. Only now
+ * report "native", reset the reconnect backoff, and register open tabs.
+ */
+function confirmConnected(): void {
+	if (portConfirmed) return;
+	portConfirmed = true;
 	connectionMode = "native";
 	reconnectDelay = RECONNECT_BASE_MS;
 	reconnectAttempts = 0;
-	console.log("[NativeHost] Connected");
+	console.log("[NativeHost] Connected (daemon confirmed)");
 
 	// Broadcast new status to all content scripts
 	broadcastStatus();
@@ -209,16 +270,35 @@ interface NativeCaptureScreenshotMessage {
 	payload: { uploadUrl: string; token?: string };
 }
 
-interface NativeRegisterAckMessage {
+interface NativePingMessage {
 	type: "ping";
+}
+
+// Written by the relay itself (not the daemon) when it cannot reach the
+// daemon socket, just before it exits and the port disconnects.
+interface NativeErrorMessage {
+	type: "error";
+	error?: string;
 }
 
 type NativeMessage =
 	| NativeCommandMessage
 	| NativeCaptureScreenshotMessage
-	| NativeRegisterAckMessage;
+	| NativePingMessage
+	| NativeErrorMessage;
 
 function handleNativeMessage(msg: NativeMessage): void {
+	if (msg.type === "error") {
+		// Relay-side failure (daemon down) — not daemon traffic, so it must
+		// not confirm the connection. onDisconnect follows and schedules the
+		// reconnect.
+		console.warn("[NativeHost] Relay error:", msg.error ?? "unknown");
+		return;
+	}
+
+	// Any daemon-originated message proves the relay↔daemon chain works.
+	confirmConnected();
+
 	if (msg.type === "command") {
 		const { tabId, payload } = msg;
 		void sendCommandToTab(tabId, payload);
@@ -227,6 +307,13 @@ function handleNativeMessage(msg: NativeMessage): void {
 
 	if (msg.type === "capture_screenshot") {
 		void handleCaptureScreenshot(msg);
+		return;
+	}
+
+	if (msg.type === "ping") {
+		// Liveness probe from the daemon; reply so it doesn't reap this
+		// relay as stale (see SweepConns in htcli).
+		sendToNative({ type: "heartbeat" });
 	}
 }
 
@@ -846,6 +933,25 @@ async function sendCommandToTab(
 		await handleFetchInPage(tabId, payload);
 		return;
 	}
+	if (payload.action === "getReadyTabs") {
+		// Background-handled: report which tabs have a live content script
+		// (the sidepanel's "Connected Tabs" view), for diagnostics via htcli.
+		try {
+			const tabs = readyTabsProvider ? await readyTabsProvider() : [];
+			sendToNative({
+				type: "command_result",
+				tabId,
+				payload: { id: payload.id, success: true, data: tabs } as CommandResult,
+			});
+		} catch (err) {
+			replyError(
+				tabId,
+				payload.id,
+				err instanceof Error ? err.message : String(err),
+			);
+		}
+		return;
+	}
 	if (payload.action === "debuggerEval") {
 		await handleDebuggerEval(tabId, payload);
 		return;
@@ -954,7 +1060,16 @@ async function sendCommandToTab(
 		} catch (err) {
 			watcher?.cancel();
 			console.warn("[NativeHost] content script injection failed:", err);
-			replyError(tabId, payload.id, "tab not available");
+			// Surface the real injection error — "Missing host permission",
+			// restricted domain, etc. — instead of a generic message, so the
+			// failure is diagnosable from the htcli side.
+			replyError(
+				tabId,
+				payload.id,
+				`tab not available (content script injection failed: ${
+					err instanceof Error ? err.message : String(err)
+				})`,
+			);
 			return;
 		}
 		result = await sendMsg();
@@ -962,7 +1077,11 @@ async function sendCommandToTab(
 
 	if (result === null) {
 		watcher?.cancel();
-		replyError(tabId, payload.id, "tab not available");
+		replyError(
+			tabId,
+			payload.id,
+			"tab not available (content script did not respond after injection)",
+		);
 		return;
 	}
 

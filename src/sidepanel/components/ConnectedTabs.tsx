@@ -21,6 +21,10 @@ export function ConnectedTabs() {
 	// `null` while we haven't checked yet. `true`/`false` once known.
 	const [hasAccess, setHasAccess] = useState<boolean | null>(null);
 	const [requesting, setRequesting] = useState(false);
+	// Outcome of the last grant attempt, surfaced in the panel because the
+	// sidebar console is invisible to most users and the failure reasons
+	// (gesture requirement, <all_urls> not requestable, API absent) differ.
+	const [grantResult, setGrantResult] = useState<string | null>(null);
 
 	const refresh = useCallback(async (): Promise<void> => {
 		try {
@@ -54,13 +58,22 @@ export function ConnectedTabs() {
 	}, []);
 
 	const requestAccess = useCallback(async (): Promise<void> => {
-		if (!chrome.permissions?.request) return;
+		if (!chrome.permissions?.request) {
+			setGrantResult("permissions.request API unavailable in this context");
+			return;
+		}
 		setRequesting(true);
+		setGrantResult(null);
 		try {
 			const granted = await chrome.permissions.request({
 				origins: REMOTE_CONTROL_ORIGINS,
 			});
 			setHasAccess(granted);
+			setGrantResult(
+				granted
+					? "Access granted — syncing tabs…"
+					: `request() returned ${String(granted)} — grant manually: about:addons → this extension → Permissions → "Access your data for all websites"`,
+			);
 			if (granted) {
 				// Connect tabs that were already open before access was
 				// granted, then show the refreshed list.
@@ -76,6 +89,9 @@ export function ConnectedTabs() {
 		} catch (err) {
 			// User dismissed the prompt or the API is unavailable.
 			console.warn("[HTR NControl] permissions.request failed:", err);
+			setGrantResult(
+				`request() failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
 		} finally {
 			setRequesting(false);
 		}
@@ -137,15 +153,25 @@ export function ConnectedTabs() {
 							>
 								{requesting ? "Requesting…" : "Grant access to tabs"}
 							</button>
+							{grantResult && <span className="ct-hint">{grantResult}</span>}
 						</li>
 					) : tabs.length === 0 ? (
 						<li className="ct-empty">
 							<span>No tabs connected.</span>
 							<span className="ct-hint">
-								Open or reload an http(s) page to connect it. If tabs still
-								aren't visible: go to the nav bar → click the site settings icon
-								→ disable this extension → re-enable it → then refresh the page.
+								Open or reload an http(s) page to connect it. On Firefox, site
+								access may still need granting even when it reports as granted —
+								use the button below, then reload the page.
 							</span>
+							<button
+								type="button"
+								className="ct-grant"
+								onClick={() => void requestAccess()}
+								disabled={requesting}
+							>
+								{requesting ? "Requesting…" : "Grant access to tabs"}
+							</button>
+							{grantResult && <span className="ct-hint">{grantResult}</span>}
 						</li>
 					) : (
 						tabs.map((tab) => (

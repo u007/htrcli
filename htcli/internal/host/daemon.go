@@ -3,7 +3,19 @@ package host
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
+	"time"
+)
+
+// Relay liveness. The daemon pings every relay each PingInterval; any message
+// from the relay (heartbeat reply, register, command_result…) refreshes its
+// lastSeen. A relay silent for longer than StaleAfter is force-closed so its
+// tabs drop out of Tabs() instead of lingering as stale duplicates (e.g. a
+// browser respawned its native host without the old relay process exiting).
+const (
+	PingInterval = 15 * time.Second
+	StaleAfter   = 45 * time.Second
 )
 
 // TabInfo describes a connected browser tab.
@@ -52,6 +64,12 @@ type shotResult struct {
 type RelayConn struct {
 	write func(msg []byte) error
 	tabs  map[int]TabInfo
+	// close force-closes the underlying transport (unix socket conn). Set by
+	// the socket server; nil in tests that never need reaping.
+	close func() error
+	// lastSeen is the time of the last message received from this relay.
+	// Guarded by Daemon.mu.
+	lastSeen time.Time
 }
 
 // Daemon holds shared state: the set of relay connections (each with its own
@@ -64,6 +82,10 @@ type Daemon struct {
 	// pendingShots correlates a capture_screenshot trigger with the HTTP
 	// upload the extension POSTs back, keyed by command ID.
 	pendingShots map[string]chan shotResult
+	// stop is closed by Stop to terminate background goroutines (e.g. the
+	// sweeper). Initialized in NewDaemon; closing it is guarded by stopOnce.
+	stopOnce sync.Once
+	stop     chan struct{}
 }
 
 // NewDaemon creates an empty Daemon.
@@ -72,6 +94,7 @@ func NewDaemon() *Daemon {
 		conns:        make(map[*RelayConn]struct{}),
 		pending:      make(map[string]*pendingCommand),
 		pendingShots: make(map[string]chan shotResult),
+		stop:         make(chan struct{}),
 	}
 }
 
@@ -80,9 +103,136 @@ func NewDaemon() *Daemon {
 func (d *Daemon) AddConn(write func(msg []byte) error) *RelayConn {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	rc := &RelayConn{write: write, tabs: make(map[int]TabInfo)}
+	rc := &RelayConn{write: write, tabs: make(map[int]TabInfo), lastSeen: time.Now()}
 	d.conns[rc] = struct{}{}
 	return rc
+}
+
+// SetConnCloser attaches the transport close function used to reap the
+// connection when it goes stale.
+func (d *Daemon) SetConnCloser(rc *RelayConn, close func() error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rc.close = close
+}
+
+// TouchConn refreshes a relay's liveness timestamp. Called for every message
+// received from that relay.
+func (d *Daemon) TouchConn(rc *RelayConn) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rc.lastSeen = time.Now()
+}
+
+// SweepConns performs one liveness pass: relays silent for longer than
+// staleAfter are force-closed and dropped; every remaining relay is sent a
+// {"type":"ping"} (the extension replies with a heartbeat, refreshing
+// lastSeen). A relay whose transport write fails is dropped immediately.
+// Returns the number of connections reaped, for tests and logging.
+//
+// Closing the socket also makes the relay process exit (its socket read
+// fails), so the browser reaps the orphaned native-host process too.
+func (d *Daemon) SweepConns(staleAfter time.Duration) int {
+	// Snapshot under the lock: which connections exist, their write closures,
+	// and whether each is already stale. The actual ping writes happen OUTSIDE
+	// the lock — a wedged relay (peer not reading, full buffer) can block a
+	// socket write for the duration of TCP timeout detection, and holding d.mu
+	// there would freeze every other daemon operation (EnqueueCommand,
+	// RegisterTab, Tabs, ResolveCommand) for that window.
+	ping, _ := json.Marshal(NativeMessage{Type: "ping"})
+	type snap struct {
+		rc    *RelayConn
+		write func([]byte) error
+		stale bool
+	}
+	d.mu.Lock()
+	conns := make([]snap, 0, len(d.conns))
+	for rc := range d.conns {
+		conns = append(conns, snap{
+			rc:    rc,
+			write: rc.write,
+			stale: time.Since(rc.lastSeen) > staleAfter,
+		})
+	}
+	d.mu.Unlock()
+
+	reaped := 0
+	// Pass 1: ping the non-stale connections outside the lock. If a write
+	// fails, the relay is dead — reap it (re-checking membership under the
+	// lock in case it already disconnected in the meantime).
+	for _, c := range conns {
+		if c.stale {
+			continue
+		}
+		if err := c.write(ping); err != nil {
+			d.mu.Lock()
+			if _, ok := d.conns[c.rc]; ok {
+				log.Printf("[htcli serve] reaping relay after ping write failure (%d tabs): %v",
+					len(c.rc.tabs), err)
+				d.dropConnLocked(c.rc)
+				reaped++
+			}
+			d.mu.Unlock()
+		}
+	}
+
+	// Pass 2: reap connections that were stale at snapshot time. Re-check
+	// staleness under the lock — a relay that spoke between the snapshot and
+	// here is spared rather than wrongly reaped.
+	d.mu.Lock()
+	for _, c := range conns {
+		if !c.stale {
+			continue
+		}
+		if _, ok := d.conns[c.rc]; !ok {
+			continue // already gone (normal disconnect)
+		}
+		if time.Since(c.rc.lastSeen) > staleAfter {
+			log.Printf("[htcli serve] reaping stale relay (%d tabs, silent %s)",
+				len(c.rc.tabs), time.Since(c.rc.lastSeen).Round(time.Second))
+			d.dropConnLocked(c.rc)
+			reaped++
+		}
+	}
+	d.mu.Unlock()
+	return reaped
+}
+
+// dropConnLocked removes a connection and closes its transport. Caller must
+// hold d.mu.
+func (d *Daemon) dropConnLocked(rc *RelayConn) {
+	delete(d.conns, rc)
+	if rc.close != nil {
+		if err := rc.close(); err != nil {
+			// Expected when the transport is already half-dead; log at
+			// debug-equivalent level for traceability.
+			log.Printf("[htcli serve] relay close: %v", err)
+		}
+	}
+}
+
+// StartSweeper runs SweepConns every interval until the daemon is stopped via
+// Stop. The sweeper owns its lifecycle through the daemon's internal stop
+// channel rather than an ad-hoc throwaway channel, so it can be cleanly
+// terminated (e.g. on daemon shutdown) instead of leaking until process exit.
+func (d *Daemon) StartSweeper(interval, staleAfter time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			d.SweepConns(staleAfter)
+		case <-d.stop:
+			return
+		}
+	}
+}
+
+// Stop terminates background goroutines started by the daemon (currently the
+// sweeper). Safe to call multiple times; the first call closes the stop
+// channel and subsequent calls are no-ops.
+func (d *Daemon) Stop() {
+	d.stopOnce.Do(func() { close(d.stop) })
 }
 
 // RemoveConn drops a relay connection and every tab it owned. Other

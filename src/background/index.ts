@@ -30,6 +30,7 @@ import { dispatchCdpInput } from "./cdpInput";
 import {
 	registerTab,
 	retryConnect,
+	setReadyTabsProvider,
 	setScreenshotCapturer,
 	setStatusListener,
 	startNativeHost,
@@ -1551,6 +1552,7 @@ chrome.sidePanel
 
 // Start native host connection
 setScreenshotCapturer(captureScreenshotForUpload);
+setReadyTabsProvider(getReadyTabsInfo);
 startNativeHost();
 
 // Fold native-host status into the unified connection mode. Any change

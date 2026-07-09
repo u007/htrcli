@@ -2,6 +2,7 @@ package host_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -127,3 +128,70 @@ func TestCommandJSON(t *testing.T) {
 		t.Errorf("round-trip failed: %+v", got)
 	}
 }
+
+func TestSweepConnsReapsStaleAndPingsLive(t *testing.T) {
+	d := host.NewDaemon()
+
+	var pings [][]byte
+	live := d.AddConn(func(msg []byte) error {
+		pings = append(pings, msg)
+		return nil
+	})
+	d.RegisterTab(live, 1, host.TabInfo{ID: 1, URL: "https://live.com"})
+
+	// A generous staleAfter keeps the fresh connection and sends it a ping.
+	if reaped := d.SweepConns(time.Hour); reaped != 0 {
+		t.Fatalf("fresh conn reaped, want 0 reaped, got %d", reaped)
+	}
+	if len(pings) != 1 {
+		t.Fatalf("want 1 ping to live conn, got %d", len(pings))
+	}
+	var msg host.NativeMessage
+	if err := json.Unmarshal(pings[0], &msg); err != nil || msg.Type != "ping" {
+		t.Fatalf("want ping message, got %s (err %v)", pings[0], err)
+	}
+
+	// staleAfter 0: any conn is stale once a moment has passed.
+	closed := false
+	stale := d.AddConn(func(_ []byte) error { return nil })
+	d.SetConnCloser(stale, func() error {
+		closed = true
+		return nil
+	})
+	d.RegisterTab(stale, 3, host.TabInfo{ID: 3, URL: "https://stale.com"})
+	time.Sleep(time.Millisecond)
+	// Remove the live conn first so only the stale one is subject to sweep.
+	d.RemoveConn(live)
+	if reaped := d.SweepConns(0); reaped != 1 {
+		t.Fatalf("want 1 reaped, got %d", reaped)
+	}
+	if !closed {
+		t.Error("stale conn transport was not closed")
+	}
+	if len(d.Tabs()) != 0 {
+		t.Errorf("stale conn tabs still listed: %+v", d.Tabs())
+	}
+}
+
+func TestSweepConnsReapsWriteFailures(t *testing.T) {
+	d := host.NewDaemon()
+	closed := false
+	rc := d.AddConn(func(_ []byte) error { return errBrokenPipe })
+	d.SetConnCloser(rc, func() error {
+		closed = true
+		return nil
+	})
+	d.RegisterTab(rc, 7, host.TabInfo{ID: 7, URL: "https://dead.com"})
+
+	if reaped := d.SweepConns(time.Hour); reaped != 1 {
+		t.Fatalf("want 1 reaped on write failure, got %d", reaped)
+	}
+	if !closed {
+		t.Error("conn transport was not closed after write failure")
+	}
+	if len(d.Tabs()) != 0 {
+		t.Errorf("dead conn tabs still listed: %+v", d.Tabs())
+	}
+}
+
+var errBrokenPipe = fmt.Errorf("write: broken pipe")
