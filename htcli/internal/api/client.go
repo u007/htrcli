@@ -225,9 +225,14 @@ func (c *Client) ExecuteCommand(tabID *int, cmd Command) (*CommandResult, error)
 	return &result, nil
 }
 
-// GetPageInfo returns information about the current page.
-func (c *Client) GetPageInfo() (*PageInfo, error) {
-	data, err := c.doRequest("GET", "/api/page", nil)
+// GetPageInfo returns information about the current page. A non-nil tabID
+// targets that tab (the --tab flag); nil falls back to the server's default.
+func (c *Client) GetPageInfo(tabID *int) (*PageInfo, error) {
+	path := "/api/page"
+	if tabID != nil {
+		path += "?tab=" + strconv.Itoa(*tabID)
+	}
+	data, err := c.doRequest("GET", path, nil)
 	if err != nil {
 		return nil, err
 	}

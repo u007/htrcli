@@ -176,7 +176,7 @@ var pageInfoCmd = &cobra.Command{
 	Short: "Get page info (URL, title, dimensions)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := GetClient()
-		page, err := c.GetPageInfo()
+		page, err := c.GetPageInfo(GetTabID())
 		if err != nil {
 			return err
 		}

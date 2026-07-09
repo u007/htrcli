@@ -290,8 +290,9 @@ async function executeAction(command: Command): Promise<unknown> {
 				waitTimeout(options),
 			);
 		case "pressKey":
+			// Target is optional: targetless press goes to the focused element.
 			return handlePressKey(
-				requireTarget(target, action),
+				target,
 				requireValue(value, action),
 				waitTimeout(options),
 			);
@@ -312,10 +313,8 @@ async function executeAction(command: Command): Promise<unknown> {
 				waitTimeout(options),
 			);
 		case "prepareKeys":
-			return handlePrepareKeys(
-				requireTarget(target, action),
-				waitTimeout(options),
-			);
+			// Target is optional: targetless press goes to the focused element.
+			return handlePrepareKeys(target, waitTimeout(options));
 
 		// ─── Navigation ───────────────────────────────────────────────
 		case "navigate":
@@ -890,14 +889,19 @@ async function handleCheck(
 }
 
 async function handlePressKey(
-	target: TargetSelector,
+	target: TargetSelector | undefined,
 	key: string,
 	timeoutMs = 5000,
 ): Promise<void> {
-	const element = (await waitForActionableElement(target, {
-		timeoutMs,
-		requireEnabled: true,
-	})) as HTMLElement;
+	// Playwright keyboard.press semantics: without a target, the key goes to
+	// the currently focused element (e.g. after a `fill`) — falling back to
+	// body when nothing has focus. With a target, wait for it and focus it.
+	const element = target
+		? ((await waitForActionableElement(target, {
+				timeoutMs,
+				requireEnabled: true,
+			})) as HTMLElement)
+		: ((document.activeElement as HTMLElement | null) ?? document.body);
 
 	element.focus();
 
@@ -954,9 +958,15 @@ async function handlePrepareClick(
  * reach the right element). Returns `{ focused }`.
  */
 async function handlePrepareKeys(
-	target: TargetSelector,
+	target: TargetSelector | undefined,
 	timeoutMs = 5000,
 ): Promise<{ focused: boolean }> {
+	// Targetless press (htcli `press Enter` after a `fill`) follows Playwright
+	// keyboard.press semantics: the CDP key events go to whatever currently has
+	// focus, so there is nothing to wait for or refocus here.
+	if (!target) {
+		return { focused: document.activeElement != null };
+	}
 	const element = (await waitForActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,

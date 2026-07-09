@@ -152,15 +152,25 @@ func handleCommand(w http.ResponseWriter, r *http.Request, d *Daemon, tabID int)
 	apiOK(w, result)
 }
 
-// handlePageGet returns the active tab's current PageInfo by dispatching a
+// handlePageGet returns a tab's current PageInfo by dispatching a
 // `getPageInfo` command and unwrapping the CommandResult. Mirrors the Bun
-// server's /api/page behavior: targets the first connected tab if --tab is
-// not given (none of the existing CLI commands pass a tab here).
+// server's /api/page behavior: targets the tab from the `?tab=<id>` query
+// parameter when given (the CLI's --tab flag), else the first connected tab.
 func handlePageGet(w http.ResponseWriter, r *http.Request, d *Daemon) {
-	tabID, ok := d.FirstTabID()
-	if !ok {
-		apiError(w, 404, "no tabs connected")
-		return
+	var tabID int
+	if q := r.URL.Query().Get("tab"); q != "" {
+		tabID = parseTabID(q)
+		if tabID == 0 {
+			apiError(w, 400, "invalid tab id: "+q)
+			return
+		}
+	} else {
+		var ok bool
+		tabID, ok = d.FirstTabID()
+		if !ok {
+			apiError(w, 404, "no tabs connected")
+			return
+		}
 	}
 	result, err := sendCommand(
 		d,

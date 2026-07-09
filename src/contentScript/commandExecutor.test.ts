@@ -528,6 +528,34 @@ describe("prepareClick / prepareKeys (internal CDP preparation)", () => {
 		expect(data.focused).toBe(true);
 		expect(document.activeElement).toBe(input);
 	});
+
+	it("prepareKeys without a target succeeds using the focused element", async () => {
+		const input = makeInput("prep-focused");
+		input.focus();
+		const result = await executeCommand({
+			id: "pk2",
+			action: "prepareKeys",
+		});
+		expect(result.success).toBe(true);
+		const data = result.data as { focused: boolean };
+		expect(data.focused).toBe(true);
+		// Targetless prep must not steal focus from the current element.
+		expect(document.activeElement).toBe(input);
+	});
+
+	it("pressKey without a target dispatches to the focused element", async () => {
+		const input = makeInput("press-focused");
+		input.focus();
+		const keys: string[] = [];
+		input.addEventListener("keydown", (e) => keys.push(e.code));
+		const result = await executeCommand({
+			id: "pk3",
+			action: "pressKey",
+			value: "Enter",
+		});
+		expect(result.success).toBe(true);
+		expect(keys).toEqual(["Enter"]);
+	});
 });
 
 describe("synthetic input upgrade (Firefox / fallback path)", () => {

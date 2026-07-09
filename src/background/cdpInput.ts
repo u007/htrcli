@@ -265,11 +265,31 @@ export async function dispatchCdpType(
  * both the native-host relay (`sendCommandToTab`) and the WS-path background
  * handler (`CDP_INPUT`).
  */
+/**
+ * CDP-injected mouse/key events only reach a tab that is actually rendered:
+ * on a background tab, `Input.dispatchMouseEvent`/`dispatchKeyEvent` ack
+ * successfully but the page never sees the events (verified live —
+ * `Input.insertText` works on background tabs, dispatched events do not).
+ * So before dispatching trusted input, make the target tab active in its
+ * window. The short delay lets the renderer un-throttle before the events
+ * are injected.
+ */
+async function ensureTabActive(tabId: number): Promise<void> {
+	const tab = await chrome.tabs.get(tabId);
+	if (tab.active) return;
+	await chrome.tabs.update(tabId, { active: true });
+	await new Promise((r) => setTimeout(r, 150));
+}
+
 export async function dispatchCdpInput(
 	tabId: number,
 	command: Command,
 	deps: CdpDispatchDeps = {},
 ): Promise<CommandResult> {
+	// Injected senders (tests) skip activation — there is no real browser.
+	if (!deps.send) {
+		await ensureTabActive(tabId);
+	}
 	switch (command.action) {
 		case "click":
 		case "dblclick":

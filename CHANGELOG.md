@@ -9,7 +9,15 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
-## 0.2.9 [2026.07.09]
+## 0.4.0 [2026.07.09]
+
+- chore: bump version to 0.4.0
+- feat: `htcli inspect` / `GET /api/page` now accepts a `?tab=<id>` query param (the CLI `--tab` flag) to target a specific connected tab instead of always using the first connected tab; invalid ids return 400
+- feat: `pressKey` and `prepareKeys` actions accept an optional target — a targetless press goes to the currently focused element (matching Playwright `keyboard.press` semantics), falling back to `body` when nothing has focus
+- fix: background service worker activates the target tab before dispatching CDP mouse/key events — injected `Input.dispatchMouseEvent`/`dispatchKeyEvent` acks but never reaches a background tab, so the tab is focused first with a short settle delay
+- test: `commandExecutor.test.ts` covers targetless `prepareKeys` (keeps current focus) and `pressKey` (dispatches to focused element)
+
+## 0.3.0 [2026.07.09]
 
 - feat: rebrand "How-To Recorder" → "HTR NControl" across extension, server, htcli, docs, and CI artifacts (manifests, options HTML, package names, `htrcontrol.zip` / `htrncontrol-firefox.xpi`)
 - feat: WebSocket transport as a transparent fallback when native messaging is unavailable — content script auto-connects to the remote-control server if the native host is down (Firefox, host not installed, daemon down); side panel shows **Online** for either transport
