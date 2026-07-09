@@ -1,6 +1,6 @@
 ---
 name: htrcli
-description: HTR NControl CLI (htcli) usage guide. Read this before running any htcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select), extracting text and data, taking screenshots (viewport, full page, annotated), getting accessibility tree snapshots with @eN refs, executing JavaScript, managing browser sessions, and running the native messaging daemon. Use when the user asks to control a browser, interact with a website, fill a form, click something, extract data, take a screenshot, or automate any browser task via HTR NControl.
+description: HTR NControl CLI (htcli) usage guide. Read this before running any htcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select, press), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, and running the native messaging daemon. Use when the user asks to control a browser, interact with a website, fill a form, click something, extract data, take a screenshot, or automate any browser task via HTR NControl.
 allowed-tools: Bash(htcli:*), Bash(go run ./cmd/htcli:*), Bash(make htcli-*)
 ---
 
@@ -101,21 +101,21 @@ htcli install --browser chrome  --uninstall           # remove manifest
 
 ```bash
 htcli open <url>              # 1. Navigate to a page (waits for page load)
-htcli snapshot -i             # 2. See what's on it (interactive elements only)
-htcli click @e3               # 3. Act on refs from the snapshot
-htcli snapshot -i             # 4. Re-snapshot after any page change
+htcli find "input[name=q]"    # 2. Locate the element you want to act on
+htcli click "input[name=q]"   # 3. Act on it (auto-waits for actionability)
+htcli find "input[name=q]"    # 4. Re-inspect after any page change
 ```
 
 `open`, `back`, `forward`, and `reload` block until the destination page
 finishes loading (up to 25s), so the next command runs against the loaded
-page. Clicks that *trigger* a navigation do NOT wait — after such a click,
-poll readiness before interacting (e.g. `htcli eval 'document.readyState'`
-or re-snapshot and check the content).
+page. Clicks that *trigger* a navigation also block for the destination
+page to finish loading — no manual polling needed.
 
-Refs (`@e1`, `@e2`, ...) are assigned fresh on every snapshot. They become
-**stale the moment the page changes** — after clicks that navigate, form
-submits, dynamic re-renders, dialog opens. Always re-snapshot before your
-next ref interaction.
+Selectors (`"input[name=q]"`, `"#submit"`, `"role=button"`, `"text=Submit"`)
+work directly; refs like `@e3` are not supported in the Go CLI (use
+`htcli command` for low-level action names if you need them). All
+interaction commands auto-wait for their target to become visible and
+enabled (up to 5s by default, override with `--timeout`).
 
 ## Quickstart
 
@@ -127,11 +127,11 @@ htcli health
 
 # Search, click a result, and capture it
 htcli open https://duckduckgo.com
-htcli snapshot -i                        # find the search box ref
-htcli fill @e1 "htcli browser automation"
+htcli find "input[name=q]"               # locate the search input
+htcli fill "input[name=q]" "htcli browser automation"
 htcli press Enter
-htcli snapshot -i                        # refs now reflect results
-htcli click @e5                          # click a result
+htcli find "input[name=q]"               # re-inspect after the change
+htcli click "a[data-testid=result]"      # click a result
 htcli screenshot result.png
 ```
 
@@ -147,43 +147,36 @@ htcli screenshot result.png
 
 ## Reading a page
 
-### Accessibility tree (preferred for AI agents)
+### Find element info
+
+`htcli find <selector>` returns the full info (tag, attributes, bounding
+box, text, children) for the first element matching a CSS selector,
+accessibility role, or text match.
 
 ```bash
-htcli snapshot                          # full accessibility tree
-htcli snapshot -i                       # interactive elements only (preferred)
-htcli snapshot -i -u                    # include href URLs on links
-htcli snapshot -i -c                    # compact (no empty structural nodes)
-htcli snapshot -i -d 3                  # cap depth at 3 levels
-htcli snapshot -s "#main"               # scope to a CSS selector
-htcli snapshot --json                   # machine-readable output
+htcli find "h1"                         # first <h1> on the page
+htcli find "#submit"                    # element by id
+htcli find "role=button"                # by ARIA role
+htcli find "text=Submit"                # by visible text
+htcli find "input[name=q]" --json       # machine-readable
 ```
 
-Snapshot output looks like:
-
-```
-Page: Example - Log in
-URL: https://example.com/login
-
-@e1 heading "Log in" [level=1]
-@e2 form
-  @e3 textbox "Email" [required]
-    @e4 placeholder="Enter your email"
-  @e5 textbox "Password" [required]
-    @e6 placeholder="Enter your password"
-  @e7 button "Submit" [enabled]
-  @e8 link "Forgot password?"
-```
-
-### Get text and attributes
+For multiple elements, use the raw `command` path:
 
 ```bash
-htcli get text @e1                      # visible text of an element
-htcli get html @e1                      # innerHTML
-htcli get attr @e1 href                 # any attribute value
-htcli get value @e1                     # input value
-htcli find "#login-form"                # find element and return info
+htcli command '{"action":"findAll","target":{"selector":"a"}}'
 ```
+
+### Get text, HTML, attributes, and values
+
+```bash
+htcli text  "h1"                        # visible text of an element
+htcli html  "h1"                        # innerHTML
+htcli attr  "a.nav" href                # any attribute value
+htcli value "input[name=q]"             # current input value
+```
+
+Add `--json` to any of these to get structured output.
 
 ### Page info
 
@@ -206,39 +199,49 @@ Scroll:   0, 350
 
 ## Interacting
 
-### Using refs (fastest)
+### Using selectors (the only way in the Go CLI)
+
+Refs like `@e1` are not supported in the Go CLI — every command takes a
+selector. The interaction subcommands are:
 
 ```bash
-htcli click @e7                         # click element by ref
-htcli dblclick @e3                      # double-click
-htcli fill @e3 "user@example.com"       # clear and fill input
-htcli type @e3 "more text"              # append text to input
-htcli hover @e5                         # hover element
-htcli select @e9 "option-value"         # select dropdown option
-htcli check @e10                        # check checkbox
-htcli uncheck @e10                      # uncheck checkbox
-htcli clear @e3                         # clear input field
+htcli click "#submit"                   # CSS selector (any of the forms below)
+htcli dblclick ".row:first-child"
+htcli fill  "input[name=email]" "user@test.com"
+htcli type  "input[name=email]" " more text"  # append, doesn't clear
+htcli hover ".menu-trigger"
+htcli select "select#country" "us"
+htcli check   "#terms"
+htcli uncheck "#newsletter"
+htcli clear   "input[name=email]"
+htcli press   Enter                    # key, no selector
+htcli focus   "#search"                # focus an element
+htcli blur    "#search"                # blur an element
+htcli scroll  down 300                 # direction + pixels
+htcli scrollTo "#footer"               # scroll an element into view
 ```
 
-### Using selectors (when refs don't work)
+Supported selector forms:
 
 ```bash
-htcli click "#submit"                   # CSS selector
-htcli fill "input[name=email]" "user@test.com"
+htcli click "#submit"                   # CSS selector (id, class, attribute, etc.)
 htcli click "button.primary"
 
-# By name, role, text, label, placeholder
+# Semantic shortcuts
 htcli click "role=button"               # by ARIA role
-htcli click "text=Submit"               # by text content
-htcli click "label=Email"               # by label
+htcli click "text=Submit"               # by visible text
+htcli click "label=Email"               # by associated label
 htcli click "name=email"                # by name attribute
 htcli click "placeholder=Search"        # by placeholder
 htcli click "xpath=//button[1]"         # by XPath
 htcli click "id=login"                  # by ID
 ```
 
-Rule of thumb: snapshot + `@eN` refs are fastest and most reliable. Use
-selectors as a fallback when refs don't work.
+Selectors auto-wait for their target to become visible and enabled before
+acting (default 5s; pass `--timeout` to change). An error like
+`Element "..." was not found (waited 5000ms for it to become actionable)`
+means the selector never resolved, was hidden, or was disabled — re-check
+the page (`htcli find <candidate>` or `htcli command '{"action":"findAll",...}'`).
 
 ### Actionable-wait behavior
 
@@ -251,11 +254,26 @@ enabled before acting. The default budget is 5s; tune it per command with
 command fails with a descriptive error naming the unmet condition
 (`not found` / `not visible` / `disabled`) instead of a bare "element not found".
 
-This means you usually do **not** need to sleep or re-snapshot before clicking
+This means you usually do **not** need to sleep or re-inspect before clicking
 an element that is animating in or rendering lazily — the command waits for it.
 Read-only inspection commands (`find`, `getText`, `getValue`, `isVisible`, …)
 keep their instant, probing semantics and do **not** wait.
 
+
+On Chrome, `click`, `press`/`type` are dispatched as **trusted** input via the
+Chrome DevTools Protocol, so the page's default actions fire as if a real user
+interacted: pressing `Enter` in a field submits the form, clicks pass
+`event.isTrusted` checks, and focus/selection behave natively. On Firefox (no
+`chrome.debugger` API) the same commands use synthetic events with pointer-event
+support — they drive most automation but are not trusted.
+
+While attached, Chrome shows the **“HTR NControl is debugging this browser”
+infobar**; this is expected (it also appears for `eval`/`print` on Chrome).
+
+If DevTools is open on the target tab (or another debugger client is attached),
+the trusted-input attach fails and the command returns an explicit error naming
+the conflict — it does **not** silently fall back to synthetic events. Close
+DevTools on that tab and retry.
 ### Keys
 
 ```bash
@@ -280,23 +298,31 @@ htcli scroll right
 
 ## Waiting
 
-Agents fail more often from bad waits than from bad selectors.
+Agents fail more often from bad waits than from bad selectors. The
+extension's auto-wait covers most cases (every interaction command waits
+up to 5s for its target to become visible and enabled before acting), so
+you usually **don't need an explicit wait** for actions that target a real
+element.
+
+For cases where the page transitions without a clear target (URL change,
+network settle, custom loading state), use:
 
 ```bash
-# After navigation or clicks that load new content:
-htcli snapshot -i                       # re-snapshot to check if content loaded
-htcli page                              # check URL changed
+# Check current page state
+htcli page                              # URL, title, readyState
+htcli find ".success-message"           # poll for an element to appear
 
-# Wait for specific element (poll with snapshot)
-htcli snapshot -i -s ".success-message" # check if element appeared
-
-# Wait for URL change (check page)
-htcli page                              # verify URL updated
+# Block on an element via the raw `command` path (waits up to the
+# command timeout, fails loudly on timeout instead of returning null):
+htcli command '{"action":"wait","target":{"selector":".success-message"},"options":{"timeout":10000}}'
 ```
 
-Always re-snapshot after any action that changes the page. The snapshot
-itself serves as a "wait" — if the element you expect isn't there, the
-page hasn't finished loading yet.
+For URL/readyState polling:
+
+```bash
+htcli page | grep Ready                 # should show "complete"
+htcli eval 'document.readyState'        # returns "loading" | "interactive" | "complete"
+```
 
 ## Screenshots
 
@@ -343,8 +369,8 @@ htcli tabs list                         # list all connected tabs
 htcli tabs get 123                      # get info for specific tab
 
 # Target a specific tab for commands
-htcli --tab 123 snapshot -i
-htcli --tab 123 click @e5
+htcli --tab 123 find "input[name=q]"
+htcli --tab 123 click "input[name=q]"
 ```
 
 ## Navigation
@@ -431,12 +457,15 @@ htcli fetch https://example.com/api/data --json | jq '.data' > output.json
 
 ## Raw commands
 
-For advanced use, send raw JSON commands:
+For advanced use, send raw JSON commands. Useful for actions that don't
+have a top-level subcommand (`wait`, `findAll`, custom targets) and for
+bypassing auto-wait when needed:
 
 ```bash
 htcli command '{"action":"click","target":{"selector":"#btn"}}'
 htcli command '{"action":"fill","target":{"name":"email"},"value":"test@example.com"}'
-htcli command '{"action":"snapshot","interactive":true,"compact":true}'
+htcli command '{"action":"findAll","target":{"selector":"a"}}'
+htcli command '{"action":"wait","target":{"selector":".loaded"},"options":{"timeout":5000}}'
 ```
 
 ## Common workflows
@@ -445,45 +474,37 @@ htcli command '{"action":"snapshot","interactive":true,"compact":true}'
 
 ```bash
 htcli open https://example.com/login
-htcli snapshot -i
-htcli fill @e3 "user@example.com"
-htcli fill @e5 "password123"
-htcli click @e7
-htcli snapshot -i                        # verify login succeeded
-htcli page                              # check URL changed to dashboard
+htcli find "input[name=email]"          # verify the form is there
+htcli fill "input[name=email]" "user@example.com"
+htcli fill "input[name=password]" "password123"
+htcli click "button[type=submit]"
+htcli page                               # verify URL changed to dashboard
 ```
 
 ### Fill a multi-step form
 
 ```bash
 htcli open https://example.com/apply
-htcli snapshot -i
+htcli find "#personal-info"              # confirm step 1 is loaded
 
-# Step 1: Personal info
-htcli fill @e1 "John"
-htcli fill @e2 "Doe"
-htcli fill @e3 "john@example.com"
-htcli click @e4                          # Next button
+# Step 1: Personal info (auto-wait handles the form transition)
+htcli fill "input[name=firstName]" "John"
+htcli fill "input[name=lastName]" "Doe"
+htcli fill "input[name=email]" "john@example.com"
+htcli click "button.next"
 
-htcli snapshot -i                        # re-snapshot for step 2
-
-# Step 2: Address
-htcli fill @e1 "123 Main St"
-htcli fill @e2 "Springfield"
-htcli click @e3                          # Submit
+# Step 2: Address (page is fully loaded before the next fill runs)
+htcli find "#address"
+htcli fill "input[name=street]" "123 Main St"
+htcli fill "input[name=city]" "Springfield"
+htcli click "button.submit"
 ```
 
 ### Extract data from a page
 
 ```bash
 htcli open https://example.com/products
-htcli snapshot -i -c -d 2               # compact tree, shallow depth
-htcli snapshot --json | jq '.data.tree' # machine-readable
-```
-
-Or use JS evaluation:
-
-```bash
+# Pull every product card's name + price from the page's main world:
 htcli eval "JSON.stringify(Array.from(document.querySelectorAll('.product')).map(el => ({name: el.querySelector('.name')?.textContent, price: el.querySelector('.price')?.textContent})))"
 ```
 
@@ -491,16 +512,22 @@ htcli eval "JSON.stringify(Array.from(document.querySelectorAll('.product')).map
 
 ```bash
 htcli open https://example.com/dashboard
-htcli screenshot --annotate --full documentation.png
+htcli screenshot documentation.png       # viewport (the only mode today)
 ```
+
+> **Note:** the Go CLI's `screenshot` command captures the viewport only.
+> Full-page and annotated capture exist in the extension's side-panel UI
+> but are not yet wired into a CLI subcommand — track that as a future
+> enhancement, or take multiple viewport screenshots and stitch with
+> external tools.
 
 ### Debug a failing page
 
 ```bash
-htcli page                              # check current URL and state
-htcli snapshot -i                        # see what elements are present
+htcli page                              # check current URL, title, readyState
 htcli eval "document.querySelector('.error')?.textContent"  # check for errors
 htcli screenshot debug.png               # visual state
+htcli find "input[name=email]"           # verify the form is in the DOM
 ```
 
 ## Troubleshooting
@@ -532,21 +559,25 @@ cd /path/to/htrncontrol && bun run server
 htcli serve
 ```
 
-### Element not found
+### Element not found / not actionable
 
-1. Re-snapshot to get fresh refs: `htcli snapshot -i`
-2. Try a different selector strategy: CSS > name > role > text
-3. Use `htcli find <selector>` to verify element exists
-4. Use `htcli screenshot` to see current page state
+An error like `Element "..." was not found (waited 5000ms for it to become
+actionable)` means the selector never resolved, was hidden, or was disabled.
 
-### Refs don't work after navigation
+1. Confirm the element is in the DOM: `htcli find <selector>`
+2. Confirm it's visible: `htcli find <selector> | grep -i 'display\|visibility\|hidden'`
+3. Confirm it's enabled: `htcli eval '!document.querySelector("...").disabled'`
+4. If the element appears after a delay, the auto-wait should handle it;
+   if you need longer than 5s, use `--timeout`
+5. Take a screenshot to see the current state: `htcli screenshot debug.png`
 
-Refs become stale after page changes. Always re-snapshot:
-```bash
-htcli click @e5                          # this navigates
-htcli snapshot -i                        # fresh refs
-htcli click @e3                          # use new ref
-```
+### Stale selector after a page change
+
+Page transitions invalidate selectors that target elements that were
+re-rendered. Use a selector that survives the transition (semantic
+attributes like `data-testid`, `aria-label`, `name` are more durable
+than positional ones like `.row:nth-child(2)`), or re-inspect with
+`htcli find` after the page changes.
 
 ## Full reference
 
@@ -567,8 +598,7 @@ htcli click @e3                          # use new ref
 | `htcli back` | Browser back |
 | `htcli forward` | Browser forward |
 | `htcli reload` | Reload page |
-| `htcli snapshot` | Accessibility tree with refs |
-| `htcli screenshot [path]` | Take screenshot |
+| `htcli screenshot [path]` | Take screenshot (viewport only) |
 | `htcli page` | Get page info |
 | `htcli click <sel>` | Click element |
 | `htcli dblclick <sel>` | Double-click element |
@@ -582,32 +612,14 @@ htcli click @e3                          # use new ref
 | `htcli scroll <dir> [px]` | Scroll page |
 | `htcli clear <sel>` | Clear input field |
 | `htcli find <sel>` | Find element info |
-| `htcli get text <sel>` | Get text content |
-| `htcli get value <sel>` | Get input value |
-| `htcli get attr <sel> <attr>` | Get attribute |
-| `htcli get html <sel>` | Get innerHTML |
-| `htcli eval <js>` | Execute JavaScript |
+| `htcli text <sel>` | Get text content |
+| `htcli value <sel>` | Get input value |
+| `htcli attr <sel> <attr>` | Get attribute |
+| `htcli html <sel>` | Get innerHTML |
+| `htcli eval <js>` | Execute JavaScript (page main world) |
 | `htcli command <json>` | Send raw JSON command |
 | `htcli fetch <url>` | Fetch URL via background (no popup, includes cookies) |
 | `htcli printpdf <path>` | Print page to PDF via CDP (no save-as prompt) |
-|------|-------------|
-| `-i`, `--interactive` | Only interactive elements |
-| `-c`, `--compact` | Compact output |
-| `-d`, `--depth <n>` | Max tree depth |
-| `-s`, `--selector <sel>` | Scope to element |
-| `-u`, `--urls` | Show URLs in links |
-| `--json` | JSON output |
-
-### Screenshot flags
-
-| Flag | Description |
-|------|-------------|
-| `--full` | Full page capture |
-| `--annotate` | Numbered element overlays |
-| `--format <fmt>` | png (default) or jpeg |
-| `--quality <n>` | JPEG quality 1-100 |
-| `--selector <sel>` | Capture specific element |
-| `--json` | Base64 JSON output |
 
 ### Global flags
 

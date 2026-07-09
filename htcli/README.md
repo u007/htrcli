@@ -79,8 +79,8 @@ htcli health
 
 # 4. Control the browser
 htcli open https://example.com
-htcli snapshot -i
-htcli click @e3
+htcli find "input[name=q]"                # find the search box
+htcli click "input[name=q]"               # act on the selector
 htcli screenshot page.png
 ```
 
@@ -140,27 +140,44 @@ target to exist, be visible, and (where it matters) be enabled before acting.
 The default budget is 5s; override it with `--timeout <ms>` (capped at 20s). If
 the element never becomes actionable the command fails with a descriptive error
 (`not found` / `not visible` / `disabled`). Read-only inspection commands
-(`find`, `get text`, `get value`, …) keep instant, probing semantics and do
-not wait.
+(`find`, `text`, `value`, `attr`, `html`, `page`, …) keep instant, probing
+semantics and do not wait.
 
-The `wait` command also waits for its target to appear (default 5s, tunable
-via `--timeout`). **Breaking change:** it now fails with an error if the
-element never appears, instead of returning a "not found" null that callers
-treated as "keep going". Update any script that relied on the old null result.
+
+On Chrome, `click`, `press`, and `type` are dispatched as **trusted** input
+events via the Chrome DevTools Protocol. The page's default actions fire as if a
+real user interacted: pressing `Enter` in a field submits the form, clicks pass
+`event.isTrusted` checks, and focus/selection behave natively. On Firefox (no
+`chrome.debugger` API) the same commands use synthetic events (with pointer-event
+support) — they drive most automation but do not count as trusted.
+
+While attached, Chrome shows the **“HTR NControl is debugging this browser”
+infobar**; this is expected and also appears for `eval`/`print` on Chrome.
+
+If DevTools is open on the target tab (or another debugger client is attached),
+the trusted-input attach fails and the command returns an explicit error naming
+the conflict — it does **not** silently fall back to synthetic events. Close
+DevTools on that tab and retry.
+
+If you need to block on an element appearing, use the raw `command` path
+(which performs the wait and fails loudly on timeout):
+
+```bash
+htcli command '{"action":"wait","target":{"selector":".loaded"},"options":{"timeout":10000}}'
+```
 
 ### Inspection
 
 ```bash
-htcli find <selector>                     # Find element info
-htcli get text <selector>                 # Get text content
-htcli get value <selector>                # Get input value
-htcli get attr <selector> <attribute>     # Get attribute
-htcli get html <selector>                 # Get innerHTML
-htcli snapshot                            # Accessibility tree
-htcli screenshot [path]                   # Take screenshot
+htcli find <selector>                     # Find element info (tag, attrs, box, text)
+htcli text  <selector>                    # Get text content
+htcli value <selector>                    # Get input value
+htcli attr  <selector> <attribute>        # Get attribute value
+htcli html  <selector>                    # Get innerHTML
+htcli command '{"action":"findAll","target":{"selector":"a"}}'  # multiple elements
 htcli page                                # Get page info
-htcli eval <javascript>                   # Execute JS
-htcli command <json>                      # Raw JSON command
+htcli eval <javascript>                   # Execute JS in the page's main world
+htcli command <json>                      # Raw JSON command (any action)
 ```
 
 `eval` accepts both single expressions (`htcli eval "document.title"`) and
