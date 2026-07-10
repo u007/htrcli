@@ -102,6 +102,37 @@ htcli config set-server http://...        # Set server URL
 htcli config set-token <token>            # Set bearer token
 ```
 
+### Publishing to addons.mozilla.org (AMO)
+
+`htcli publish` builds (optionally) and signs the Firefox add-on, then
+submits it to AMO via `web-ext sign`.
+
+```bash
+# Default channel is "listed" = public on addons.mozilla.org.
+htcli publish --build                     # build + sign + submit (public)
+
+# Self-distributed / "own use" (was the old default before going public):
+htcli publish --channel unlisted
+
+# Dry-run prints the exact web-ext command without submitting:
+htcli publish --dry-run --source-dir firefox/build
+```
+
+Channels:
+- `listed` (default) — public listing on addons.mozilla.org; anyone can install.
+- `unlisted` — self-distributed ("own use"); not shown in the gallery.
+
+AMO API credentials (key + secret) are resolved in this order:
+1. `--api-key` / `--api-secret` flags
+2. Environment: `AMO_API_KEY` / `AMO_API_SECRET` (or `HTCLI_AMO_API_KEY` / `HTCLI_AMO_API_SECRET`)
+3. htcli config: `htcli config set-amo-api-key <key>` / `htcli config set-amo-api-secret <secret>`
+
+Get credentials at <https://addons.mozilla.org/en-US/developers/addon/api/key/>.
+
+`web-ext` is used automatically: if it is on `PATH` it is invoked directly,
+otherwise `npx --yes web-ext` fetches it on demand. Override with `--web-ext <path>`.
+The signed add-on is written to `web-ext-artifacts/`.
+
 ### Tab Management
 
 ```bash

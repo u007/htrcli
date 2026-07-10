@@ -9,6 +9,15 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.4.2 [2026.07.10]
+
+- chore: bump version to 0.4.2
+- fix: rename native-messaging host from `com.howtorecorder.host` → `com.htrcontrol.host` (matches the rebrand) in `htcli` (`main.go`, `install.go`), the extension service worker (`nativeHost.ts`), and `GUIDE.md`
+- feat: `htcli publish` builds (optionally via `--build`) and signs the Firefox add-on, then submits it to addons.mozilla.org via `web-ext sign`; flags `--channel listed|unlisted`, `--api-key/--api-secret`, `--source-dir`, `--web-ext`, `--dry-run`, `--sign-timeout` (`publish.go`)
+- feat: `htcli config` gains `set-amo-api-key` / `set-amo-api-secret` (masked in `config` output) so AMO credentials persist in `~/.htcli/config.json` (`config.go`)
+- docs: document AMO publishing in `htcli/README.md` and `firefox/README.md`
+- fix: `Makefile` `firefox-install` drops a stray `com.htrcontrol.host.json` argument the `htcli install` command does not accept
+
 ## 0.4.1 [2026.07.10]
 
 - chore: bump version to 0.4.1

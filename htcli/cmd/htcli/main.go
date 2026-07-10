@@ -10,7 +10,7 @@ import (
 
 // hostManifestName is the native-messaging manifest filename. Firefox passes
 // the full path to this manifest as the first argument when spawning the host.
-const hostManifestName = "com.howtorecorder.host.json"
+const hostManifestName = "com.htrcontrol.host.json"
 
 // firefoxExtensionID is the add-on ID Firefox passes as the second argument.
 const firefoxExtensionID = "htrcontrol@mercstudio.com"

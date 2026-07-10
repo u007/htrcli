@@ -99,7 +99,16 @@ bun run firefox:zip
 This produces `firefox/htrncontrol-firefox.xpi`, ready to upload
 to [addons.mozilla.org](https://addons.mozilla.org) or distribute
 directly (Firefox will install unsigned XPIs with a confirmation
-prompt; for AMO submission, sign the XPI first).
+prompt). To sign and submit to AMO through `htcli`, use:
+
+```bash
+htcli publish --build            # public ("listed") channel on addons.mozilla.org
+htcli publish --channel unlisted # self-distributed / "own use"
+```
+
+`htcli publish` runs the Firefox build and calls `web-ext sign` for you.
+See the [htcli README](../htcli/README.md#publishing-to-addonsmozillaorg-amo)
+for credential setup and channel details.
 
 ## Development
 

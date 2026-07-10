@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const hostName = "com.howtorecorder.host"
+const hostName = "com.htrcontrol.host"
 
 type chromeManifest struct {
 	Name           string   `json:"name"`

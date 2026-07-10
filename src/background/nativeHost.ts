@@ -13,7 +13,7 @@ import {
 	dispatchCdpInput,
 } from "./cdpInput";
 
-const HOST_NAME = "com.howtorecorder.host";
+const HOST_NAME = "com.htrcontrol.host";
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 const MAX_RECONNECT_ATTEMPTS = 20;

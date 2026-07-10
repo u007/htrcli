@@ -39,7 +39,7 @@ export PATH="$PATH:/Users/james/www/htrncontrol/htcli/bin"
 htcli install --browser chrome --extension-id <chrome-extension-id>
 ```
 
-This writes `com.howtorecorder.host.json` to Chrome's native messaging
+This writes `com.htrcontrol.host.json` to Chrome's native messaging
 manifest directory (macOS: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`),
 pointing at your `htcli` binary and allowing your extension ID to connect.
 

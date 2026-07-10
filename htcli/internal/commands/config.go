@@ -12,8 +12,10 @@ import (
 )
 
 type configData struct {
-	Server string `json:"server"`
-	Token  string `json:"token"`
+	Server       string `json:"server"`
+	Token        string `json:"token"`
+	AMOAPIKey    string `json:"amo-api-key"`
+	AMOAPISecret string `json:"amo-api-secret"`
 }
 
 var configCmd = &cobra.Command{
@@ -26,8 +28,10 @@ var configShowCmd = &cobra.Command{
 	Short: "Show current configuration",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := configData{
-			Server: viper.GetString("server"),
-			Token:  viper.GetString("token"),
+			Server:       viper.GetString("server"),
+			Token:        viper.GetString("token"),
+			AMOAPIKey:    viper.GetString("amo-api-key"),
+			AMOAPISecret: viper.GetString("amo-api-secret"),
 		}
 		if cfg.Server == "" {
 			cfg.Server = "http://127.0.0.1:3845"
@@ -44,6 +48,8 @@ var configShowCmd = &cobra.Command{
 		} else {
 			fmt.Println("Token:  (not set)")
 		}
+		printMasked("AMO API Key", cfg.AMOAPIKey)
+		printMasked("AMO API Secret", cfg.AMOAPISecret)
 		return nil
 	},
 }
@@ -91,6 +97,10 @@ func setConfigValue(key, value string) error {
 		cfg.Server = value
 	case "token":
 		cfg.Token = value
+	case "amo-api-key":
+		cfg.AMOAPIKey = value
+	case "amo-api-secret":
+		cfg.AMOAPISecret = value
 	}
 
 	// Write config.
@@ -110,9 +120,38 @@ func setConfigValue(key, value string) error {
 	return nil
 }
 
+func printMasked(label, value string) {
+	if value != "" {
+		n := min(4, len(value))
+		fmt.Printf("%s: %s...%s\n", label, value[:n], value[len(value)-n:])
+	} else {
+		fmt.Printf("%s: (not set)\n", label)
+	}
+}
+
+var configSetAMOKeyCmd = &cobra.Command{
+	Use:   "set-amo-api-key <key>",
+	Short: "Set AMO (addons.mozilla.org) API key",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setConfigValue("amo-api-key", args[0])
+	},
+}
+
+var configSetAMOSecretCmd = &cobra.Command{
+	Use:   "set-amo-api-secret <secret>",
+	Short: "Set AMO (addons.mozilla.org) API secret",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setConfigValue("amo-api-secret", args[0])
+	},
+}
+
 func init() {
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configSetServerCmd)
 	configCmd.AddCommand(configSetTokenCmd)
+	configCmd.AddCommand(configSetAMOKeyCmd)
+	configCmd.AddCommand(configSetAMOSecretCmd)
 	rootCmd.AddCommand(configCmd)
 }
