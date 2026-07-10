@@ -70,6 +70,71 @@ native host while the old process lingered) clean themselves up. Extensions
 older than this protocol never reply and get reaped every 45s — keep the
 extension and htcli builds in sync.
 
+## CDP transport (direct Chrome DevTools Protocol)
+
+By default `htcli` drives the browser through the extension (the transports
+above). With `--cdp` (or `htcli config set-transport cdp`) it instead talks
+**directly to Chrome over the Chrome DevTools Protocol** — no extension and no
+server required. This is what you want for:
+
+- **Browser-restricted pages** the extension can't reach (e.g. the Chrome Web
+  Store developer console, `chrome://` internals).
+- **Headless / background automation** — run Chrome with no window and drive it
+  from a cron job or CI.
+
+```bash
+# Start a dedicated Chrome controlled by htcli (fresh profile at ~/.htcli/chrome-profile).
+htcli browser start                 # visible window
+htcli browser start --headless      # no window (recommended for background jobs)
+
+htcli browser status                # probe the debugging port
+htcli browser stop                  # kill the managed Chrome
+htcli browser hide                  # minimize the window (visible mode only)
+htcli browser show                  # restore the window
+
+# Every command accepts --cdp (or the persisted transport=cdp config):
+htcli --cdp open https://chrome.google.com/webstore/.../console
+htcli --cdp fill "#email" "me@example.com"
+htcli --cdp click "#submit"
+htcli --cdp screenshot out.png
+htcli --cdp eval "document.title"
+htcli --cdp tabs list               # CDP page targets (no "Active" column)
+```
+
+### Tab-ID namespace
+
+`--tab` means different things on the two transports:
+
+| Transport | `--tab` value | Example |
+|---|---|---|
+| extension (`ext`, default) | numeric tab ID from `htcli tabs list` | `--tab 43` |
+| CDP (`cdp`) | 32-char hex **CDP target ID** from `htcli --cdp tabs list` | `--tab 8E17C9D2...` |
+
+`--cdp` selects the CDP path; the numeric form is rejected there (and a hex
+target ID is rejected on the extension path).
+
+### Sign in once, then drive headless
+
+CDP can only control a profile that is already authenticated. **Sign in
+visibly first** (`htcli browser start`, log in, leave the session), then either
+keep the window open or switch to `--headless` for subsequent runs — the
+dedicated `~/.htcli/chrome-profile` persists the session. The debugging port is
+an **unauthenticated, localhost-only** control channel into that signed-in
+profile: same trust model as the localhost daemon, minus the bearer token, so
+only ever run it on a machine you trust.
+
+### Configuration
+
+```bash
+htcli config set-transport cdp        # make --cdp the default
+htcli config set-cdp-port 9222        # debugging port (default 9222)
+htcli config set-chrome-path /path/to/chrome   # if not auto-detected
+```
+
+Flags override config in both directions: `--transport ext` beats a
+`transport=cdp` config, and `--cdp` beats a `transport=ext` config. If both
+flags are passed, `--transport` wins (`--cdp` is only shorthand).
+
 ## Quick Start
 
 ```bash

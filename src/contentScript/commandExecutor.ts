@@ -1162,7 +1162,7 @@ async function handleFetchFromCS(
 		const raw = localStorage.getItem("OAOP_LOGINDATA");
 		if (raw) {
 			const p = JSON.parse(raw) as { jwt?: string };
-			if (p.jwt) headers["Authorization"] = `Bearer ${p.jwt}`;
+			if (p.jwt) headers.Authorization = `Bearer ${p.jwt}`;
 		}
 	} catch {
 		// intentionally not logged: failures are benign
@@ -1301,8 +1301,7 @@ async function handleFetchViaBackground(
 			const raw = localStorage.getItem("OAOP_LOGINDATA");
 			if (raw) {
 				const parsed = JSON.parse(raw) as { jwt?: string };
-				if (parsed.jwt)
-					defaultHeaders["Authorization"] = `Bearer ${parsed.jwt}`;
+				if (parsed.jwt) defaultHeaders.Authorization = `Bearer ${parsed.jwt}`;
 			}
 		}
 	} catch {

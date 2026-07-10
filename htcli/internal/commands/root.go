@@ -3,6 +3,8 @@ package commands
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -11,13 +13,15 @@ import (
 )
 
 var (
-	cfgFile     string
-	serverURL   string
-	token       string
-	jsonOutput  bool
-	tabID       int
-	timeout     int
-	client      *api.Client
+	cfgFile       string
+	serverURL     string
+	token         string
+	jsonOutput    bool
+	tabTarget     string
+	transportFlag string
+	cdpFlag       bool
+	timeout       int
+	client        *api.Client
 )
 
 var rootCmd = &cobra.Command{
@@ -41,7 +45,9 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&serverURL, "server", "", "server URL (overrides config)")
 	rootCmd.PersistentFlags().StringVar(&token, "token", "", "bearer token (overrides config)")
 	rootCmd.PersistentFlags().BoolVar(&jsonOutput, "json", false, "output raw JSON")
-	rootCmd.PersistentFlags().IntVar(&tabID, "tab", 0, "target specific tab ID")
+	rootCmd.PersistentFlags().StringVar(&tabTarget, "tab", "", "target tab: numeric ID (extension) or CDP target ID (--cdp)")
+	rootCmd.PersistentFlags().StringVar(&transportFlag, "transport", "", "transport: ext (extension, default) or cdp")
+	rootCmd.PersistentFlags().BoolVar(&cdpFlag, "cdp", false, "shorthand for --transport cdp")
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 30000, "command timeout in ms")
 }
 
@@ -62,6 +68,10 @@ func initConfig() {
 
 	viper.AutomaticEnv()
 	viper.SetEnvPrefix("HTCLI")
+	// Dashed config keys (cdp-port, chrome-path) map to underscored env vars
+	// (HTCLI_CDP_PORT, HTCLI_CHROME_PATH) — dashes can't appear in shell
+	// variable names.
+	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))
 
 	_ = viper.ReadInConfig()
 }
@@ -92,12 +102,46 @@ func GetClient() *api.Client {
 	return client
 }
 
-// GetTabID returns the target tab ID, or nil if not set.
-func GetTabID() *int {
-	if tabID > 0 {
-		return &tabID
+// GetTabID returns the numeric extension tab ID, nil if unset.
+// Errors when --tab is non-numeric (that form is CDP-only).
+func GetTabID() (*int, error) {
+	if tabTarget == "" {
+		return nil, nil
 	}
-	return nil
+	id, err := strconv.Atoi(tabTarget)
+	if err != nil || id <= 0 {
+		return nil, fmt.Errorf("--tab %q is not a numeric tab ID (CDP target IDs require --cdp)", tabTarget)
+	}
+	return &id, nil
+}
+
+// GetTabTarget returns the raw --tab value for the CDP transport ("" = unset).
+func GetTabTarget() string {
+	return tabTarget
+}
+
+// UseCDP resolves the transport: flags > config/env > default ext.
+func UseCDP() bool {
+	if transportFlag != "" {
+		return transportFlag == "cdp"
+	}
+	if cdpFlag {
+		return true
+	}
+	return viper.GetString("transport") == "cdp"
+}
+
+// GetCDPPort returns the CDP debugging port (flags none; env/config; default 9222).
+func GetCDPPort() int {
+	if p := viper.GetInt("cdp-port"); p > 0 {
+		return p
+	}
+	return 9222
+}
+
+// GetChromePath returns the configured Chrome binary path ("" = autodetect).
+func GetChromePath() string {
+	return viper.GetString("chrome-path")
 }
 
 // Execute runs the root command.

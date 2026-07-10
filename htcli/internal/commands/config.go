@@ -1,10 +1,12 @@
 package commands
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -16,6 +18,9 @@ type configData struct {
 	Token        string `json:"token"`
 	AMOAPIKey    string `json:"amo-api-key"`
 	AMOAPISecret string `json:"amo-api-secret"`
+	Transport    string `json:"transport,omitempty"`
+	CDPPort      int    `json:"cdp-port,omitempty"`
+	ChromePath   string `json:"chrome-path,omitempty"`
 }
 
 var configCmd = &cobra.Command{
@@ -32,6 +37,9 @@ var configShowCmd = &cobra.Command{
 			Token:        viper.GetString("token"),
 			AMOAPIKey:    viper.GetString("amo-api-key"),
 			AMOAPISecret: viper.GetString("amo-api-secret"),
+			Transport:    viper.GetString("transport"),
+			CDPPort:      viper.GetInt("cdp-port"),
+			ChromePath:   viper.GetString("chrome-path"),
 		}
 		if cfg.Server == "" {
 			cfg.Server = "http://127.0.0.1:3845"
@@ -50,6 +58,9 @@ var configShowCmd = &cobra.Command{
 		}
 		printMasked("AMO API Key", cfg.AMOAPIKey)
 		printMasked("AMO API Secret", cfg.AMOAPISecret)
+		fmt.Printf("Transport: %s\n", cmp.Or(cfg.Transport, "ext"))
+		fmt.Printf("CDP port: %d\n", cmp.Or(cfg.CDPPort, 9222))
+		fmt.Printf("Chrome path: %s\n", cmp.Or(cfg.ChromePath, "(autodetect)"))
 		return nil
 	},
 }
@@ -101,6 +112,28 @@ func setConfigValue(key, value string) error {
 		cfg.AMOAPIKey = value
 	case "amo-api-secret":
 		cfg.AMOAPISecret = value
+	case "transport":
+		cfg.Transport = value
+	case "cdp-port":
+		p, err := strconv.Atoi(value)
+		if err != nil || p < 1 || p > 65535 {
+			return fmt.Errorf("cdp-port must be a port number, got %q", value)
+		}
+		cfg.CDPPort = p
+		viper.Set(key, p)
+		data, err := json.MarshalIndent(cfg, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal config: %w", err)
+		}
+		if err := os.WriteFile(configFile, data, 0600); err != nil {
+			return fmt.Errorf("failed to write config: %w", err)
+		}
+		fmt.Printf("Set %s to %d\n", key, p)
+		return nil
+	case "chrome-path":
+		cfg.ChromePath = value
+	default:
+		return fmt.Errorf("unknown config key %q", key)
 	}
 
 	// Write config.
@@ -147,11 +180,51 @@ var configSetAMOSecretCmd = &cobra.Command{
 	},
 }
 
+func validateTransport(v string) error {
+	if v != "ext" && v != "cdp" {
+		return fmt.Errorf("transport must be \"ext\" or \"cdp\", got %q", v)
+	}
+	return nil
+}
+
+var configSetTransportCmd = &cobra.Command{
+	Use:   "set-transport <ext|cdp>",
+	Short: "Set default transport (ext = extension, cdp = direct CDP)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateTransport(args[0]); err != nil {
+			return err
+		}
+		return setConfigValue("transport", args[0])
+	},
+}
+
+var configSetCDPPortCmd = &cobra.Command{
+	Use:   "set-cdp-port <port>",
+	Short: "Set CDP debugging port (default 9222)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setConfigValue("cdp-port", args[0])
+	},
+}
+
+var configSetChromePathCmd = &cobra.Command{
+	Use:   "set-chrome-path <path>",
+	Short: "Set Chrome binary path for htcli browser start",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setConfigValue("chrome-path", args[0])
+	},
+}
+
 func init() {
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configSetServerCmd)
 	configCmd.AddCommand(configSetTokenCmd)
 	configCmd.AddCommand(configSetAMOKeyCmd)
 	configCmd.AddCommand(configSetAMOSecretCmd)
+	configCmd.AddCommand(configSetTransportCmd)
+	configCmd.AddCommand(configSetCDPPortCmd)
+	configCmd.AddCommand(configSetChromePathCmd)
 	rootCmd.AddCommand(configCmd)
 }

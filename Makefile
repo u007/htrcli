@@ -28,6 +28,10 @@ htcli-install:
 htcli-clean:
 	rm -rf $(HTCLI_DIR)/bin
 
+# Run the gated CDP end-to-end integration test (requires a real Chrome).
+htcli-test-integration:
+	cd $(HTCLI_DIR) && go test -tags integration ./internal/cdp/ -run TestCDPEndToEnd -v
+
 # ── Extension ──────────────────────────────────────────────────────────
 
 ext-build:

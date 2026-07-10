@@ -89,8 +89,15 @@ var pressCmd = &cobra.Command{
 	Short: "Press key (Enter, Tab, Ctrl+a, etc.)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return runInteractCDP("pressKey", "", args[0])
+		}
 		c := GetClient()
-		result, err := c.ExecuteCommand(GetTabID(), api.Command{
+		tabID, err := GetTabID()
+		if err != nil {
+			return err
+		}
+		result, err := c.ExecuteCommand(tabID, api.Command{
 			ID:     "1",
 			Action: "pressKey",
 			Value:  args[0],
@@ -144,6 +151,9 @@ var scrollCmd = &cobra.Command{
 	Short: "Scroll page (up, down, left, right)",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return errUnsupportedCDP("scroll")
+		}
 		c := GetClient()
 		pixels := 500
 		if len(args) > 1 {
@@ -154,7 +164,11 @@ var scrollCmd = &cobra.Command{
 			pixels = p
 		}
 
-		result, err := c.ExecuteCommand(GetTabID(), api.Command{
+		tabID, err := GetTabID()
+		if err != nil {
+			return err
+		}
+		result, err := c.ExecuteCommand(tabID, api.Command{
 			ID:     "1",
 			Action: "scrollTo",
 			Value:  args[0],
@@ -199,8 +213,15 @@ func commandError(result *api.CommandResult) error {
 }
 
 func runInteract(action, selector, value string) error {
+	if UseCDP() {
+		return runInteractCDP(action, selector, value)
+	}
 	c := GetClient()
-	result, err := c.ExecuteCommand(GetTabID(), api.Command{
+	tabID, err := GetTabID()
+	if err != nil {
+		return err
+	}
+	result, err := c.ExecuteCommand(tabID, api.Command{
 		ID:     "1",
 		Action: action,
 		Target: parseSelector(selector),

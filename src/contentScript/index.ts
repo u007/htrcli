@@ -18,7 +18,6 @@ import { executeCommand } from "./commandExecutor";
 import {
 	connect as connectRemote,
 	disconnect as disconnectRemote,
-	isConnected as remoteIsConnected,
 } from "./connectionManager";
 import { hideHighlight, removeHighlight, showHighlight } from "./highlighter";
 import {

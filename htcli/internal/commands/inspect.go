@@ -18,8 +18,15 @@ var findCmd = &cobra.Command{
 	Short: "Find element and return info",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return runInspectCDP("find", args[0], "")
+		}
 		c := GetClient()
-		result, err := c.ExecuteCommand(GetTabID(), api.Command{
+		tabID, err := GetTabID()
+		if err != nil {
+			return err
+		}
+		result, err := c.ExecuteCommand(tabID, api.Command{
 			ID:     "1",
 			Action: "find",
 			Target: parseSelector(args[0]),
@@ -47,6 +54,9 @@ var getTextCmd = &cobra.Command{
 	Short: "Get text content of element",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return runInspectCDP("getText", args[0], "")
+		}
 		return runInspect("getText", args[0])
 	},
 }
@@ -56,6 +66,9 @@ var getValueCmd = &cobra.Command{
 	Short: "Get input value",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return runInspectCDP("getValue", args[0], "")
+		}
 		return runInspect("getValue", args[0])
 	},
 }
@@ -65,8 +78,15 @@ var getAttrCmd = &cobra.Command{
 	Short: "Get attribute value",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return runInspectCDP("getAttribute", args[0], args[1])
+		}
 		c := GetClient()
-		result, err := c.ExecuteCommand(GetTabID(), api.Command{
+		tabID, err := GetTabID()
+		if err != nil {
+			return err
+		}
+		result, err := c.ExecuteCommand(tabID, api.Command{
 			ID:     "1",
 			Action: "getAttribute",
 			Target: parseSelector(args[0]),
@@ -96,6 +116,9 @@ var getHTMLCmd = &cobra.Command{
 	Short: "Get innerHTML of element",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return runInspectCDP("getHTML", args[0], "")
+		}
 		return runInspect("getHTML", args[0])
 	},
 }
@@ -104,8 +127,15 @@ var snapshotCmd = &cobra.Command{
 	Use:   "snapshot",
 	Short: "Get page accessibility tree with refs",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return runInspectCDP("getPageInfo", "", "")
+		}
 		c := GetClient()
-		result, err := c.ExecuteCommand(GetTabID(), api.Command{
+		tabID, err := GetTabID()
+		if err != nil {
+			return err
+		}
+		result, err := c.ExecuteCommand(tabID, api.Command{
 			ID:     "1",
 			Action: "getPageInfo",
 		})
@@ -131,6 +161,13 @@ var screenshotCmd = &cobra.Command{
 	Short: "Take screenshot (saves PNG)",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			path := ""
+			if len(args) > 0 {
+				path = args[0]
+			}
+			return runScreenshotCDP(path)
+		}
 		c := GetClient()
 
 		// Get screenshot data.
@@ -175,8 +212,15 @@ var pageInfoCmd = &cobra.Command{
 	Use:   "page",
 	Short: "Get page info (URL, title, dimensions)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return runInspectCDP("getPageInfo", "", "")
+		}
 		c := GetClient()
-		page, err := c.GetPageInfo(GetTabID())
+		tabID, err := GetTabID()
+		if err != nil {
+			return err
+		}
+		page, err := c.GetPageInfo(tabID)
 		if err != nil {
 			return err
 		}
@@ -207,8 +251,15 @@ var evalCmd = &cobra.Command{
 	Short: "Execute JavaScript",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return runEvalCDP(args[0])
+		}
 		c := GetClient()
-		result, err := c.ExecuteCommand(GetTabID(), api.Command{
+		tabID, err := GetTabID()
+		if err != nil {
+			return err
+		}
+		result, err := c.ExecuteCommand(tabID, api.Command{
 			ID:     "1",
 			Action: "evaluate",
 			Value:  args[0],
@@ -235,6 +286,9 @@ var commandCmd = &cobra.Command{
 	Short: "Send raw JSON command",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return errUnsupportedCDP("command")
+		}
 		// Parse the raw JSON as a Command.
 		var rawCmd api.Command
 		if err := json.Unmarshal([]byte(args[0]), &rawCmd); err != nil {
@@ -242,7 +296,11 @@ var commandCmd = &cobra.Command{
 		}
 
 		c := GetClient()
-		result, err := c.ExecuteCommand(GetTabID(), rawCmd)
+		tabID, err := GetTabID()
+		if err != nil {
+			return err
+		}
+		result, err := c.ExecuteCommand(tabID, rawCmd)
 		if err != nil {
 			return err
 		}
@@ -254,7 +312,11 @@ var commandCmd = &cobra.Command{
 
 func runInspect(action, selector string) error {
 	c := GetClient()
-	result, err := c.ExecuteCommand(GetTabID(), api.Command{
+	tabID, err := GetTabID()
+	if err != nil {
+		return err
+	}
+	result, err := c.ExecuteCommand(tabID, api.Command{
 		ID:     "1",
 		Action: action,
 		Target: parseSelector(selector),
@@ -281,6 +343,9 @@ var fetchCmd = &cobra.Command{
 	Long:  "Makes a fetch request via the extension background script, including session cookies. Use --json for full response.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return errUnsupportedCDP("fetch")
+		}
 		method, _ := cmd.Flags().GetString("method")
 		body, _ := cmd.Flags().GetString("body")
 
@@ -296,7 +361,11 @@ var fetchCmd = &cobra.Command{
 		}
 
 		c := GetClient()
-		result, err := c.ExecuteCommand(GetTabID(), api.Command{
+		tabID, err := GetTabID()
+		if err != nil {
+			return err
+		}
+		result, err := c.ExecuteCommand(tabID, api.Command{
 			ID:      "1",
 			Action:  "fetch",
 			Value:   args[0],
@@ -330,10 +399,17 @@ var printPDFCmd = &cobra.Command{
 	Short: "Print current tab to PDF via CDP (no save-as prompt)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return errUnsupportedCDP("printpdf")
+		}
 		outputPath := args[0]
 
 		c := GetClient()
-		result, err := c.ExecuteCommand(GetTabID(), api.Command{
+		tabID, err := GetTabID()
+		if err != nil {
+			return err
+		}
+		result, err := c.ExecuteCommand(tabID, api.Command{
 			ID:     "1",
 			Action: "printToPDF",
 		})
@@ -406,6 +482,9 @@ var downloadReceiptsCmd = &cobra.Command{
 	Use:   "downloadreceipts",
 	Short: "Download all AIA e-receipts for Tan Yee Wen 2025",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return errUnsupportedCDP("downloadreceipts")
+		}
 		c := GetClient()
 		outDir, _ := cmd.Flags().GetString("out")
 		aiaTabID := 98184784 // AIA ereceipt page pseudo-ID
@@ -434,8 +513,8 @@ var downloadReceiptsCmd = &cobra.Command{
 		if !aiaConnected {
 			fmt.Printf("AIA tab not connected. Opening fresh AIA tab from helper %d...\n", helperTabID)
 			openResult, openErr := c.ExecuteCommand(intPtr(helperTabID), api.Command{
-				ID:     "openaia",
-				Action: "openTab",
+				ID:      "openaia",
+				Action:  "openTab",
 				Options: map[string]any{"url": erReceiptURL},
 			})
 			if openErr != nil || !openResult.Success {

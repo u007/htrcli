@@ -108,6 +108,40 @@ Firefox extension automatically falls back to a direct WebSocket connection
 to the Bun server — see **Alternative: Bun server** below. The side-panel
 indicator shows **Online** for either transport.
 
+## CDP transport: direct Chrome control
+
+`htcli` can also drive Chrome directly over the Chrome DevTools Protocol with
+`--cdp` (or `htcli config set-transport cdp`). Use this for browser-restricted
+pages like the Chrome Web Store dev console, or for headless/background runs
+where you don't want the extension involved.
+
+```bash
+# Start a dedicated Chrome with a fresh profile at ~/.htcli/chrome-profile.
+htcli browser start
+htcli browser start --headless
+
+htcli browser status
+htcli browser hide
+htcli browser show
+htcli browser stop
+
+# Once Chrome is started, point commands at the CDP transport.
+htcli --cdp open https://chrome.google.com/webstore/.../console
+htcli --cdp fill "#email" "me@example.com"
+htcli --cdp click "#submit"
+htcli --cdp screenshot out.png
+htcli --cdp tabs list
+```
+
+Notes:
+
+- Sign in once with `htcli browser start` in visible mode, then re-use the same
+  dedicated profile for headless/background automation.
+- `--tab` means a numeric extension tab ID on the default transport, but a CDP
+  target ID on `--cdp`.
+- The debugging port is a localhost-only control channel into a signed-in
+  profile; treat it like a trusted local admin surface.
+
 ## Alternative: Bun server instead of `htcli serve`
 
 If you'd rather use the WebSocket-based Bun server instead of the native

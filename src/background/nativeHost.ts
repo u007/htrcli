@@ -394,7 +394,6 @@ async function handleFetchInPage(
 		const results = await chrome.scripting.executeScript({
 			target: { tabId },
 			world: "MAIN",
-			// biome-ignore lint/complexity/useArrowFunction: serialized to page context
 			// Synchronous XHR so no Promise is returned — avoids Chrome's known
 			// issue where executeScript world:MAIN async return values are null.
 			func: (
@@ -408,7 +407,7 @@ async function handleFetchInPage(
 					const raw = localStorage.getItem("OAOP_LOGINDATA");
 					if (raw) {
 						const parsed = JSON.parse(raw) as { jwt?: string };
-						if (parsed.jwt) headers["Authorization"] = `Bearer ${parsed.jwt}`;
+						if (parsed.jwt) headers.Authorization = `Bearer ${parsed.jwt}`;
 					}
 				} catch {
 					// intentionally not logged: running in page context, failures are benign
@@ -914,7 +913,7 @@ async function dispatchCdpInputWithRetry(
 				files: [contentScriptFile],
 			});
 			await new Promise((r) => setTimeout(r, 300));
-		} catch (injectErr) {
+		} catch {
 			throw new Error("tab not available");
 		}
 		return await dispatchCdpInput(tabId, payload);

@@ -6,7 +6,8 @@
 		"useIgnoreFile": true
 	},
 	"files": {
-		"ignoreUnknown": false
+		"ignoreUnknown": false,
+		"includes": ["**", "!htcli/internal/cdp/bundle/htcli-dom.js"]
 	},
 	"formatter": {
 		"enabled": true,

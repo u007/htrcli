@@ -11,6 +11,10 @@ node_modules
 /package
 /firefox/build
 /firefox/htrncontrol-firefox.xpi
+# htcli-dom.js is a go:embed input — it must stay committed or fresh clones
+# cannot `go build` htcli. Rebuild with: bun run cdp-bundle:build
+/htcli/internal/cdp/bundle/*
+!/htcli/internal/cdp/bundle/htcli-dom.js
 
 # CI/CD artifacts
 *.crx

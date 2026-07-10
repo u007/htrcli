@@ -4,6 +4,7 @@ go 1.22.0
 
 require (
 	github.com/fatih/color v1.17.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/viper v1.19.0
 )

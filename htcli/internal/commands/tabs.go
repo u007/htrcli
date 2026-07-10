@@ -17,6 +17,9 @@ var tabsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List connected browser tabs",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return runTabsListCDP()
+		}
 		c := GetClient()
 		tabs, err := c.ListTabs()
 		if err != nil {
@@ -59,6 +62,9 @@ var tabsGetCmd = &cobra.Command{
 	Short: "Get information about a specific tab",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return errUnsupportedCDP("tabs get")
+		}
 		id, err := strconv.Atoi(args[0])
 		if err != nil {
 			return fmt.Errorf("invalid tab ID: %s", args[0])

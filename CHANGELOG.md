@@ -9,6 +9,13 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.4.3 [2026.07.10]
+
+- feat: add direct Chrome DevTools Protocol transport to `htcli` via `--cdp` / `transport=cdp`, plus `htcli browser start|stop|status|hide|show` to manage a dedicated Chrome profile (`htcli/internal/cdp`, `htcli/internal/commands`)
+- feat: route existing browser commands over CDP when enabled, including DOM verbs, navigation, screenshots, and tab listing
+- feat: add an embedded DOM-command bundle built from `src/contentScript/commandExecutor.ts` and a gated integration smoke test for the CDP path
+- docs: explain the CDP transport, browser lifecycle, and tab-ID namespace in `htcli/README.md` and `GUIDE.md`
+
 ## 0.4.2 [2026.07.10]
 
 - chore: bump version to 0.4.2

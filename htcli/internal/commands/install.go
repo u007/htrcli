@@ -23,11 +23,11 @@ type chromeManifest struct {
 }
 
 type firefoxManifest struct {
-	Name               string   `json:"name"`
-	Description        string   `json:"description"`
-	Path               string   `json:"path"`
-	Type               string   `json:"type"`
-	AllowedExtensions  []string `json:"allowed_extensions"`
+	Name              string   `json:"name"`
+	Description       string   `json:"description"`
+	Path              string   `json:"path"`
+	Type              string   `json:"type"`
+	AllowedExtensions []string `json:"allowed_extensions"`
 }
 
 var (
