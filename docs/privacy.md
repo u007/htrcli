@@ -148,7 +148,7 @@ We may update this privacy policy from time to time. Changes will be reflected i
 
 HTR NControl is open-source software. You can review the complete source code to verify all claims made in this privacy policy:
 
-- **Repository:** [github.com/jameshowe/how-to-recorder](https://github.com/jameshowe/how-to-recorder)
+- **Repository:** [github.com/u007/how-to-recorder](https://github.com/u007/how-to-recorder)
 - **Key files:**
   - `src/contentScript/inputHandler.ts` — Sensitive field masking logic
   - `src/utils/sensitiveFields.ts` — Sensitive field detection patterns
@@ -159,4 +159,4 @@ HTR NControl is open-source software. You can review the complete source code to
 
 ## Contact
 
-If you have questions about this privacy policy or the Extension's data practices, please open an issue on our [GitHub repository](https://github.com/jameshowe/how-to-recorder/issues).
+If you have questions about this privacy policy or the Extension's data practices, please open an issue on our [GitHub repository](https://github.com/u007/how-to-recorder/issues).
