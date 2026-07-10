@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — HTR NControl</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 3rem 2rem 4rem;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 3rem;
+      padding-bottom: 2rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    header h1 {
+      font-size: 2rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
+    header .last-updated {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+
+    h2 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin-top: 2.5rem;
+      margin-bottom: 1rem;
+      color: var(--accent);
+    }
+
+    h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-top: 1.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    p {
+      margin-bottom: 1rem;
+      color: var(--text);
+    }
+
+    .highlight {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      margin: 1.5rem 0;
+      font-weight: 500;
+    }
+
+    .highlight strong {
+      color: #3fb950;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0 1.5rem;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border: 1px solid var(--border);
+    }
+
+    th {
+      background: var(--surface);
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    td {
+      color: var(--text-muted);
+    }
+
+    td:first-child {
+      color: var(--text);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    ul {
+      margin: 0.75rem 0 1rem 1.5rem;
+      color: var(--text-muted);
+    }
+
+    li {
+      margin-bottom: 0.4rem;
+    }
+
+    li strong {
+      color: var(--text);
+    }
+
+    code {
+      background: var(--surface);
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+      font-size: 0.85em;
+      color: var(--accent);
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      color: var(--accent-hover);
+      text-decoration: underline;
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 2rem 0;
+    }
+
+    footer {
+      text-align: center;
+      margin-top: 3rem;
+      padding-top: 2rem;
+      border-top: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+
+    footer a {
+      color: var(--text-muted);
+    }
+
+    footer a:hover {
+      color: var(--accent);
+    }
+
+    @media (max-width: 600px) {
+      .container { padding: 2rem 1rem; }
+      header h1 { font-size: 1.5rem; }
+      h2 { font-size: 1.2rem; }
+      table { font-size: 0.8rem; }
+      th, td { padding: 0.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Privacy Policy</h1>
+      <p class="last-updated">Last updated: July 10, 2026</p>
+    </header>
+
+    <h2>Overview</h2>
+    <p>
+      HTR NControl ("the Extension") is an open-source browser extension that records user interactions
+      with web pages to generate step-by-step documentation. This privacy policy explains what data the
+      Extension collects, how it is stored, and your rights regarding that data.
+    </p>
+    <div class="highlight">
+      <strong>The Extension does not collect, transmit, or sell any data to third parties.</strong>
+      All data stays on your device unless you explicitly export it.
+    </div>
+
+    <h2>Data We Collect</h2>
+    <p>
+      The Extension captures the following data <strong>locally on your device</strong> while you are
+      actively recording a session:
+    </p>
+    <table>
+      <thead>
+        <tr><th>Data Type</th><th>Description</th><th>When Collected</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Screenshots</td><td>PNG images of the visible browser tab</td><td>At recording start, on each interaction, and on user request</td></tr>
+        <tr><td>Click events</td><td>Element tag, text content, CSS selector, and attributes</td><td>When you click interactive elements (buttons, links, inputs, etc.)</td></tr>
+        <tr><td>Input events</td><td>Form field values, labels, and selectors</td><td>When you type in form fields (sensitive values are automatically masked)</td></tr>
+        <tr><td>Navigation events</td><td>Page URL and title</td><td>When you navigate to a new page</td></tr>
+        <tr><td>Audio narration</td><td>WebM audio recordings (optional)</td><td>When you enable audio recording and speak during a step</td></tr>
+        <tr><td>Annotations</td><td>Text notes you add between steps</td><td>When you manually insert an annotation</td></tr>
+        <tr><td>Tab metadata</td><td>Tab IDs, titles, and URLs</td><td>Throughout the recording session</td></tr>
+      </tbody>
+    </table>
+
+    <h3>What We Do NOT Collect</h3>
+    <ul>
+      <li>Browsing history outside of active recording sessions</li>
+      <li>Personal identity information</li>
+      <li>Cookies or tracking data</li>
+      <li>Analytics, telemetry, or usage statistics</li>
+      <li>Data from pages you visit when the Extension is idle</li>
+      <li>Form field values from sensitive fields (these are automatically masked)</li>
+    </ul>
+
+    <h2>How Your Data Is Stored</h2>
+    <p>
+      All recorded data is stored <strong>locally in your browser</strong> using:
+    </p>
+    <ul>
+      <li><strong>IndexedDB</strong> (<code>HowToRecorderDB</code>) — Primary storage for screenshots, steps, annotations, and audio blobs</li>
+      <li><strong>chrome.storage.local</strong> — Extension settings and configuration</li>
+    </ul>
+    <div class="highlight">
+      <strong>No data is sent to any remote server, cloud service, or third party.</strong>
+      Your recordings exist only in your browser's local storage.
+    </div>
+
+    <h2>Sensitive Data Handling</h2>
+    <p>
+      The Extension automatically detects and masks sensitive form field values before they are stored.
+      This includes:
+    </p>
+    <ul>
+      <li><strong>Passwords</strong> (<code>&lt;input type="password"&gt;</code>)</li>
+      <li><strong>Credit card numbers</strong> (fields with <code>autocomplete="cc-number"</code>, <code>cc-csc</code>, etc.)</li>
+      <li><strong>Social Security Numbers</strong> and other government identifiers</li>
+      <li><strong>API keys, tokens, and secrets</strong> (fields with names/labels matching common patterns like <code>api_key</code>, <code>token</code>, <code>secret</code>, <code>ssn</code>, <code>otp</code>, <code>2fa</code>, etc.)</li>
+    </ul>
+    <p>
+      Detected sensitive values are replaced with <code>********</code> at the time of capture. The
+      Extension sets an <code>isSensitive</code> flag on these steps, and exports display
+      <code>"[Sensitive data masked]"</code> in place of the actual value.
+    </p>
+
+    <h2>Data Transmission</h2>
+    <p>
+      The Extension may communicate over the network <strong>only</strong> in the following limited,
+      local scenarios:
+    </p>
+
+    <h3>Local WebSocket Server (Remote Control)</h3>
+    <p>
+      When remote control is enabled, the Extension connects to a WebSocket server running on your own
+      machine (<code>ws://127.0.0.1:3845</code>). This server is:
+    </p>
+    <ul>
+      <li>Bound to localhost only (not accessible from the network)</li>
+      <li>Protected by IP whitelist and optional bearer token authentication</li>
+      <li>Used solely for executing remote commands (click, fill, navigate, screenshot) from your own tools</li>
+    </ul>
+
+    <h3>Native Messaging (htcli)</h3>
+    <p>
+      The Extension can optionally connect to a local native messaging host (<code>com.htrcontrol.host</code>)
+      for remote control. This communication stays entirely on your device.
+    </p>
+
+    <h3>No External Connections</h3>
+    <p>The Extension makes <strong>zero</strong> connections to external servers, APIs, or third-party services. There is:</p>
+    <ul>
+      <li>No analytics or tracking</li>
+      <li>No telemetry</li>
+      <li>No crash reporting</li>
+      <li>No advertising networks</li>
+      <li>No data brokers</li>
+    </ul>
+
+    <h2>Permissions</h2>
+    <p>The Extension requests the following browser permissions:</p>
+    <table>
+      <thead>
+        <tr><th>Permission</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>activeTab</code></td><td>Capture screenshots of the current tab</td></tr>
+        <tr><td><code>tabs</code></td><td>Track tab navigation and manage multiple tabs</td></tr>
+        <tr><td><code>contextMenus</code></td><td>Provide right-click annotation options</td></tr>
+        <tr><td><code>downloads</code></td><td>Save exported files (JSON, Markdown, ZIP) to your device</td></tr>
+        <tr><td><code>storage</code></td><td>Store extension settings locally</td></tr>
+        <tr><td><code>scripting</code></td><td>Inject content scripts into newly opened tabs</td></tr>
+        <tr><td><code>sidePanel</code></td><td>Display the main user interface</td></tr>
+        <tr><td><code>nativeMessaging</code></td><td>Connect to the local htcli native host (optional)</td></tr>
+        <tr><td><code>debugger</code></td><td>Generate PDFs via Chrome DevTools Protocol (optional)</td></tr>
+        <tr><td><code>host_permissions</code></td><td>Inject content scripts to track interactions on any page you visit while recording</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Data Export</h2>
+    <p>
+      You can export your recorded sessions at any time using the Export feature in the side panel.
+      Available formats:
+    </p>
+    <ul>
+      <li><strong>JSON</strong> — Machine-readable session data</li>
+      <li><strong>Markdown</strong> — Human-readable step-by-step documentation with embedded screenshots</li>
+      <li><strong>ZIP</strong> — Bundled archive containing JSON, Markdown, screenshots, and audio files</li>
+    </ul>
+    <p>
+      Exports are triggered <strong>manually by you</strong>. The Extension never automatically exports
+      or uploads your data.
+    </p>
+
+    <h2>Data Retention</h2>
+    <p>Your recorded sessions remain in your browser's IndexedDB until you:</p>
+    <ul>
+      <li>Manually delete them through the Extension's UI</li>
+      <li>Clear your browser's extension data</li>
+      <li>Uninstall the Extension</li>
+    </ul>
+    <p>The Extension does not automatically delete or expire your data.</p>
+
+    <h2>Children's Privacy</h2>
+    <p>
+      The Extension is not directed at children under 13. We do not knowingly collect information
+      from children.
+    </p>
+
+    <h2>Changes to This Policy</h2>
+    <p>
+      We may update this privacy policy from time to time. Changes will be reflected in the "Last
+      updated" date at the top of this document. Continued use of the Extension after changes
+      constitutes acceptance of the updated policy.
+    </p>
+
+    <h2>Open Source</h2>
+    <p>
+      HTR NControl is open-source software. You can review the complete source code to verify all
+      claims made in this privacy policy:
+    </p>
+    <ul>
+      <li><strong>Repository:</strong> <a href="https://github.com/jameshowe/how-to-recorder">github.com/jameshowe/how-to-recorder</a></li>
+      <li><strong>Key files:</strong>
+        <ul>
+          <li><code>src/contentScript/inputHandler.ts</code> — Sensitive field masking logic</li>
+          <li><code>src/utils/sensitiveFields.ts</code> — Sensitive field detection patterns</li>
+          <li><code>src/background/index.ts</code> — Screenshot capture and data storage</li>
+          <li><code>src/manifest.ts</code> — Extension permissions</li>
+        </ul>
+      </li>
+    </ul>
+
+    <h2>Contact</h2>
+    <p>
+      If you have questions about this privacy policy or the Extension's data practices, please
+      <a href="https://github.com/jameshowe/how-to-recorder/issues">open an issue</a> on our
+      GitHub repository.
+    </p>
+
+    <footer>
+      <p>
+        <a href="https://github.com/jameshowe/how-to-recorder">HTR NControl</a> ·
+        <a href="https://github.com/jameshowe/how-to-recorder/blob/main/docs/privacy.md">View on GitHub</a>
+      </p>
+    </footer>
+  </div>
+</body>
+</html>
