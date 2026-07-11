@@ -25,6 +25,7 @@ import {
 	authorizeWs,
 	loadAuthConfig,
 } from "./auth";
+import { loadEnv } from "./loadEnv";
 import type {
 	ApiResponse,
 	Command,
@@ -51,6 +52,10 @@ const NAV_ACTIONS = new Set(["navigate", "reload", "goBack", "goForward"]);
 const EVALUATE_VIA_CDP: CommandAction = "evaluateViaCdp";
 
 // ─── Configuration ─────────────────────────────────────────────────
+
+// Load repo-root .env files (cwd is `server/` when launched via `bun run
+// server`, so Bun's automatic .env loading won't find them otherwise).
+loadEnv();
 
 const PORT = Number(process.env.HTR_PORT) || 3845;
 const HOST = process.env.HTR_HOST || "127.0.0.1";

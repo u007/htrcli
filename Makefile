@@ -2,6 +2,7 @@
 		htrcli-build htrcli-build-all htrcli-install htrcli-clean \
 		ext-build ext-dev ext-zip firefox-build firefox-install firefox-zip
 
+-include .env
 -include .env.local
 export
 

@@ -9,6 +9,10 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.4.5 [2026.07.12]
+
+- fix: server loads repo-root `.env` and `.env.local` via new `loadEnv()` utility so `HTR_BEARER_TOKEN`, `HTR_PORT`, etc. are picked up even when the server cwd is `server/` (Makefile also `-include .env` for make targets)
+
 ## 0.4.4 [2026.07.11]
 
 - chore: rename the Go CLI from `htcli` to `htrcli` — directory `htcli/` → `htrcli/`, binary name, Go module (`github.com/u007/htcli` → `github.com/u007/htrcli`), Makefile targets (`htcli-*` → `htrcli-*`), and the spec renamed `SPEC_HTCLI.md` → `SPEC_HTRCLI.md`
