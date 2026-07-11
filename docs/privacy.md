@@ -71,7 +71,7 @@ When remote control is enabled, the Extension connects to a WebSocket server run
 - Protected by IP whitelist and optional bearer token authentication
 - Used solely for executing remote commands (click, fill, navigate, screenshot) from your own tools
 
-### Native Messaging (htcli)
+### Native Messaging (htrcli)
 
 The Extension can optionally connect to a local native messaging host (`com.htrcontrol.host`) for remote control. This communication stays entirely on your device.
 
@@ -100,7 +100,7 @@ The Extension requests the following browser permissions:
 | `storage` | Store extension settings locally |
 | `scripting` | Inject content scripts into newly opened tabs |
 | `sidePanel` | Display the main user interface |
-| `nativeMessaging` | Connect to the local htcli native host (optional) |
+| `nativeMessaging` | Connect to the local htrcli native host (optional) |
 | `debugger` | Generate PDFs via Chrome DevTools Protocol (optional) |
 | `host_permissions: ["<all_urls>"]` | Inject content scripts to track interactions on any page you visit while recording |
 

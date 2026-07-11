@@ -24,15 +24,15 @@ bun run firefox:zip        # Build + package as .xpi
 bun run server       # Start API server (port 3845)
 bun run server:dev   # Server with hot reload
 
-# htcli (Go CLI in htcli/)
-make htcli-build     # go build → htcli/bin/htcli
-make htcli-install   # go install (global)
-make build           # htcli-build + ext-build
+# htrcli (Go CLI in htrcli/)
+make htrcli-build     # go build → htrcli/bin/htrcli
+make htrcli-install   # go install (global)
+make build           # htrcli-build + ext-build
 
-# htcli native-messaging daemon (alternative to the Bun server on :3845)
-htcli install --browser chrome  --extension-id <id>   # register native host (Chrome)
-htcli install --browser firefox --extension-id htrcontrol@mercstudio.com
-htcli serve          # run daemon: HTTP :3845 + Unix socket relay (Chrome+Firefox)
+# htrcli native-messaging daemon (alternative to the Bun server on :3845)
+htrcli install --browser chrome  --extension-id <id>   # register native host (Chrome)
+htrcli install --browser firefox --extension-id htrcontrol@mercstudio.com
+htrcli serve          # run daemon: HTTP :3845 + Unix socket relay (Chrome+Firefox)
 
 # Utility
 make close           # Kill process on :3845
@@ -46,7 +46,7 @@ This is a **multi-part project** with four independent runtimes:
 
 ```
 ┌──────────────┐   HTTP   ┌─────────────────┐  WebSocket  ┌────────────────────────┐
-│  htcli (Go)  │─────────►│  server/ (Bun)  │────────────►│  Extension (Chrome/FF) │
+│  htrcli (Go)  │─────────►│  server/ (Bun)  │────────────►│  Extension (Chrome/FF) │
 └──────────────┘          │  port 3845      │             └────────────────────────┘
                           └─────────────────┘
 ```
@@ -68,7 +68,7 @@ Built with Vite + `@crxjs/vite-plugin` (Chrome only). Entry points defined in `s
   - `components/` — UI components
 - **`src/types/recording.ts`** — All shared TypeScript interfaces and `MessageType` union
 - **`src/utils/`** — Export helpers (JSON, Markdown, ZIP via jszip), sensitive field detection
-- **`src/nativeHost.ts`** — Native messaging bridge to `htcli` host
+- **`src/nativeHost.ts`** — Native messaging bridge to `htrcli` host
 
 ### Firefox workspace (`firefox/`)
 
@@ -80,7 +80,7 @@ Plain Vite build (no crxjs). `firefox/vite.config.ts` emits `manifest.json` dire
 
 ### Server (`server/`)
 
-Independent Bun project (own `package.json`). HTTP + WebSocket API on port 3845. The extension's content script connects here via WS; external tools (including htcli) call the HTTP API.
+Independent Bun project (own `package.json`). HTTP + WebSocket API on port 3845. The extension's content script connects here via WS; external tools (including htrcli) call the HTTP API.
 
 Auth: IP whitelist (localhost only) + bearer token. Override with env vars:
 ```bash
@@ -89,9 +89,9 @@ HTR_ENABLE_BEARER_TOKEN=false    # Disable token auth
 HTR_ALLOWED_IPS="127.0.0.1,..."  # Expand whitelist
 ```
 
-### htcli (`htcli/`)
+### htrcli (`htrcli/`)
 
-Go CLI (Go 1.22+). Wraps the server HTTP API. Config stored at `~/.htcli/config.json`. Priority order: flags > env (`HTCLI_SERVER`, `HTCLI_TOKEN`) > config file.
+Go CLI (Go 1.22+). Wraps the server HTTP API. Config stored at `~/.htrcli/config.json`. Priority order: flags > env (`HTRCLI_SERVER`, `HTRCLI_TOKEN`) > config file.
 
 ## Key Conventions
 

@@ -60,7 +60,7 @@ export interface RecordingSession {
 }
 
 // Connection mode tracked by the background and surfaced to the UI.
-// - "native": connected via native messaging (htcli relay → daemon)
+// - "native": connected via native messaging (htrcli relay → daemon)
 // - "ws": connected directly to the remote-control server over WebSocket
 //         (content-script fallback when native messaging is unavailable)
 // - "disconnected": transient — relay exited (daemon down) or WS dropped,

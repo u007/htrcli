@@ -961,7 +961,7 @@ async function handlePrepareKeys(
 	target: TargetSelector | undefined,
 	timeoutMs = 5000,
 ): Promise<{ focused: boolean }> {
-	// Targetless press (htcli `press Enter` after a `fill`) follows Playwright
+	// Targetless press (htrcli `press Enter` after a `fill`) follows Playwright
 	// keyboard.press semantics: the CDP key events go to whatever currently has
 	// focus, so there is nothing to wait for or refocus here.
 	if (!target) {

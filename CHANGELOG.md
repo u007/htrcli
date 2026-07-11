@@ -9,6 +9,12 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.4.4 [2026.07.11]
+
+- chore: rename the Go CLI from `htcli` to `htrcli` — directory `htcli/` → `htrcli/`, binary name, Go module (`github.com/u007/htcli` → `github.com/u007/htrcli`), Makefile targets (`htcli-*` → `htrcli-*`), and the spec renamed `SPEC_HTCLI.md` → `SPEC_HTRCLI.md`
+- chore: move the CLI config home from `~/.htcli` to `~/.htrcli` (config.json, browser.json, chrome-profile, daemon.sock) and drop the tracked `htrcli/htcli_bin` binary from version control
+- docs: update all `htcli` references to `htrcli` across `CLAUDE.md`, `GUIDE.md`, `firefox/README.md`, `docs/privacy.md` / `docs/privacy.html`, `htrcli/README.md`, and `skills/htrcli/SKILL.md`, plus the extension service-worker and content-script source
+
 ## 0.4.3 [2026.07.10]
 
 - feat: add direct Chrome DevTools Protocol transport to `htcli` via `--cdp` / `transport=cdp`, plus `htcli browser start|stop|status|hide|show` to manage a dedicated Chrome profile (`htcli/internal/cdp`, `htcli/internal/commands`)

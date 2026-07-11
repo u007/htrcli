@@ -530,7 +530,7 @@ async function waitForNavigation(
 	startedAt: number,
 	timeoutMs: number,
 ): Promise<CommandResult> {
-	// Stay under htcli's 30s HTTP client timeout so callers get a clean error
+	// Stay under htrcli's 30s HTTP client timeout so callers get a clean error
 	const deadline = startedAt + Math.min(timeoutMs, 25000);
 
 	while (Date.now() < deadline) {

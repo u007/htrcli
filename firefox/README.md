@@ -99,15 +99,15 @@ bun run firefox:zip
 This produces `firefox/htrncontrol-firefox.xpi`, ready to upload
 to [addons.mozilla.org](https://addons.mozilla.org) or distribute
 directly (Firefox will install unsigned XPIs with a confirmation
-prompt). To sign and submit to AMO through `htcli`, use:
+prompt). To sign and submit to AMO through `htrcli`, use:
 
 ```bash
-htcli publish --build            # public ("listed") channel on addons.mozilla.org
-htcli publish --channel unlisted # self-distributed / "own use"
+htrcli publish --build            # public ("listed") channel on addons.mozilla.org
+htrcli publish --channel unlisted # self-distributed / "own use"
 ```
 
-`htcli publish` runs the Firefox build and calls `web-ext sign` for you.
-See the [htcli README](../htcli/README.md#publishing-to-addonsmozillaorg-amo)
+`htrcli publish` runs the Firefox build and calls `web-ext sign` for you.
+See the [htrcli README](../htrcli/README.md#publishing-to-addonsmozillaorg-amo)
 for credential setup and channel details.
 
 ## Development
@@ -135,28 +135,28 @@ add-on after each change (`bun run firefox:build` is fast — sub-second).
 | `.zip` artifact   | `htrncontrol.zip`               | `htrncontrol-firefox.xpi` (Firefox convention) |
 
 Everything else — recording state, IndexedDB sessions, exports, the
-`htcli` native messaging host, screenshots, sensitive-field masking,
+`htrcli` native messaging host, screenshots, sensitive-field masking,
 audio capture, the devtools panel, etc. — is shared code under `src/`
 and behaves identically.
 
-## Remote control via `htcli` (native messaging)
+## Remote control via `htrcli` (native messaging)
 
-To drive this Firefox build from the [`htcli`](../htcli) CLI over native
+To drive this Firefox build from the [`htrcli`](../htrcli) CLI over native
 messaging, register the native host for Firefox (Firefox uses
 `allowed_extensions` + the add-on ID, not Chrome's `allowed_origins`):
 
 ```bash
-htcli install --browser firefox --extension-id htrcontrol@mercstudio.com
+htrcli install --browser firefox --extension-id htrcontrol@mercstudio.com
 ```
 
 This writes the host manifest to
 `~/Library/Application Support/Mozilla/NativeMessagingHosts/` (macOS) or
 `~/.mozilla/native-messaging-hosts/` (Linux). Then reload the extension
-(`about:debugging` → **Reload**) and start the daemon with `htcli serve`.
+(`about:debugging` → **Reload**) and start the daemon with `htrcli serve`.
 
 Firefox and Chrome can both be registered and connected to the same daemon
 at once; commands route to whichever browser owns the target tab. See the
-[htcli README](../htcli/README.md#native-messaging-daemon-mode) for details.
+[htrcli README](../htrcli/README.md#native-messaging-daemon-mode) for details.
 
 > The add-on ID comes from `browser_specific_settings.gecko.id` in the
 > built `manifest.json`. The native host requires the `nativeMessaging`
@@ -164,15 +164,15 @@ at once; commands route to whichever browser owns the target tab. See the
 
 ### Remote control without native messaging (WebSocket fallback)
 
-Native messaging is the preferred transport, but it requires the `htcli`
-host to be installed and the `htcli serve` daemon to be running. If native
+Native messaging is the preferred transport, but it requires the `htrcli`
+host to be installed and the `htrcli serve` daemon to be running. If native
 messaging is unavailable on Firefox (host not installed, daemon down, or the
 add-on ID not allowed), the extension **automatically falls back to a direct
 WebSocket connection** to the remote-control server. You do **not** need to
 register a native host to use remote control in this mode.
 
 To use the WebSocket fallback, run the Bun API server (which speaks the
-extension's WebSocket protocol) instead of `htcli serve`:
+extension's WebSocket protocol) instead of `htrcli serve`:
 
 ```bash
 bun run server          # HTTP + WebSocket on ws://127.0.0.1:3845
@@ -184,9 +184,9 @@ The extension connects to the URL stored in `remoteControlServer`
 `key.pem` are present. If you have configured TLS, set the URL to
 `wss://127.0.0.1:3845` in Options.
 
-> `htcli serve` does **not** expose the WebSocket endpoint (it only offers
+> `htrcli serve` does **not** expose the WebSocket endpoint (it only offers
 > the HTTP API plus the native-messaging relay), so the WebSocket fallback
-> only works against `bun run server`. Use `htcli serve` for the native-
+> only works against `bun run server`. Use `htrcli serve` for the native-
 > messaging path, or `bun run server` for the WebSocket path.
 
 The side-panel connection indicator now reflects whichever transport is

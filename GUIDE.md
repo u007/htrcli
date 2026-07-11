@@ -1,7 +1,7 @@
-# Setup Guide: Chrome Extension + `htcli serve`
+# Setup Guide: Chrome Extension + `htrcli serve`
 
-This guide covers wiring the Chrome extension to `htcli` via the native-messaging
-daemon (`htcli serve`) — no Bun `server/` process needed. `htcli serve` provides
+This guide covers wiring the Chrome extension to `htrcli` via the native-messaging
+daemon (`htrcli serve`) — no Bun `server/` process needed. `htrcli serve` provides
 the same HTTP API on `:3845` itself, talking to the extension over a native
 messaging relay instead of WebSocket.
 
@@ -18,40 +18,40 @@ bun run build        # → build/
 - **Load unpacked** → select `build/`
 - Copy the **Extension ID** shown on the card (needed in step 3)
 
-## 2. Build htcli
+## 2. Build htrcli
 
 ```bash
-cd htcli
-make build            # → htcli/bin/htcli
-# or: make htcli-install   (go install, puts htcli on PATH globally)
+cd htrcli
+make build            # → htrcli/bin/htrcli
+# or: make htrcli-install   (go install, puts htrcli on PATH globally)
 ```
 
-`htcli install` (step 3) requires `htcli` to already be resolvable via
+`htrcli install` (step 3) requires `htrcli` to already be resolvable via
 `exec.LookPath`, so make sure the binary is on `PATH`:
 
 ```bash
-export PATH="$PATH:/Users/james/www/htrncontrol/htcli/bin"
+export PATH="$PATH:/Users/james/www/htrncontrol/htrcli/bin"
 ```
 
 ## 3. Register the native messaging host
 
 ```bash
-htcli install --browser chrome --extension-id <chrome-extension-id>
+htrcli install --browser chrome --extension-id <chrome-extension-id>
 ```
 
 This writes `com.htrcontrol.host.json` to Chrome's native messaging
 manifest directory (macOS: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`),
-pointing at your `htcli` binary and allowing your extension ID to connect.
+pointing at your `htrcli` binary and allowing your extension ID to connect.
 
 Then **reload the extension** at `chrome://extensions/` so it re-reads the
 host registration.
 
-To undo: `htcli install --browser chrome --uninstall`
+To undo: `htrcli install --browser chrome --uninstall`
 
 ## 4. Start the daemon
 
 ```bash
-htcli serve
+htrcli serve
 ```
 
 This binds:
@@ -60,47 +60,47 @@ This binds:
 
 Only one process can hold `:3845` — don't run `bun run server` at the same time.
 
-If no bearer token is set, `htcli serve` starts **unauthenticated** and warns
+If no bearer token is set, `htrcli serve` starts **unauthenticated** and warns
 you. Set a token first (recommended):
 
 ```bash
-htcli config set-token <your-token>
-htcli serve            # picks up the saved token automatically
-# or override per-run: HTR_BEARER_TOKEN=<token> htcli serve
+htrcli config set-token <your-token>
+htrcli serve            # picks up the saved token automatically
+# or override per-run: HTR_BEARER_TOKEN=<token> htrcli serve
 ```
 
-## 5. Configure htcli as a client and verify
+## 5. Configure htrcli as a client and verify
 
 ```bash
-htcli config set-server http://127.0.0.1:3845
-htcli config set-token <same-token-as-above>
-htcli health
+htrcli config set-server http://127.0.0.1:3845
+htrcli config set-token <same-token-as-above>
+htrcli health
 ```
 
-`htcli health` should report a connected extension. If not:
-- Confirm the extension was reloaded after `htcli install`
-- Confirm `htcli serve` is running and the extension shows as connected (check the side panel / background console for `[NativeHost]` logs)
+`htrcli health` should report a connected extension. If not:
+- Confirm the extension was reloaded after `htrcli install`
+- Confirm `htrcli serve` is running and the extension shows as connected (check the side panel / background console for `[NativeHost]` logs)
 
 ## 6. Drive the browser
 
 ```bash
-htcli tabs list
-htcli open https://example.com
-htcli snapshot -i
-htcli click @e3
-htcli screenshot page.png
+htrcli tabs list
+htrcli open https://example.com
+htrcli snapshot -i
+htrcli click @e3
+htrcli screenshot page.png
 ```
 
 ## Firefox (optional, same daemon)
 
-Chrome and Firefox can both be registered and connected to the same `htcli serve`
+Chrome and Firefox can both be registered and connected to the same `htrcli serve`
 instance at once; commands route to whichever browser owns the target tab.
 
 ```bash
 bun run firefox:build
 # Load firefox/build/manifest.json via about:debugging#/runtime/this-firefox
-htcli install --browser firefox --extension-id htrcontrol@mercstudio.com
-# Reload the add-on in about:debugging, then htcli serve is already covering it
+htrcli install --browser firefox --extension-id htrcontrol@mercstudio.com
+# Reload the add-on in about:debugging, then htrcli serve is already covering it
 ```
 
 If you don't install the native host (or the daemon isn't running), the
@@ -110,50 +110,50 @@ indicator shows **Online** for either transport.
 
 ## CDP transport: direct Chrome control
 
-`htcli` can also drive Chrome directly over the Chrome DevTools Protocol with
-`--cdp` (or `htcli config set-transport cdp`). Use this for browser-restricted
+`htrcli` can also drive Chrome directly over the Chrome DevTools Protocol with
+`--cdp` (or `htrcli config set-transport cdp`). Use this for browser-restricted
 pages like the Chrome Web Store dev console, or for headless/background runs
 where you don't want the extension involved.
 
 ```bash
-# Start a dedicated Chrome with a fresh profile at ~/.htcli/chrome-profile.
-htcli browser start
-htcli browser start --headless
+# Start a dedicated Chrome with a fresh profile at ~/.htrcli/chrome-profile.
+htrcli browser start
+htrcli browser start --headless
 
-htcli browser status
-htcli browser hide
-htcli browser show
-htcli browser stop
+htrcli browser status
+htrcli browser hide
+htrcli browser show
+htrcli browser stop
 
 # Once Chrome is started, point commands at the CDP transport.
-htcli --cdp open https://chrome.google.com/webstore/.../console
-htcli --cdp fill "#email" "me@example.com"
-htcli --cdp click "#submit"
-htcli --cdp screenshot out.png
-htcli --cdp tabs list
+htrcli --cdp open https://chrome.google.com/webstore/.../console
+htrcli --cdp fill "#email" "me@example.com"
+htrcli --cdp click "#submit"
+htrcli --cdp screenshot out.png
+htrcli --cdp tabs list
 ```
 
 Notes:
 
-- Sign in once with `htcli browser start` in visible mode, then re-use the same
+- Sign in once with `htrcli browser start` in visible mode, then re-use the same
   dedicated profile for headless/background automation.
 - `--tab` means a numeric extension tab ID on the default transport, but a CDP
   target ID on `--cdp`.
 - The debugging port is a localhost-only control channel into a signed-in
   profile; treat it like a trusted local admin surface.
 
-## Alternative: Bun server instead of `htcli serve`
+## Alternative: Bun server instead of `htrcli serve`
 
 If you'd rather use the WebSocket-based Bun server instead of the native
 messaging daemon:
 
 ```bash
 bun run server          # prints a bearer token on startup
-htcli config set-server http://127.0.0.1:3845
-htcli config set-token <printed-token>
-htcli health
+htrcli config set-server http://127.0.0.1:3845
+htrcli config set-token <printed-token>
+htrcli health
 ```
 
-No `htcli install` / native messaging registration is needed for this path —
+No `htrcli install` / native messaging registration is needed for this path —
 the extension connects to the Bun server directly via WebSocket. Only one of
-the two servers (`bun run server` or `htcli serve`) can hold `:3845` at a time.
+the two servers (`bun run server` or `htrcli serve`) can hold `:3845` at a time.

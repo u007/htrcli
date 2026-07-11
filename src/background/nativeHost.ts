@@ -1,6 +1,6 @@
 /**
  * Native Messaging Host integration for the HTR NControl extension.
- * Manages the connection to the htcli native host via Chrome Native Messaging.
+ * Manages the connection to the htrcli native host via Chrome Native Messaging.
  */
 
 import type { Command, CommandResult, TabInfo } from "../types/commands";
@@ -312,7 +312,7 @@ function handleNativeMessage(msg: NativeMessage): void {
 
 	if (msg.type === "ping") {
 		// Liveness probe from the daemon; reply so it doesn't reap this
-		// relay as stale (see SweepConns in htcli).
+		// relay as stale (see SweepConns in htrcli).
 		sendToNative({ type: "heartbeat" });
 	}
 }
@@ -506,7 +506,7 @@ async function handleDebuggerEval(
 // equivalent). Works on Firefox too (tabs API via polyfill, no CDP needed).
 
 const NAV_ACTIONS = new Set(["navigate", "reload", "goBack", "goForward"]);
-// Under htcli's 30s HTTP timeout and the daemon's 30s command timeout, so the
+// Under htrcli's 30s HTTP timeout and the daemon's 30s command timeout, so the
 // caller gets a clean error instead of a transport timeout.
 const NAV_LOAD_TIMEOUT_MS = 25000;
 
@@ -934,7 +934,7 @@ async function sendCommandToTab(
 	}
 	if (payload.action === "getReadyTabs") {
 		// Background-handled: report which tabs have a live content script
-		// (the sidepanel's "Connected Tabs" view), for diagnostics via htcli.
+		// (the sidepanel's "Connected Tabs" view), for diagnostics via htrcli.
 		try {
 			const tabs = readyTabsProvider ? await readyTabsProvider() : [];
 			sendToNative({
@@ -1061,7 +1061,7 @@ async function sendCommandToTab(
 			console.warn("[NativeHost] content script injection failed:", err);
 			// Surface the real injection error — "Missing host permission",
 			// restricted domain, etc. — instead of a generic message, so the
-			// failure is diagnosable from the htcli side.
+			// failure is diagnosable from the htrcli side.
 			replyError(
 				tabId,
 				payload.id,

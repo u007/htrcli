@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import "../test/domSetup";
 import "./index";
 
-describe("__htcliDom bundle global", () => {
+describe("__htrcliDom bundle global", () => {
 	beforeEach(() => {
 		document.body.innerHTML = `<input id="email" type="text" />`;
 	});
 
 	test("exposes exec on window", () => {
-		expect(typeof window.__htcliDom?.exec).toBe("function");
+		expect(typeof window.__htrcliDom?.exec).toBe("function");
 	});
 
 	test("fill via exec sets value and fires input event", async () => {
@@ -20,9 +20,9 @@ describe("__htcliDom bundle global", () => {
 		el.addEventListener("input", () => {
 			inputFired = true;
 		});
-		const dom = window.__htcliDom;
+		const dom = window.__htrcliDom;
 		if (!dom) {
-			throw new Error("__htcliDom not installed");
+			throw new Error("__htrcliDom not installed");
 		}
 		const result = await dom.exec({
 			id: "1",

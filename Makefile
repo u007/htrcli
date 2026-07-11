@@ -1,36 +1,36 @@
 .PHONY: build install serve close \
-		htcli-build htcli-build-all htcli-install htcli-clean \
+		htrcli-build htrcli-build-all htrcli-install htrcli-clean \
 		ext-build ext-dev ext-zip firefox-build firefox-install firefox-zip
 
 -include .env.local
 export
 
-HTCLI_DIR := htcli
+HTRCLI_DIR := htrcli
 
-# ── htcli ──────────────────────────────────────────────────────────────
+# ── htrcli ──────────────────────────────────────────────────────────────
 
-htcli-build:
-	cd $(HTCLI_DIR) && go build -o bin/htcli ./cmd/htcli
+htrcli-build:
+	cd $(HTRCLI_DIR) && go build -o bin/htrcli ./cmd/htrcli
 
-# Cross-compile htcli for all supported OS/arch combinations.
-# Binaries are placed in htcli/bin/ with platform-specific names.
-htcli-build-all:
-	cd $(HTCLI_DIR) && \
-	GOOS=darwin  GOARCH=amd64 go build -o bin/htcli-darwin-amd64   ./cmd/htcli && \
-	GOOS=darwin  GOARCH=arm64 go build -o bin/htcli-darwin-arm64   ./cmd/htcli && \
-	GOOS=linux   GOARCH=amd64 go build -o bin/htcli-linux-amd64    ./cmd/htcli && \
-	GOOS=linux   GOARCH=arm64 go build -o bin/htcli-linux-arm64    ./cmd/htcli && \
-	GOOS=windows GOARCH=amd64 go build -o bin/htcli-windows-amd64.exe ./cmd/htcli
+# Cross-compile htrcli for all supported OS/arch combinations.
+# Binaries are placed in htrcli/bin/ with platform-specific names.
+htrcli-build-all:
+	cd $(HTRCLI_DIR) && \
+	GOOS=darwin  GOARCH=amd64 go build -o bin/htrcli-darwin-amd64   ./cmd/htrcli && \
+	GOOS=darwin  GOARCH=arm64 go build -o bin/htrcli-darwin-arm64   ./cmd/htrcli && \
+	GOOS=linux   GOARCH=amd64 go build -o bin/htrcli-linux-amd64    ./cmd/htrcli && \
+	GOOS=linux   GOARCH=arm64 go build -o bin/htrcli-linux-arm64    ./cmd/htrcli && \
+	GOOS=windows GOARCH=amd64 go build -o bin/htrcli-windows-amd64.exe ./cmd/htrcli
 
-htcli-install:
-	cd $(HTCLI_DIR) && go install ./cmd/htcli
+htrcli-install:
+	cd $(HTRCLI_DIR) && go install ./cmd/htrcli
 
-htcli-clean:
-	rm -rf $(HTCLI_DIR)/bin
+htrcli-clean:
+	rm -rf $(HTRCLI_DIR)/bin
 
 # Run the gated CDP end-to-end integration test (requires a real Chrome).
-htcli-test-integration:
-	cd $(HTCLI_DIR) && go test -tags integration ./internal/cdp/ -run TestCDPEndToEnd -v
+htrcli-test-integration:
+	cd $(HTRCLI_DIR) && go test -tags integration ./internal/cdp/ -run TestCDPEndToEnd -v
 
 # ── Extension ──────────────────────────────────────────────────────────
 
@@ -56,18 +56,18 @@ firefox-install: firefox-build
 		--firefox="$${FIREFOX_BIN:-/Applications/Firefox.app/Contents/MacOS/firefox}" \
 		--firefox-profile "$$PROFILE_DIR" \
 		--no-input
-	htcli install --browser firefox --extension-id htrcontrol@mercstudio.com
+	htrcli install --browser firefox --extension-id htrcontrol@mercstudio.com
 
 # ── Combined ───────────────────────────────────────────────────────────
 
-build: htcli-build-all ext-build firefox-build
+build: htrcli-build-all ext-build firefox-build
 
-install: htcli-install
+install: htrcli-install
 	@if [ -n "$(EXTID)" ]; then \
 		echo "Registering native host for extension $(EXTID)..."; \
-		htcli install --extension-id "$(EXTID)"; \
+		htrcli install --extension-id "$(EXTID)"; \
 	else \
-		echo "htcli installed. Set EXTID in .env or run: htcli install --extension-id <ID>"; \
+		echo "htrcli installed. Set EXTID in .env or run: htrcli install --extension-id <ID>"; \
 	fi
 
 serve:
@@ -77,7 +77,7 @@ serve:
 		echo "Killing process $$pid on port $$port..."; \
 		kill -9 $$pid 2>/dev/null || true; \
 	fi; \
-	htcli serve
+	htrcli serve
 
 close:
 	@port=$${HTR_PORT:-3845}; \
@@ -89,4 +89,4 @@ close:
 	fi
 
 list:
-	HTR_BEARER_TOKEN=htr_aia_2026 htcli tabs list
+	HTR_BEARER_TOKEN=htr_aia_2026 htrcli tabs list
