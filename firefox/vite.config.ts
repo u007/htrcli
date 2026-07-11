@@ -133,7 +133,7 @@ function buildFirefoxManifest(): Plugin {
 				host_permissions: ["<all_urls>"],
 				browser_specific_settings: {
 					gecko: {
-						id: "htrcontrol@mercstudio.com",
+						id: "htrncontrol@mercstudio.com",
 						// 112+ is required for `background.type` and
 						// is also the first version that ships the
 						// data-collection-consent UX we declare

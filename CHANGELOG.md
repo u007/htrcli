@@ -9,6 +9,10 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.4.6 [2026.07.12]
+
+- fix: rename the Firefox add-on `browser_specific_settings.gecko.id` from `htrcontrol@mercstudio.com` → `htrncontrol@mercstudio.com` in `firefox/vite.config.ts`, and update the matching native-host install command (`htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com`) in `CLAUDE.md`, `GUIDE.md`, `Makefile`, `firefox/README.md`, `htrcli/README.md`, and `skills/htrcli/SKILL.md`
+
 ## 0.4.5 [2026.07.12]
 
 - fix: server loads repo-root `.env` and `.env.local` via new `loadEnv()` utility so `HTR_BEARER_TOKEN`, `HTR_PORT`, etc. are picked up even when the server cwd is `server/` (Makefile also `-include .env` for make targets)

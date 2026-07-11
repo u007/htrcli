@@ -57,7 +57,7 @@ firefox-install: firefox-build
 		--firefox="$${FIREFOX_BIN:-/Applications/Firefox.app/Contents/MacOS/firefox}" \
 		--firefox-profile "$$PROFILE_DIR" \
 		--no-input
-	htrcli install --browser firefox --extension-id htrcontrol@mercstudio.com
+	htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
 
 # ── Combined ───────────────────────────────────────────────────────────
 

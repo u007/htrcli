@@ -68,7 +68,7 @@ WebSocket. Supports Chrome and Firefox connected simultaneously.
 ```bash
 # 1. Register htrcli as the browser's native messaging host
 htrcli install --browser chrome  --extension-id <chrome-extension-id>
-htrcli install --browser firefox --extension-id htrcontrol@mercstudio.com
+htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
 
 # 2. Reload the extension so it re-reads the host registration
 

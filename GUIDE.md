@@ -99,7 +99,7 @@ instance at once; commands route to whichever browser owns the target tab.
 ```bash
 bun run firefox:build
 # Load firefox/build/manifest.json via about:debugging#/runtime/this-firefox
-htrcli install --browser firefox --extension-id htrcontrol@mercstudio.com
+htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
 # Reload the add-on in about:debugging, then htrcli serve is already covering it
 ```
 

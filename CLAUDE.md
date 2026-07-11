@@ -31,7 +31,7 @@ make build           # htrcli-build + ext-build
 
 # htrcli native-messaging daemon (alternative to the Bun server on :3845)
 htrcli install --browser chrome  --extension-id <id>   # register native host (Chrome)
-htrcli install --browser firefox --extension-id htrcontrol@mercstudio.com
+htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
 htrcli serve          # run daemon: HTTP :3845 + Unix socket relay (Chrome+Firefox)
 
 # Utility

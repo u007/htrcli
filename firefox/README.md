@@ -146,7 +146,7 @@ messaging, register the native host for Firefox (Firefox uses
 `allowed_extensions` + the add-on ID, not Chrome's `allowed_origins`):
 
 ```bash
-htrcli install --browser firefox --extension-id htrcontrol@mercstudio.com
+htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
 ```
 
 This writes the host manifest to

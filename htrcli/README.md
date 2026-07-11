@@ -46,7 +46,7 @@ needs no `bun run server`; `htrcli serve` provides the HTTP API on :3845 itself.
 #    Chrome — use the extension ID from chrome://extensions → Details:
 htrcli install --browser chrome  --extension-id <chrome-extension-id>
 #    Firefox — use the add-on ID (browser_specific_settings.gecko.id):
-htrcli install --browser firefox --extension-id htrcontrol@mercstudio.com
+htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
 
 #    Remove a manifest with: htrcli install --browser <b> --uninstall
 
