@@ -23,7 +23,6 @@ import type {
 	RecordingStep,
 	StartRecordingMessage,
 	UpdateAnnotationMessage,
-	WsConnectionStatusMessage,
 } from "../types/recording";
 import { cdpEvaluate } from "./cdpEval";
 import { dispatchCdpInput } from "./cdpInput";
@@ -34,7 +33,6 @@ import {
 	setScreenshotCapturer,
 	setStatusListener,
 	startNativeHost,
-	waitForInitialStatus,
 } from "./nativeHost";
 
 type ChromeWithSidebarAction = typeof chrome & {
@@ -144,81 +142,6 @@ async function migrateFromChromeStorage(): Promise<void> {
 
 console.log("[HTR NControl] Background service worker started");
 
-// One-shot migration marker. Set after rewriting the legacy wss:// default
-// to ws://, so the rewrite only happens once per install and the change is
-// auditable from the chrome.storage.local state inspector.
-const WSS_DEFAULT_REWRITE_FLAG = "wssDefaultRewritten";
-
-/**
- * Generate a per-install random bearer token and return it. Used the first
- * time a user opens Options so the token on disk is unique per install
- * rather than a public, hardcoded string. 32 bytes hex = 64 chars.
- */
-async function generateInstallToken(): Promise<string> {
-	const bytes = new Uint8Array(32);
-	crypto.getRandomValues(bytes);
-	const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(
-		"",
-	);
-	return `htr_${hex}`;
-}
-
-// Seed default remote-control settings on first install so tabs auto-connect.
-chrome.storage.local.get(
-	["remoteControlServer", WSS_DEFAULT_REWRITE_FLAG],
-	async (result) => {
-		if (!result.remoteControlServer) {
-			// First install: only seed a default WS server/token if native
-			// messaging isn't available on this machine. Port 3845 belongs to
-			// the native-messaging daemon (htrcli serve) when one is configured
-			// — it's a REST API + native relay, not a WebSocket endpoint — so
-			// auto-populating a WS URL on a native-only install just causes a
-			// permanently failing connection attempt in every content script.
-			const nativeMode = await waitForInitialStatus();
-			if (nativeMode === "native" || nativeMode === "disconnected") return;
-
-			// Write a per-install token so users on shared hosts (multi-user
-			// systems, containers, dev VMs) are not exposed to a public default
-			// token. The token is shown in the Options page.
-			const token = await generateInstallToken();
-			chrome.storage.local.set({
-				remoteControlServer: "ws://127.0.0.1:3845",
-				remoteControlToken: token,
-			});
-		} else if (
-			result.remoteControlServer === "wss://127.0.0.1:3845" &&
-			!result[WSS_DEFAULT_REWRITE_FLAG]
-		) {
-			// Legacy default: the server only speaks plain ws:// unless TLS
-			// certs are configured, so a wss:// default could never connect.
-			// Rewrite it once, mark the migration so we don't repeat it, and
-			// log so the change shows up in the service worker console.
-			console.log(
-				"[HTR NControl] Migrating legacy wss:// default to ws:// (one-shot)",
-			);
-			chrome.storage.local.set({
-				remoteControlServer: "ws://127.0.0.1:3845",
-				[WSS_DEFAULT_REWRITE_FLAG]: true,
-			});
-		} else if (
-			result.remoteControlToken === "htr_aia_2026" &&
-			!result[WSS_DEFAULT_REWRITE_FLAG]
-		) {
-			// Legacy default token (shipped in earlier builds). Rotate to a
-			// per-install token so the public default does not linger for
-			// users who never opened Options. Mark the migration.
-			console.log(
-				"[HTR NControl] Rotating legacy default token to per-install value",
-			);
-			const token = await generateInstallToken();
-			chrome.storage.local.set({
-				remoteControlToken: token,
-				[WSS_DEFAULT_REWRITE_FLAG]: true,
-			});
-		}
-	},
-);
-
 // Run migration on startup
 migrateFromChromeStorage();
 
@@ -229,23 +152,10 @@ let currentSession: RecordingSession | null = null;
 const readyTabs = new Set<number>();
 
 // Unified connection state, surfaced to the side panel / content scripts.
-// `nativeHostMode` comes from the native-messaging host; `wsConnected`
-// tracks whether at least one content script has an open WebSocket to the
-// remote-control server. The effective mode is:
-//   - "native"       if the native host is connected
-//   - "ws"           if native is down but a WebSocket is connected
-//   - nativeHostMode otherwise (transient "disconnected" or "unavailable")
 let nativeHostMode: ConnectionMode = "unavailable";
-let wsConnected = false;
-
-function computeConnectionMode(): ConnectionMode {
-	if (nativeHostMode === "native") return "native";
-	if (wsConnected) return "ws";
-	return nativeHostMode;
-}
 
 function broadcastConnectionStatus(): void {
-	const mode = computeConnectionMode();
+	const mode = nativeHostMode;
 	const payload = { type: "CONNECTION_STATUS" as const, mode };
 	// Side panel (may not be open — ignore errors).
 	chrome.runtime.sendMessage(payload).catch(() => {});
@@ -888,8 +798,7 @@ chrome.runtime.onMessage.addListener(
 			| { type: "OPEN_TAB"; url: string; sessionData?: string }
 			| { type: "CDP_NAVIGATE"; tabId: number; url: string }
 			| { type: "CLOSE_TAB"; tabId: number }
-			| { type: "CDP_EVAL"; tabId: number; expression: string }
-			| WsConnectionStatusMessage,
+			| { type: "CDP_EVAL"; tabId: number; expression: string },
 		sender,
 		sendResponse,
 	) => {
@@ -1009,18 +918,6 @@ chrome.runtime.onMessage.addListener(
 								currentSession.trackedTabIds.push(sender.tab.id);
 							}
 						}
-						// Native messaging is the preferred transport, but if it
-						// isn't connected (host not installed, daemon down, or
-						// Firefox where it may be unavailable) fall back to a
-						// direct WebSocket connection to the remote-control
-						// server so the tab can still be controlled.
-						if (nativeHostMode !== "native") {
-							chrome.tabs
-								.sendMessage(sender.tab.id, {
-									type: "ENABLE_WS_REMOTE_CONTROL",
-								})
-								.catch(() => {});
-						}
 					}
 					sendResponse({ success: true });
 					break;
@@ -1133,7 +1030,7 @@ chrome.runtime.onMessage.addListener(
 				case "GET_CONNECTION_STATUS":
 					sendResponse({
 						type: "CONNECTION_STATUS",
-						mode: computeConnectionMode(),
+						mode: nativeHostMode,
 					});
 					return true;
 
@@ -1141,14 +1038,6 @@ chrome.runtime.onMessage.addListener(
 					retryConnect();
 					sendResponse({ success: true });
 					return true;
-
-				case "WS_CONNECTION_STATUS": {
-					const msg = message as WsConnectionStatusMessage;
-					wsConnected = msg.mode === "ws";
-					broadcastConnectionStatus();
-					sendResponse({ success: true });
-					return true;
-				}
 
 				case "GET_TAB_ID":
 					sendResponse({ tabId: sender.tab?.id ?? 0 });

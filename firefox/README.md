@@ -162,33 +162,16 @@ at once; commands route to whichever browser owns the target tab. See the
 > built `manifest.json`. The native host requires the `nativeMessaging`
 > permission, which the manifest already declares.
 
-### Remote control without native messaging (WebSocket fallback)
+### Remote control requires native messaging
 
-Native messaging is the preferred transport, but it requires the `htrcli`
-host to be installed and the `htrcli serve` daemon to be running. If native
-messaging is unavailable on Firefox (host not installed, daemon down, or the
-add-on ID not allowed), the extension **automatically falls back to a direct
-WebSocket connection** to the remote-control server. You do **not** need to
-register a native host to use remote control in this mode.
+Remote control requires `htrcli` to be installed and the `htrcli serve` daemon
+to be running. Native messaging is the only transport — the WebSocket fallback
+was removed when the extension consolidated on `htrcli serve` as its sole backend.
 
-To use the WebSocket fallback, run the Bun API server (which speaks the
-extension's WebSocket protocol) instead of `htrcli serve`:
+If native messaging is unavailable, the side panel shows **Install htrcli**.
+Install the Go CLI and register the native host:
 
 ```bash
-bun run server          # HTTP + WebSocket on ws://127.0.0.1:3845
+htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
+htrcli serve
 ```
-
-The extension connects to the URL stored in `remoteControlServer`
-(Options page). The default is `ws://127.0.0.1:3845` — note the **plain
-`ws://` scheme**, not `wss://`: the server only enables TLS if `cert.pem` /
-`key.pem` are present. If you have configured TLS, set the URL to
-`wss://127.0.0.1:3845` in Options.
-
-> `htrcli serve` does **not** expose the WebSocket endpoint (it only offers
-> the HTTP API plus the native-messaging relay), so the WebSocket fallback
-> only works against `bun run server`. Use `htrcli serve` for the native-
-> messaging path, or `bun run server` for the WebSocket path.
-
-The side-panel connection indicator now reflects whichever transport is
-active: **Online** for native messaging or WebSocket, **Reconnecting…** while
-a transient connection is retried, and **Offline** when neither is available.

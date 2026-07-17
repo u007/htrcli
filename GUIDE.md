@@ -58,7 +58,7 @@ This binds:
 - HTTP API on `:3845` (same surface as the Bun server)
 - A Unix socket that the extension's native messaging relay connects to
 
-Only one process can hold `:3845` — don't run `bun run server` at the same time.
+Only one process can hold `:3845`.
 
 If no bearer token is set, `htrcli serve` starts **unauthenticated** and warns
 you. Set a token first (recommended):
@@ -142,18 +142,3 @@ Notes:
 - The debugging port is a localhost-only control channel into a signed-in
   profile; treat it like a trusted local admin surface.
 
-## Alternative: Bun server instead of `htrcli serve`
-
-If you'd rather use the WebSocket-based Bun server instead of the native
-messaging daemon:
-
-```bash
-bun run server          # prints a bearer token on startup
-htrcli config set-server http://127.0.0.1:3845
-htrcli config set-token <printed-token>
-htrcli health
-```
-
-No `htrcli install` / native messaging registration is needed for this path —
-the extension connects to the Bun server directly via WebSocket. Only one of
-the two servers (`bun run server` or `htrcli serve`) can hold `:3845` at a time.

@@ -20,16 +20,11 @@ bun run firefox:build      # tsc -p firefox/tsconfig.json + Vite build → firef
 bun run firefox:typecheck  # Type-check Firefox workspace only
 bun run firefox:zip        # Build + package as .xpi
 
-# Remote control server (separate Bun project in server/)
-bun run server       # Start API server (port 3845)
-bun run server:dev   # Server with hot reload
-
-# htrcli (Go CLI in htrcli/)
+# htrcli (Go CLI in htrcli/) — native-messaging daemon (sole backend for remote control)
 make htrcli-build     # go build → htrcli/bin/htrcli
 make htrcli-install   # go install (global)
 make build           # htrcli-build + ext-build
 
-# htrcli native-messaging daemon (alternative to the Bun server on :3845)
 htrcli install --browser chrome  --extension-id <id>   # register native host (Chrome)
 htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
 htrcli serve          # run daemon: HTTP :3845 + Unix socket relay (Chrome+Firefox)
@@ -42,13 +37,20 @@ Single test file: `bun test src/path/to/file.test.ts`
 
 ## Architecture
 
-This is a **multi-part project** with four independent runtimes:
+This is a **multi-part project** with the extension using htrcli as its sole backend:
 
 ```
-┌──────────────┐   HTTP   ┌─────────────────┐  WebSocket  ┌────────────────────────┐
-│  htrcli (Go)  │─────────►│  server/ (Bun)  │────────────►│  Extension (Chrome/FF) │
-└──────────────┘          │  port 3845      │             └────────────────────────┘
-                          └─────────────────┘
+┌──────────────┐   HTTP   ┌──────────────────────────────┐
+│  External    │─────────►│         htrcli serve          │
+│  Tool / CLI  │          │   Go daemon (port 3845)      │
+└──────────────┘          │  HTTP API + NM relay relay    │
+                          └───────────┬──────────────────┘
+                                      │  Native Messaging
+                                      ▼
+                            ┌────────────────────────┐
+                            │  Extension (Chrome/FF)  │
+                            │  Service Worker         │
+                            └────────────────────────┘
 ```
 
 ### Extension (`src/` → `build/`)
@@ -59,10 +61,9 @@ Built with Vite + `@crxjs/vite-plugin` (Chrome only). Entry points defined in `s
 - **`src/contentScript/index.ts`** — Injected into every `http/https` page. Submodules handle:
   - `clickHandler.ts` / `inputHandler.ts` — Track interactions
   - `commandExecutor.ts` — Execute remote control commands (click, fill, navigate, eval…)
-  - `wsClient.ts` — WebSocket connection to the server
+  - `connectionManager.ts` — Manages native messaging lifecycle
   - `elementFinder.ts` / `selectorGenerator.ts` / `xpathGenerator.ts` — DOM query helpers
   - `highlighter.ts` — Visual overlay on elements before screenshot
-  - `connectionManager.ts` — Manages WS lifecycle
 - **`src/sidepanel/`** — React 18 UI shown in Chrome's side panel / Firefox sidebar.
   - `context/` — `RecordingContext.tsx` uses `useReducer` for all recording state
   - `components/` — UI components
@@ -78,9 +79,9 @@ Plain Vite build (no crxjs). `firefox/vite.config.ts` emits `manifest.json` dire
 - Every entry shim in `firefox/src/` re-exports from `src/` after applying polyfill
 - Result: `chrome.*` calls in shared `src/` resolve to Firefox's `browser.*` at runtime
 
-### Server (`server/`)
+### htrcli (`htrcli/`)
 
-Independent Bun project (own `package.json`). HTTP + WebSocket API on port 3845. The extension's content script connects here via WS; external tools (including htrcli) call the HTTP API.
+Go CLI (Go 1.22+). Self-contained daemon that provides the remote-control backend via native messaging. Config stored at `~/.htrcli/config.json`. Priority order: flags > env (`HTRCLI_SERVER`, `HTRCLI_TOKEN`) > config file.
 
 Auth: IP whitelist (localhost only) + bearer token. Override with env vars:
 ```bash
@@ -89,10 +90,6 @@ HTR_ENABLE_BEARER_TOKEN=false    # Disable token auth
 HTR_ALLOWED_IPS="127.0.0.1,..."  # Expand whitelist
 ```
 
-### htrcli (`htrcli/`)
-
-Go CLI (Go 1.22+). Wraps the server HTTP API. Config stored at `~/.htrcli/config.json`. Priority order: flags > env (`HTRCLI_SERVER`, `HTRCLI_TOKEN`) > config file.
-
 ## Key Conventions
 
 - **Package manager**: `bun` only — never npm/yarn.
@@ -100,5 +97,5 @@ Go CLI (Go 1.22+). Wraps the server HTTP API. Config stored at `~/.htrcli/config
 - **Message passing**: All cross-component messages use typed interfaces from `src/types/recording.ts`. Add new message types to the `MessageType` union + create a matching interface.
 - **Async message listeners**: Always `return true` from `chrome.runtime.onMessage.addListener` callbacks that respond asynchronously.
 - **Error prefix**: `console.error/warn('[HTR NControl] ...')` in extension code.
-- **Tests**: Bun's built-in runner. Test files: `*.test.ts`. Currently sparse — server tests in `server/auth.test.ts`, content script tests in `src/contentScript/commandExecutor.test.ts`.
+- **Tests**: Bun's built-in runner. Test files: `*.test.ts`. Currently sparse — content script tests in `src/contentScript/commandExecutor.test.ts`.
 - **Build output**: Chrome → `build/`, Firefox → `firefox/build/`.

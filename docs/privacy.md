@@ -63,17 +63,13 @@ Detected sensitive values are replaced with `********` at the time of capture. T
 
 The Extension may communicate over the network **only** in the following limited, local scenarios:
 
-### Local WebSocket Server (Remote Control)
+### Native Messaging (htrcli)
 
-When remote control is enabled, the Extension connects to a WebSocket server running on your own machine (`ws://127.0.0.1:3845`). This server is:
+When remote control is enabled, the Extension connects to a local native messaging host (`com.htrcontrol.host`), backed by `htrcli serve` running on your own machine (HTTP API on `127.0.0.1:3845` plus a Unix socket relay). This communication stays entirely on your device and is:
 
 - Bound to localhost only (not accessible from the network)
 - Protected by IP whitelist and optional bearer token authentication
 - Used solely for executing remote commands (click, fill, navigate, screenshot) from your own tools
-
-### Native Messaging (htrcli)
-
-The Extension can optionally connect to a local native messaging host (`com.htrcontrol.host`) for remote control. This communication stays entirely on your device.
 
 ### No External Connections
 

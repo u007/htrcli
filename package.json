@@ -31,8 +31,7 @@
 		"postinstall:list": "bun run scripts/postinstall.ts list",
 		"postinstall:run": "bun run scripts/postinstall.ts postinstall",
 		"postinstall:all": "bun run scripts/postinstall.ts all",
-		"server": "cd server && bun run start",
-		"server:dev": "cd server && bun run dev",
+
 		"firefox:dev": "vite --config firefox/vite.config.ts",
 		"firefox:build": "tsc -p firefox/tsconfig.json && vite build --config firefox/vite.config.ts && vite build --config firefox/vite.content.config.ts",
 		"firefox:typecheck": "tsc -p firefox/tsconfig.json --noEmit",

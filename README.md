@@ -41,11 +41,27 @@ The same source code ships as a **Chrome extension** (Manifest V3) and a **Firef
    - Select the `build/` directory from this project
    - The extension icon should appear in your toolbar
 
-5. **(Optional) Start the remote control server**
+5. **(Optional) Enable remote control via htrcli**
+   First install the Go CLI:
    ```bash
-   bun run server
+   make htrcli-install
    ```
-   The server will display a bearer token on startup — use this for API authentication.
+   Then register the native messaging host and start the daemon:
+   ```bash
+   htrcli install --browser chrome --extension-id <your-extension-id>
+   htrcli serve
+   ```
+
+### htrcli (Quick Install)
+
+```bash
+go install github.com/.../htrcli@latest  # or use make htrcli-install
+htrcli install --browser chrome --extension-id <extension-id>
+htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
+htrcli serve   # starts daemon on port 3845
+```
+
+See [htrcli/README.md](./htrcli/README.md) for full documentation.
 
 ### Firefox (Build & Load Locally)
 
@@ -94,48 +110,50 @@ See [`firefox/README.md`](./firefox/README.md) for the full architecture, the po
 
 ## Remote Control
 
-HTR NControl includes a built-in remote control system that allows external tools (like AI agents) to control browser tabs via an HTTP/WebSocket API.
+HTR NControl includes a remote control system that allows external tools (like AI agents) to control browser tabs via an HTTP API. The backend is provided by **htrcli**, a self-contained Go daemon.
 
 ### Quick Start
 
 ```bash
-# 1. Start the API server
-bun run server
+# 1. Install and start htrcli
+htrcli install --browser chrome --extension-id <extension-id>
+htrcli serve
 
-# 2. The server displays an auth token on startup:
-#    🔑 Auto-generated bearer token: abc123...
-
-# 3. Connect the extension (enable remote control via message or URL parameter)
-
-# 4. Send commands
-curl -H "Authorization: Bearer abc123..." http://127.0.0.1:3845/api/tabs
+# 2. Send commands
+curl http://127.0.0.1:3845/api/tabs
 ```
 
 ### Architecture
 
 ```
-┌─────────────────┐     HTTP      ┌─────────────────┐     WebSocket     ┌─────────────────┐
-│   External Tool  │ ◄───────────► │   API Server     │ ◄───────────────► │   Extension     │
-│   (AI Agent)     │               │   (port 3845)    │                   │   (Content)     │
-└─────────────────┘               └─────────────────┘                   └─────────────────┘
+┌─────────────────┐     HTTP      ┌─────────────────┐
+│   External Tool  │ ◄───────────► │   htrcli serve   │
+│   (AI Agent)     │               │   (port 3845)    │
+└─────────────────┘               └────────┬────────┘
+                                            │  Native Messaging
+                                            ▼
+                                  ┌─────────────────┐
+                                  │   Extension      │
+                                  │   (Background)   │
+                                  └─────────────────┘
 ```
 
 ### Authentication (Enabled by Default)
 
-Both IP whitelist and bearer token are enabled by default:
+Both IP whitelist and bearer token are enabled by default (configurable via env vars):
 
 - **IP Whitelist**: Only `127.0.0.1`, `localhost`, `::1` allowed
-- **Bearer Token**: Auto-generated random 32-char hex token (displayed on server start)
+- **Bearer Token**: Auto-generated random token (displayed on daemon start)
 
 ```bash
 # Override with custom token
-HTR_BEARER_TOKEN="my-secret" bun run server
+HTR_BEARER_TOKEN="my-secret" htrcli serve
 
 # Disable bearer token (IP whitelist only)
-HTR_ENABLE_BEARER_TOKEN=false bun run server
+HTR_ENABLE_BEARER_TOKEN=false htrcli serve
 
 # Add IPs to whitelist
-HTR_ALLOWED_IPS="127.0.0.1,192.168.1.100" bun run server
+HTR_ALLOWED_IPS="127.0.0.1,192.168.1.100" htrcli serve
 ```
 
 ### API Endpoints
@@ -212,30 +230,7 @@ Find elements using various strategies:
 | **Visual** | `screenshot`, `highlight`, `unhighlight` |
 | **Script** | `evaluate` (execute JavaScript) |
 
-### WebSocket Protocol
 
-The extension connects to the server via WebSocket for real-time command execution:
-
-```javascript
-// Connect via WebSocket (token as query parameter)
-const ws = new WebSocket('ws://127.0.0.1:3845?token=YOUR_TOKEN');
-
-// Send command
-ws.send(JSON.stringify({
-  type: 'command',
-  command: { id: '1', action: 'click', target: { selector: '#btn' } }
-}));
-
-// Receive result
-ws.onmessage = (event) => {
-  const result = JSON.parse(event.data);
-  console.log(result);
-};
-```
-
-### Full Documentation
-
-See [server/README.md](./server/README.md) for complete API reference and examples in Python, JavaScript, and curl.
 
 ## Development
 
@@ -254,8 +249,7 @@ bun run test         # Run tests
 bun run check        # Lint and format check
 bun run check:fix    # Auto-fix lint/format issues
 bun run zip          # Build and create distributable ZIP
-bun run server       # Start remote control API server
-bun run server:dev   # Start server with hot reload
+# htrcli serve handles remote control (see htrcli/)
 ```
 
 ### Project Structure
@@ -269,8 +263,7 @@ src/
 │   └── context/      # React context providers
 ├── types/            # TypeScript definitions
 ├── utils/            # Export and utility functions
-├── manifest.ts       # Extension manifest configuration
-└── server/           # Remote control API server
+└── manifest.ts       # Extension manifest configuration
 ```
 
 ### Tech Stack

@@ -9,6 +9,16 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.4.8 [2026.07.17]
+
+- remove: delete the Bun WebSocket server (`server/`) — native messaging (htrcli) is now the sole backend for remote control
+- remove: delete `src/contentScript/wsClient.ts` and remove all WS fallback logic from the extension
+- refactor: simplify `ConnectionMode` to `"native" | "disconnected" | "unavailable"`; remove `WS_CONNECTION_STATUS`, `ENABLE_WS_REMOTE_CONTROL`, and `wsConnected` background state
+- refactor: `computeConnectionMode()` simplified to `nativeHostMode` only; UI shows "Install htrcli" when unavailable
+- chore: remove server scripts from `package.json` (`server`, `server:dev`)
+- chore: update all documentation to reflect the consolidated architecture — `AGENTS.md`, `CLAUDE.md`, `GUIDE.md`, `README.md`, `docs/privacy.md`, `firefox/README.md`, `htrcli/README.md`, `skills/htrcli/SKILL.md`
+- chore: simplify `Options.tsx` — server URL/token config removed, only Connected Tabs section remains
+
 ## 0.4.7 [2026.07.17]
 
 - fix: background only seeds the default WebSocket server/token on first install when native messaging is unavailable; native-only installs no longer get a permanently failing WS connection (`src/background/index.ts`, `src/background/nativeHost.ts`)

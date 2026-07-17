@@ -2,22 +2,15 @@
 
 Go CLI for controlling browser tabs via the [HTR NControl](https://github.com/u007/htrncontrol) remote control API.
 
-`htrcli` is an HTTP client that talks to a server on port 3845. There are two
-interchangeable transports for that server — pick one:
+`htrcli` is an HTTP client that talks to the native-messaging daemon on port 3845.
+The daemon relays commands to the extension over native messaging:
 
 ```
-# WebSocket transport (Bun server)
-htrcli (Go) ──HTTP──► Bun server (server/, :3845) ──WebSocket──► Extension ──DOM──► Chrome / Firefox
-
-# Native messaging transport (htrcli daemon — no Bun server)
 htrcli (Go) ──HTTP──► htrcli serve (:3845) ──Unix socket──► relay ──stdio──► Extension ──DOM──► Chrome / Firefox
 ```
 
-The native-messaging daemon (`htrcli serve`) is a drop-in replacement for the Bun
-server: same HTTP API on :3845, but the browser connects via a native-messaging
-relay instead of a WebSocket. Both Chrome and Firefox are supported, and both can
-be connected to the daemon at the same time (commands route to the browser that
-owns the target tab). Only one of the two servers can hold :3845 at a time.
+Both Chrome and Firefox are supported, and both can be connected to the daemon
+at the same time (commands route to the browser that owns the target tab).
 
 ## Installation
 
@@ -38,8 +31,8 @@ go install github.com/u007/htrcli/cmd/htrcli@latest
 
 ## Native Messaging (daemon mode)
 
-Run the browser over a native-messaging relay instead of the Bun server. This
-needs no `bun run server`; `htrcli serve` provides the HTTP API on :3845 itself.
+Run `htrcli serve` to start the native-messaging daemon, which provides the
+HTTP API on :3845 and relays commands to the extension.
 
 ```bash
 # 1. Register htrcli as the browser's native-messaging host.
@@ -138,18 +131,14 @@ flags are passed, `--transport` wins (`--cdp` is only shorthand).
 ## Quick Start
 
 ```bash
-# 1. Start the HTR NControl server
-cd /path/to/htrncontrol
-bun run server
-
-# 2. Configure htrcli
+# 1. Configure htrcli
 htrcli config set-server http://127.0.0.1:3845
 htrcli config set-token <bearer-token>
 
-# 3. Check connection
+# 2. Check connection
 htrcli health
 
-# 4. Control the browser
+# 3. Control the browser
 htrcli open https://example.com
 htrcli find "input[name=q]"                # find the search box
 htrcli click "input[name=q]"               # act on the selector
@@ -330,7 +319,7 @@ Priority: flags > env vars (`HTRCLI_SERVER`, `HTRCLI_TOKEN`) > config file > def
 ## Requirements
 
 - [HTR NControl](https://github.com/u007/htrncontrol) extension installed (Chrome or Firefox)
-- A server on :3845 — either the Bun server (`bun run server`) or the native-messaging daemon (`htrcli serve`)
+- The native-messaging daemon on :3845 (`htrcli serve`)
 - Go 1.22+ (for building from source)
 
 ## License

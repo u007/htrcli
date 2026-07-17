@@ -211,32 +211,33 @@ Fields containing passwords, credit cards, etc. are automatically detected and m
 
 3. **Firefox-specific code (`firefox/`)** — If you add a shim or Firefox-only workaround in `firefox/src/`, consider whether the same fix should be applied to the shared `src/` code so both browsers benefit. Document why a Firefox-only path exists.
 
-4. **Server changes (`server/`)** — The server (port 3845) is shared by both browsers via WebSocket. After changing server endpoints, message handling, or auth:
+4. **htrcli changes (`htrcli/`)** — The native messaging host (port 3845) is the sole backend for remote control. After changing endpoints, message handling, or auth in the Go daemon:
    - Verify the extension's content script (`src/contentScript/connectionManager.ts`) still connects correctly
-   - Test with both Chrome and Firefox if possible, or at minimum confirm no browser-specific assumptions were introduced in the server code
+   - Test with both Chrome and Firefox if possible
+   - Run `cd htrcli && go test ./...` to validate server-side logic
 
 ### Verification checklist
 
-After any extension or server change, run these commands before committing:
+After any extension or htrcli change, run these commands before committing:
 
 ```bash
 bun run check:fix         # Lint + format
 bun run build             # Chrome build
 bun run firefox:build     # Firefox build
 bun run test              # Unit tests (if any)
+cd htrcli && go test ./...  # Go backend tests
 ```
 
-If the change touches server code or the WebSocket connection layer:
+If the change touches the native messaging layer:
 
 ```bash
-bun run server:dev        # Start server locally
+htrcli serve              # Start daemon locally
 # Manually verify extension connects in both Chrome and Firefox
 ```
 
 ### Why this matters
 
 - The Firefox build uses `webextension-polyfill` to alias `chrome.*` → `browser.*`, so Chrome-only API calls may silently fail on Firefox if not shimmed.
-- The server doesn't know which browser is talking to it — both connect over the same WebSocket protocol. A breaking change in the server protocol breaks both browsers equally.
 
 ## File Structure
 

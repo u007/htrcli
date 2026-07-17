@@ -25,18 +25,6 @@ function ConnectionIndicator() {
 		);
 	}
 
-	if (connectionStatus === "ws") {
-		return (
-			<span
-				className="connection-indicator online"
-				title="Server connected (WebSocket)"
-			>
-				<span className="ci-dot" />
-				<span className="ci-label">Online</span>
-			</span>
-		);
-	}
-
 	if (connectionStatus === "disconnected") {
 		return (
 			<span
@@ -49,16 +37,16 @@ function ConnectionIndicator() {
 		);
 	}
 
-	// unavailable — give up, show retry button
+	// unavailable — native messaging host not available
 	return (
 		<span className="connection-indicator unavailable">
 			<span className="ci-dot" />
-			<span className="ci-label">Offline</span>
+			<span className="ci-label">Install htrcli</span>
 			<button
 				type="button"
 				className="ci-retry"
 				onClick={handleRetry}
-				title="Retry connection"
+				title="Native messaging host not detected — install htrcli and run 'htrcli serve'"
 			>
 				↻
 			</button>

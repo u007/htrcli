@@ -18,7 +18,7 @@ htrcli (Go) ──HTTP──► htrcli serve (:3845) ──Unix socket──► 
 ```
 
 Two interchangeable server transports — pick one:
-- **Bun server** (`bun run server`) — WebSocket-based, requires Node/Bun runtime
+- **htrcli serve** — native-messaging daemon (Go), sole backend for remote control
 - **htrcli daemon** (`htrcli serve`) — native messaging, pure Go, no extra runtime
 
 Both expose the same HTTP API on port 3845. Only one can hold the port at a time.
@@ -553,7 +553,7 @@ htrcli health                             # test connection
 Server not running. Start one of:
 ```bash
 # Option A: Bun server (WebSocket transport)
-cd /path/to/htrncontrol && bun run server
+htrcli serve
 
 # Option B: htrcli daemon (native messaging — no Bun needed)
 htrcli serve

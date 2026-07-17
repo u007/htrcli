@@ -204,7 +204,6 @@ function handleMessage(
 		| { type: "EXECUTE_COMMAND"; command: Command; tabId?: number }
 		| { type: "ENABLE_REMOTE_CONTROL"; serverUrl?: string }
 		| { type: "DISABLE_REMOTE_CONTROL" }
-		| { type: "ENABLE_WS_REMOTE_CONTROL"; serverUrl?: string }
 		| { type: "GET_CURRENT_TAB_ID" },
 	_sender: chrome.runtime.MessageSender,
 	sendResponse: (response?: unknown) => void,
@@ -271,16 +270,6 @@ function handleMessage(
 		case "ENABLE_REMOTE_CONTROL": {
 			const msg = message as {
 				type: "ENABLE_REMOTE_CONTROL";
-				serverUrl?: string;
-			};
-			enableRemoteControl(msg.serverUrl);
-			sendResponse({ success: true });
-			break;
-		}
-
-		case "ENABLE_WS_REMOTE_CONTROL": {
-			const msg = message as {
-				type: "ENABLE_WS_REMOTE_CONTROL";
 				serverUrl?: string;
 			};
 			enableRemoteControl(msg.serverUrl);

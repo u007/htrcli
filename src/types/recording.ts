@@ -61,13 +61,9 @@ export interface RecordingSession {
 
 // Connection mode tracked by the background and surfaced to the UI.
 // - "native": connected via native messaging (htrcli relay → daemon)
-// - "ws": connected directly to the remote-control server over WebSocket
-//         (content-script fallback when native messaging is unavailable)
-// - "disconnected": transient — relay exited (daemon down) or WS dropped,
-//         retrying with backoff
-// - "unavailable": permanent — host not installed/forbidden, max retries
-//         exceeded, or no WS server configured
-export type ConnectionMode = "native" | "ws" | "disconnected" | "unavailable";
+// - "disconnected": transient — relay exited (daemon down), retrying with backoff
+// - "unavailable": permanent — host not installed/forbidden, or max retries exceeded
+export type ConnectionMode = "native" | "disconnected" | "unavailable";
 
 // Message types for communication between components
 export type MessageType =
@@ -93,8 +89,6 @@ export type MessageType =
 	| "HIDE_HIGHLIGHT"
 	| "CONNECTION_STATUS"
 	| "RECONNECT_NATIVE"
-	| "WS_CONNECTION_STATUS"
-	| "ENABLE_WS_REMOTE_CONTROL"
 	| "CDP_EVAL"
 	// Server/WS path relays trusted (CDP) click/pressKey/type to the background,
 	// which owns the debugger connection. The content script sends this and
@@ -230,23 +224,6 @@ export interface ConnectionStatusMessage extends BaseMessage {
 	mode: ConnectionMode;
 }
 
-// WebSocket connection status from a content script (content script → background).
-// `mode` is "ws" when the content script's WebSocket to the remote-control
-// server is open, and "disconnected" when it has dropped. The background
-// folds this into the unified connection mode shown in the UI.
-export interface WsConnectionStatusMessage extends BaseMessage {
-	type: "WS_CONNECTION_STATUS";
-	mode: "ws" | "disconnected";
-}
-
-// Ask a content script to enable its WebSocket remote-control fallback
-// (background → content script). Used when native messaging is unavailable
-// so the tab can connect to the server directly over WebSocket.
-export interface EnableWsRemoteControlMessage extends BaseMessage {
-	type: "ENABLE_WS_REMOTE_CONTROL";
-	serverUrl?: string;
-}
-
 // Content script → background: relay a trusted (CDP) input command (click /
 // pressKey / type) to the background, which owns the debugger connection.
 export interface CdpInputMessage extends BaseMessage {
@@ -275,8 +252,6 @@ export type RecordingMessage =
 	| HighlightElementMessage
 	| HideHighlightMessage
 	| ConnectionStatusMessage
-	| WsConnectionStatusMessage
-	| EnableWsRemoteControlMessage
 	| CdpInputMessage;
 
 // Export format types
