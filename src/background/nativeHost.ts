@@ -60,6 +60,27 @@ export function getConnectionMode(): "native" | "disconnected" | "unavailable" {
 	return connectionMode;
 }
 
+// Resolves once with the first real connection-mode determination (the first
+// `broadcastStatus()` call, from `confirmConnected`/`setDisconnected`/
+// `markUnavailable`). Callers that need to know "is native messaging even
+// configured on this machine" before making a one-time decision (e.g. whether
+// to seed a default WebSocket server on first install) await this instead of
+// racing `getConnectionMode()`, which is still "unavailable" synchronously
+// right after `connect()` starts regardless of whether a host is registered.
+let initialStatusPromise: Promise<ConnectionMode> | null = null;
+let resolveInitialStatus: ((mode: ConnectionMode) => void) | null = null;
+let initialStatusDetermined = false;
+
+export function waitForInitialStatus(): Promise<ConnectionMode> {
+	if (initialStatusDetermined) return Promise.resolve(connectionMode);
+	if (!initialStatusPromise) {
+		initialStatusPromise = new Promise((resolve) => {
+			resolveInitialStatus = resolve;
+		});
+	}
+	return initialStatusPromise;
+}
+
 /**
  * Manually retry connecting to the native host after the max retries cap has
  * been exceeded, or any time the user wants to force a reconnection attempt.
@@ -255,6 +276,11 @@ export function setStatusListener(fn: (mode: ConnectionMode) => void): void {
 
 function broadcastStatus(): void {
 	statusListener?.(connectionMode);
+	if (!initialStatusDetermined) {
+		initialStatusDetermined = true;
+		resolveInitialStatus?.(connectionMode);
+		resolveInitialStatus = null;
+	}
 }
 
 interface NativeCommandMessage {

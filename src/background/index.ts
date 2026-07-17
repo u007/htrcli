@@ -34,6 +34,7 @@ import {
 	setScreenshotCapturer,
 	setStatusListener,
 	startNativeHost,
+	waitForInitialStatus,
 } from "./nativeHost";
 
 type ChromeWithSidebarAction = typeof chrome & {
@@ -167,9 +168,18 @@ chrome.storage.local.get(
 	["remoteControlServer", WSS_DEFAULT_REWRITE_FLAG],
 	async (result) => {
 		if (!result.remoteControlServer) {
-			// First install: write a per-install token so users on shared hosts
-			// (multi-user systems, containers, dev VMs) are not exposed to a
-			// public default token. The token is shown in the Options page.
+			// First install: only seed a default WS server/token if native
+			// messaging isn't available on this machine. Port 3845 belongs to
+			// the native-messaging daemon (htrcli serve) when one is configured
+			// — it's a REST API + native relay, not a WebSocket endpoint — so
+			// auto-populating a WS URL on a native-only install just causes a
+			// permanently failing connection attempt in every content script.
+			const nativeMode = await waitForInitialStatus();
+			if (nativeMode === "native" || nativeMode === "disconnected") return;
+
+			// Write a per-install token so users on shared hosts (multi-user
+			// systems, containers, dev VMs) are not exposed to a public default
+			// token. The token is shown in the Options page.
 			const token = await generateInstallToken();
 			chrome.storage.local.set({
 				remoteControlServer: "ws://127.0.0.1:3845",

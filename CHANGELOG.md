@@ -9,6 +9,12 @@ Summary
   5. version timestamp follow the yyyy.MM.dd format
 ```
 
+## 0.4.7 [2026.07.17]
+
+- fix: background only seeds the default WebSocket server/token on first install when native messaging is unavailable; native-only installs no longer get a permanently failing WS connection (`src/background/index.ts`, `src/background/nativeHost.ts`)
+- feat: add `waitForInitialStatus()` to `nativeHost.ts` that resolves once with the first real connection-mode determination, so one-time decisions can await the actual native-messaging availability instead of racing the still-`unavailable` synchronous `getConnectionMode()`
+- fix: content script re-announces its open WebSocket connection to the background after a service-worker restart, so the side panel/background catch back up to the live socket that survived the eviction (`src/contentScript/connectionManager.ts`)
+
 ## 0.4.6 [2026.07.12]
 
 - fix: rename the Firefox add-on `browser_specific_settings.gecko.id` from `htrcontrol@mercstudio.com` → `htrncontrol@mercstudio.com` in `firefox/vite.config.ts`, and update the matching native-host install command (`htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com`) in `CLAUDE.md`, `GUIDE.md`, `Makefile`, `firefox/README.md`, `htrcli/README.md`, and `skills/htrcli/SKILL.md`

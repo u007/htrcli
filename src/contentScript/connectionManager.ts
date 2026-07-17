@@ -162,6 +162,21 @@ chrome.runtime.onMessage.addListener((message) => {
 		if (mode === "native") {
 			mode = "disconnected";
 			checkAutoConnectWS();
+			return;
+		}
+
+		// The background's own view of `wsConnected` lives in memory and is
+		// wiped whenever its MV3 service worker is evicted and restarts (it
+		// re-runs the whole script, resetting the flag to false). Our socket
+		// survives that restart untouched, but `reportedWs` is already true so
+		// `reportWsStatus` won't re-send. If the background just broadcast a
+		// non-native status while our socket is actually open, re-announce it
+		// so the background (and side panel) catch back up.
+		if (wsIsConnected()) {
+			reportedWs = true;
+			chrome.runtime
+				.sendMessage({ type: "WS_CONNECTION_STATUS", mode: "ws" })
+				.catch(() => {});
 		}
 	}
 });
