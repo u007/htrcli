@@ -742,21 +742,21 @@ async function captureTabScreenshot(
  * reason instead of swallowing it, so the daemon's GET /api/screenshot returns
  * a diagnosable error.
  *
- * captureVisibleTab can only capture a window's *visible* (active) tab, and the
- * daemon's tabId comes from its registry — which may hold a stale or pseudo id
- * that chrome.tabs.get rejects ("Invalid tab ID"). So we ignore it and capture
- * the focused window's active tab, which is what a screenshot means anyway.
+ * captureVisibleTab can only capture a window's *visible* (active) tab, so if
+ * the requested tab isn't currently active in its window we activate it first
+ * — otherwise this silently captures whatever unrelated tab happens to be
+ * active, which is data leakage across tabs.
  */
 async function captureScreenshotForUpload(
-	_tabId: number,
+	tabId: number,
 ): Promise<{ data?: string; error?: string }> {
 	try {
-		const [active] = await chrome.tabs.query({
-			active: true,
-			lastFocusedWindow: true,
-		});
-		if (!active?.windowId) return { error: "no active tab to capture" };
-		const dataUrl = await chrome.tabs.captureVisibleTab(active.windowId, {
+		const tab = await chrome.tabs.get(tabId);
+		if (!tab.windowId) return { error: "tab has no windowId" };
+		if (!tab.active) {
+			await chrome.tabs.update(tabId, { active: true });
+		}
+		const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
 			format: "png",
 		});
 		if (!dataUrl) return { error: "captureVisibleTab returned empty" };
