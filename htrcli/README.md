@@ -63,6 +63,16 @@ native host while the old process lingered) clean themselves up. Extensions
 older than this protocol never reply and get reaped every 45s — keep the
 extension and htrcli builds in sync.
 
+### Tray icon
+
+When you run `htrcli serve` on a desktop (macOS, Windows, Linux with a
+display), a system-tray icon appears automatically. See
+[htrcli/docs/tray.md](docs/tray.md) for what the menu does and how to
+disable it.
+
+Headless Linux servers (no display, or logged in over SSH) silently
+skip the tray — no configuration needed.
+
 ## CDP transport (direct Chrome DevTools Protocol)
 
 By default `htrcli` drives the browser through the extension (the transports

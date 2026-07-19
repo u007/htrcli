@@ -195,3 +195,44 @@ func TestSweepConnsReapsWriteFailures(t *testing.T) {
 }
 
 var errBrokenPipe = fmt.Errorf("write: broken pipe")
+
+func TestDaemonRelaysConnected(t *testing.T) {
+	d := host.NewDaemon()
+	if n := d.RelaysConnected(); n != 0 {
+		t.Fatalf("fresh daemon: want 0 relays, got %d", n)
+	}
+	rc1 := noopConn(d)
+	rc2 := noopConn(d)
+	if n := d.RelaysConnected(); n != 2 {
+		t.Fatalf("after 2 AddConn: want 2 relays, got %d", n)
+	}
+	d.RemoveConn(rc1)
+	if n := d.RelaysConnected(); n != 1 {
+		t.Fatalf("after RemoveConn: want 1 relay, got %d", n)
+	}
+	_ = rc2
+}
+
+func TestDaemonLastErrorFromFailedCommand(t *testing.T) {
+	d := host.NewDaemon()
+	rc := noopConn(d)
+	d.RegisterTab(rc, 1, host.TabInfo{ID: 1, URL: "https://a.com"})
+
+	if _, err := d.EnqueueCommand(1, host.Command{ID: "c1", Action: "click"}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	// Deliver a failed result.
+	d.ResolveCommand("c1", host.CommandResult{ID: "c1", Success: false, Error: "boom"})
+	if got := d.LastError(); got != "boom" {
+		t.Fatalf("LastError = %q, want %q", got, "boom")
+	}
+}
+
+func TestDaemonLastErrorOnRelayDrop(t *testing.T) {
+	d := host.NewDaemon()
+	rc := noopConn(d)
+	d.RemoveConn(rc)
+	if got := d.LastError(); got != "relay disconnected" {
+		t.Fatalf("LastError = %q, want %q", got, "relay disconnected")
+	}
+}

@@ -82,10 +82,42 @@ type Daemon struct {
 	// pendingShots correlates a capture_screenshot trigger with the HTTP
 	// upload the extension POSTs back, keyed by command ID.
 	pendingShots map[string]chan shotResult
+	// lastErr records the most recent non-fatal error (a failed command, a
+	// dropped relay, or a failed screenshot) for display in the tray. It
+	// carries a timestamp so the tray can age it out (see LastError).
+	lastErr   string
+	lastErrAt time.Time
 	// stop is closed by Stop to terminate background goroutines (e.g. the
 	// sweeper). Initialized in NewDaemon; closing it is guarded by stopOnce.
 	stopOnce sync.Once
 	stop     chan struct{}
+}
+
+// RelaysConnected returns the number of live relay connections (browsers).
+func (d *Daemon) RelaysConnected() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.conns)
+}
+
+// LastError returns the most recent non-fatal error, or "" if none within the
+// last 5 minutes. The staleness window keeps the tray from showing a
+// long-past transient error forever.
+func (d *Daemon) LastError() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if time.Since(d.lastErrAt) > 5*time.Minute {
+		return ""
+	}
+	return d.lastErr
+}
+
+// setLastErr records a non-fatal error with the current timestamp.
+func (d *Daemon) setLastErr(err string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.lastErr = err
+	d.lastErrAt = time.Now()
 }
 
 // NewDaemon creates an empty Daemon.
@@ -237,10 +269,15 @@ func (d *Daemon) Stop() {
 
 // RemoveConn drops a relay connection and every tab it owned. Other
 // connections are left untouched, so one browser disconnecting does not stop
-// commands to the others.
+// commands to the others. A dropped relay is a notable event, so it is
+// recorded as the daemon's last error for tray display.
 func (d *Daemon) RemoveConn(rc *RelayConn) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if _, ok := d.conns[rc]; ok {
+		d.lastErr = "relay disconnected"
+		d.lastErrAt = time.Now()
+	}
 	delete(d.conns, rc)
 }
 
@@ -331,6 +368,10 @@ func (d *Daemon) ResolveCommand(commandID string, result CommandResult) {
 	if ok {
 		delete(d.pending, commandID)
 	}
+	if !result.Success {
+		d.lastErr = result.Error
+		d.lastErrAt = time.Now()
+	}
 	d.mu.Unlock()
 
 	if ok {
@@ -384,6 +425,10 @@ func (d *Daemon) ResolveScreenshot(commandID, data, errMsg string) {
 	ch, ok := d.pendingShots[commandID]
 	if ok {
 		delete(d.pendingShots, commandID)
+	}
+	if errMsg != "" {
+		d.lastErr = errMsg
+		d.lastErrAt = time.Now()
 	}
 	d.mu.Unlock()
 

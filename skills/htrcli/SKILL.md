@@ -78,6 +78,15 @@ htrcli serve
 HTR_PORT=48546 HTR_BEARER_TOKEN=secret htrcli serve
 ```
 
+### Tray icon
+
+When you run `htrcli serve` on a desktop, a system-tray icon auto-attaches.
+It exposes live status and maintenance actions (reinstall native host,
+open config folder, copy bearer token, show recent log, restart, quit).
+On headless Linux servers (no display, or SSH session), the tray is
+silently skipped. See `htrcli/docs/tray.md` for the full menu and
+`--no-tray` opt-out.
+
 Chrome and Firefox may both be registered and connected at once —
 `htrcli tabs list` shows tabs from both, and `--tab <id>` routes to whichever
 browser owns that tab.

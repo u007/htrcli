@@ -14,13 +14,14 @@ import (
 )
 
 type configData struct {
-	Server       string `json:"server"`
-	Token        string `json:"token"`
-	AMOAPIKey    string `json:"amo-api-key"`
-	AMOAPISecret string `json:"amo-api-secret"`
-	Transport    string `json:"transport,omitempty"`
-	CDPPort      int    `json:"cdp-port,omitempty"`
-	ChromePath   string `json:"chrome-path,omitempty"`
+	Server       string            `json:"server"`
+	Token        string            `json:"token"`
+	AMOAPIKey    string            `json:"amo-api-key"`
+	AMOAPISecret string            `json:"amo-api-secret"`
+	Transport    string            `json:"transport,omitempty"`
+	CDPPort      int               `json:"cdp-port,omitempty"`
+	ChromePath   string            `json:"chrome-path,omitempty"`
+	ExtensionID  map[string]string `json:"extension-id,omitempty"`
 }
 
 var configCmd = &cobra.Command{
@@ -40,6 +41,7 @@ var configShowCmd = &cobra.Command{
 			Transport:    viper.GetString("transport"),
 			CDPPort:      viper.GetInt("cdp-port"),
 			ChromePath:   viper.GetString("chrome-path"),
+			ExtensionID:  viper.GetStringMapString("extension-id"),
 		}
 		if cfg.Server == "" {
 			cfg.Server = "http://127.0.0.1:3845"
@@ -61,6 +63,13 @@ var configShowCmd = &cobra.Command{
 		fmt.Printf("Transport: %s\n", cmp.Or(cfg.Transport, "ext"))
 		fmt.Printf("CDP port: %d\n", cmp.Or(cfg.CDPPort, 9222))
 		fmt.Printf("Chrome path: %s\n", cmp.Or(cfg.ChromePath, "(autodetect)"))
+		if extID := viper.GetString("extension-id"); extID != "" {
+			fmt.Printf("Extension ID: %s\n", extID)
+		} else if len(cfg.ExtensionID) > 0 {
+			for k, v := range cfg.ExtensionID {
+				fmt.Printf("Extension ID (%s): %s\n", k, v)
+			}
+		}
 		return nil
 	},
 }
@@ -226,5 +235,71 @@ func init() {
 	configCmd.AddCommand(configSetTransportCmd)
 	configCmd.AddCommand(configSetCDPPortCmd)
 	configCmd.AddCommand(configSetChromePathCmd)
+	configCmd.AddCommand(setExtensionIDCmd)
+	setExtensionIDCmd.Flags().StringVar(&setExtensionIDBrowser, "browser", "", "Browser this ID applies to (chrome, firefox). Empty = default for all.")
 	rootCmd.AddCommand(configCmd)
+}
+
+var setExtensionIDBrowser string
+
+var setExtensionIDCmd = &cobra.Command{
+	Use:   "set-extension-id <id>",
+	Short: "Set the browser extension ID used by 'htrcli install' (and the tray's 'Reinstall native host' menu)",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		id := args[0]
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+		configDir := filepath.Join(home, ".htrcli")
+		if err := os.MkdirAll(configDir, 0700); err != nil {
+			return fmt.Errorf("failed to create config directory: %w", err)
+		}
+		configFile := filepath.Join(configDir, "config.json")
+
+		// Read the existing config as a raw map so we never drop keys
+		// owned by other subcommands (e.g. token, server).
+		raw := map[string]any{}
+		if data, rerr := os.ReadFile(configFile); rerr == nil {
+			_ = json.Unmarshal(data, &raw)
+		}
+
+		extID := map[string]string{}
+		if existing, ok := raw["extension-id"].(map[string]any); ok {
+			for k, v := range existing {
+				if s, ok := v.(string); ok {
+					extID[k] = s
+				}
+			}
+		}
+
+		if setExtensionIDBrowser == "" {
+			// Default ID applies to all browsers: stored as a plain string.
+			raw["extension-id"] = id
+			viper.Set("extension-id", id)
+		} else {
+			extID[setExtensionIDBrowser] = id
+			raw["extension-id"] = extID
+			viper.Set("extension-id", extID)
+			// Also set the dotted key so `viper.GetString("extension-id.<browser>")`
+			// resolves directly.
+			viper.Set("extension-id."+setExtensionIDBrowser, id)
+		}
+
+		out, merr := json.MarshalIndent(raw, "", "  ")
+		if merr != nil {
+			return fmt.Errorf("failed to marshal config: %w", merr)
+		}
+		if werr := os.WriteFile(configFile, out, 0600); werr != nil {
+			return fmt.Errorf("failed to write config: %w", werr)
+		}
+
+		which := setExtensionIDBrowser
+		if which == "" {
+			which = "all"
+		}
+		fmt.Printf("Set extension-id for %s to %s\n", which, id)
+		return nil
+	},
 }

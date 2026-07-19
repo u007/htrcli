@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## [Unreleased]
+
+### Added
+
+- **Tray icon (desktop)**: `htrcli serve` now shows a cross-platform
+  system-tray icon on macOS, Windows, and Linux desktops. Menu provides
+  live status (port, relay count, last error) and maintenance actions:
+  reinstall native host (Chrome/Firefox), open config folder, copy
+  bearer token (with 30s auto-clear), show recent log, and Restart/Quit
+  lifecycle. The main goroutine now drives the tray; the HTTP server and
+  signal handler run as goroutines behind it. On headless Linux servers
+  the tray is silently skipped; opt out with `--no-tray` or
+  `HTRCLI_NO_TRAY=1` (CI must use this). Bearer token is now logged as
+  a fingerprint (`a1b2…f3e4`) instead of the full value. Requires
+  `gnome-shell-extension-appindicator` or `ayatana-indicator` on
+  GNOME/Wayland for the icon to appear.
+
+### Changed
+
+- `htrcli config set-extension-id <id> [--browser chrome|firefox]` stores
+  the browser extension ID used by the tray's "Reinstall native host" menu.
+- `htrcli config show` now displays the configured extension ID.
+
 ```txt
 Summary
   1. document grouping follow 'SemVer2.0' protocol

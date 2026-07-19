@@ -857,4 +857,32 @@ var screenshotCmd = &cobra.Command{
 
 ---
 
+## Tray icon
+
+`htrcli serve` auto-attaches a cross-platform system-tray icon on
+desktops. The menu exposes live status and a small set of maintenance
+actions (reinstall native host, open config folder, copy bearer token,
+show recent log, restart, quit). The tray is silently skipped on
+headless Linux; opt out with `--no-tray` or `HTRCLI_NO_TRAY=1`.
+
+- New package: `internal/tray` (`Controller` interface, `Run`, `ShouldStart`,
+  `daemonController`). The `getlantern/systray` dependency is isolated here.
+- `tray.ShouldStart(noTray bool) bool` — pure detection: macOS/Windows
+  always; Linux only with a display and no active SSH session.
+- `serve.go` restructures so the main goroutine drives `tray.Run`; the HTTP
+  server, signal handler, and daemon sweeper run as background goroutines.
+  Shutdown is explicit (`performShutdown`), not deferred.
+- `host.StartUnixSocketServer` now returns its `net.Listener` so shutdown can
+  close it.
+- `host.Daemon` gains `RelaysConnected()` and `LastError()` (5-minute
+  staleness) for the status line.
+- `htrcli config set-extension-id <id> [--browser chrome|firefox]` stores the
+  ID used by the tray's "Reinstall native host" menu.
+- Bearer token is logged as a fingerprint (`a1b2…f3e4`) instead of the full
+  value.
+
+See `docs/tray.md` for the user-facing reference and
+`docs/superpowers/specs/2026-07-18-htrcli-desktop-tray-design.md` for the
+full design rationale.
+
 *Spec version: 1.2 — 2026-06-10*

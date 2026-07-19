@@ -1,17 +1,27 @@
 package commands
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/u007/htrcli/internal/host"
+	"github.com/u007/htrcli/internal/tray"
 )
+
+var serveNoTray bool
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -23,14 +33,7 @@ var serveCmd = &cobra.Command{
 		}
 		socketPath := home + host.DefaultSocketPath
 
-		bearerToken := os.Getenv("HTR_BEARER_TOKEN")
-		if bearerToken == "" {
-			if fileToken := readBearerTokenFile(); fileToken != "" {
-				bearerToken = fileToken
-			} else {
-				bearerToken = viper.GetString("token")
-			}
-		}
+		bearerToken := resolveBearerToken()
 		port := 3845
 		if p := os.Getenv("HTR_PORT"); p != "" {
 			fmt.Sscanf(p, "%d", &port)
@@ -38,30 +41,22 @@ var serveCmd = &cobra.Command{
 
 		d := host.NewDaemon()
 
-		// Bind the HTTP port BEFORE touching the unix socket. A second
-		// `htrcli serve` used to remove/re-create daemon.sock first and only
-		// then fail on the busy port — destroying the running daemon's
-		// socket on exit and leaving every relay unable to connect.
 		srv := host.NewHTTPServer(d, port, bearerToken, defaultAllowedIPs())
 		ln, err := net.Listen("tcp", srv.Addr)
 		if err != nil {
 			return fmt.Errorf("port %d already in use (another htrcli serve or the Bun server running?): %w", port, err)
 		}
 
-		// Start Unix socket server (for relay connections from Chrome)
-		go func() {
-			if err := host.StartUnixSocketServer(d, socketPath); err != nil {
-				log.Printf("[htrcli serve] Unix socket error: %v", err)
-			}
-		}()
+		// Start Unix socket server (for relay connections from Chrome).
+		// The listener is owned here so it can be closed during shutdown.
+		unixLn, err := host.StartUnixSocketServer(d, socketPath)
+		if err != nil {
+			return fmt.Errorf("unix socket server: %w", err)
+		}
 
 		// Reap stale relays: ping each connection periodically and drop any
-		// that stay silent (e.g. a browser respawned its native host while
-		// the old relay process lingered, leaving duplicate/dead tabs).
-		// The sweeper's lifecycle is owned by the daemon (see d.Stop), so it
-		// terminates cleanly on shutdown instead of leaking until exit.
+		// that stay silent. Lifecycle owned by the daemon (see d.Stop).
 		go d.StartSweeper(host.PingInterval, host.StaleAfter)
-		defer d.Stop()
 
 		fmt.Printf("[htrcli serve] Listening on http://127.0.0.1:%d\n", port)
 		fmt.Printf("[htrcli serve] Unix socket: %s\n", socketPath)
@@ -69,11 +64,139 @@ var serveCmd = &cobra.Command{
 			fmt.Println("[htrcli serve] Warning: no bearer token configured — unauthenticated")
 			fmt.Println("  Set HTR_BEARER_TOKEN env var, or run: htrcli config set-token <token>")
 		} else {
-			fmt.Printf("[htrcli serve] Using bearer token: %s\n", bearerToken)
+			// Never log the full bearer token — only a fingerprint.
+			log.Printf("[htrcli serve] Using bearer token: %s", tray.Fingerprint(bearerToken))
 		}
 
-		return srv.Serve(ln)
+		// --- Tray detection -------------------------------------------------
+		trayAttached := tray.ShouldStart(serveNoTray)
+		if trayAttached {
+			log.Printf("[htrcli serve] Tray icon enabled")
+		} else {
+			log.Printf("[htrcli serve] Tray disabled (no display or HTRCLI_NO_TRAY set)")
+		}
+
+		// Resolvers shared by the tray controller (env > file > viper).
+		getToken := func() string { return resolveBearerToken() }
+		getExtID := func(browser string) string {
+			if browser != "" {
+				if v := viper.GetString("extension-id." + browser); v != "" {
+					return v
+				}
+			}
+			return viper.GetString("extension-id")
+		}
+
+		// --- Shutdown sequencing -------------------------------------------
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+		done := make(chan struct{})
+		var logCloser func() error
+		var shutdownOnce sync.Once
+		performShutdown := func() {
+			shutdownOnce.Do(func() {
+				// 1. Quit the tray (idempotent). Routed through the tray
+				//    package so serve.go never imports getlantern/systray.
+				if trayAttached {
+					tray.Quit()
+				}
+				// 2. Drain HTTP (5s timeout).
+				sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := srv.Shutdown(sctx); err != nil {
+					log.Printf("[htrcli serve] HTTP shutdown: %v", err)
+				}
+				// 3. Stop the daemon (sweeper, etc.).
+				d.Stop()
+				// 4. Close the Unix-socket listener.
+				if unixLn != nil {
+					_ = unixLn.Close()
+				}
+				// 5. Flush/close the tray log file if attached.
+				if logCloser != nil {
+					_ = logCloser()
+				}
+				close(done)
+			})
+		}
+
+		// Signal handler goroutine.
+		go func() {
+			<-sigCh
+			performShutdown()
+		}()
+
+		// HTTP server goroutine.
+		go func() {
+			if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+				log.Printf("[htrcli serve] HTTP server error: %v", err)
+			}
+		}()
+
+		if trayAttached {
+			// Redirect daemon logs to ~/.htrcli/serve.log (in addition to
+			// stderr) so the tray's "Show recent log" menu has something to
+			// open. Server runs without a tray are unaffected.
+			if closer, lerr := attachServeLog(); lerr != nil {
+				log.Printf("[htrcli serve] tray log redirect: %v (continuing without)", lerr)
+			} else {
+				logCloser = closer
+			}
+
+			selfPath, _ := os.Executable()
+			ctrl := tray.NewDaemonController(d, port, getToken, getExtID, selfPath, ln, tray.RealCommander{})
+			ctrl.SetQuitFn(func() {
+				// Reuse the signal-shutdown path.
+				sigCh <- syscall.SIGTERM
+			})
+
+			// tray.Run blocks the main goroutine (required by systray on
+			// macOS/Windows) until tray.Quit() is called — which happens
+			// via Quit menu → SetQuitFn → SIGTERM → performShutdown.
+			tray.Run(ctrl, trayIcon)
+			<-done
+			return nil
+		}
+
+		// No tray: block until shutdown completes.
+		<-done
+		return nil
 	},
+}
+
+// resolveBearerToken resolves the bearer token with priority
+// env > token file > viper config.
+func resolveBearerToken() string {
+	if t := os.Getenv("HTR_BEARER_TOKEN"); t != "" {
+		return t
+	}
+	if t := readBearerTokenFile(); t != "" {
+		return t
+	}
+	return viper.GetString("token")
+}
+
+
+// attachServeLog redirects the standard logger to also write to
+// ~/.htrcli/serve.log (keeping stderr for journald/launchd). Returns a closer
+// for the log file.
+func attachServeLog() (func() error, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(home, ".htrcli")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, err
+	}
+	logPath := filepath.Join(dir, "serve.log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+	log.SetOutput(io.MultiWriter(os.Stderr, f))
+	return f.Close, nil
 }
 
 func defaultAllowedIPs() []string {
@@ -135,5 +258,6 @@ func readBearerTokenFile() string {
 }
 
 func init() {
+	serveCmd.Flags().BoolVar(&serveNoTray, "no-tray", false, "Disable the system-tray icon (auto-skipped on headless Linux; set HTRCLI_NO_TRAY=1 to force)")
 	rootCmd.AddCommand(serveCmd)
 }

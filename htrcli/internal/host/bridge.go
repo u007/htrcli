@@ -13,34 +13,40 @@ import (
 
 // StartUnixSocketServer listens on socketPath for relay connections.
 // Each accepted connection becomes the active relay for the daemon.
-// Blocks until an error occurs.
-func StartUnixSocketServer(d *Daemon, socketPath string) error {
+// It returns the net.Listener so the caller can close it during shutdown
+// (the tray feature's clean-shutdown sequence depends on this). The accept
+// loop runs in a background goroutine; StartUnixSocketServer itself returns
+// as soon as the listener is bound.
+func StartUnixSocketServer(d *Daemon, socketPath string) (net.Listener, error) {
 	if err := ensureSocketParentDir(socketPath); err != nil {
-		return fmt.Errorf("create socket dir: %w", err)
+		return nil, fmt.Errorf("create socket dir: %w", err)
 	}
 	// Only clear a STALE socket file. If another daemon is actively
 	// accepting on it, bail out instead of unlinking it from under them.
 	if probe, err := net.DialTimeout("unix", socketPath, time.Second); err == nil {
 		probe.Close()
-		return fmt.Errorf("another daemon is already accepting on %s", socketPath)
+		return nil, fmt.Errorf("another daemon is already accepting on %s", socketPath)
 	}
 	os.Remove(socketPath)
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
-		return fmt.Errorf("listen unix %s: %w", socketPath, err)
+		return nil, fmt.Errorf("listen unix %s: %w", socketPath, err)
 	}
-	defer func() {
-		ln.Close()
-		os.Remove(socketPath)
+
+	go func() {
+		// Remove the socket file when the listener is closed (shutdown).
+		defer os.Remove(socketPath)
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				// Listener closed during shutdown — exit the loop.
+				return
+			}
+			go handleRelayConn(d, conn)
+		}
 	}()
 
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			return err
-		}
-		go handleRelayConn(d, conn)
-	}
+	return ln, nil
 }
 
 func ensureSocketParentDir(socketPath string) error {
