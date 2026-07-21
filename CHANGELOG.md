@@ -19,6 +19,8 @@
 
 ### Changed
 
+- **ConnectedTabs**: tab list items are now clickable buttons that switch to and focus the target tab's window, improving the multi-window UX (`src/sidepanel/components/ConnectedTabs.tsx`, `src/sidepanel/components/ConnectedTabs.css`)
+- **FETCH_URL error logging**: background now includes the HTTP method and URL in error messages for easier debugging (`src/background/index.ts`)
 - `htrcli config set-extension-id <id> [--browser chrome|firefox]` stores
   the browser extension ID used by the tray's "Reinstall native host" menu.
 - `htrcli config show` now displays the configured extension ID.

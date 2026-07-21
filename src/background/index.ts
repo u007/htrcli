@@ -1127,7 +1127,10 @@ chrome.runtime.onMessage.addListener(
 						}
 						sendResponse({ ok: resp.ok, status: resp.status, data });
 					} catch (error) {
-						console.error("[HTR NControl] FETCH_URL error:", error);
+						console.error(
+							`[HTR NControl] FETCH_URL error (${msg.method || "GET"} ${msg.url}):`,
+							error,
+						);
 						sendResponse({
 							ok: false,
 							error: error instanceof Error ? error.message : String(error),

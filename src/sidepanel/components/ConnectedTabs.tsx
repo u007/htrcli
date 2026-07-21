@@ -57,6 +57,22 @@ export function ConnectedTabs() {
 		}
 	}, []);
 
+	const activateTab = useCallback(
+		async (tabId: number): Promise<void> => {
+			try {
+				const tab = await chrome.tabs.get(tabId);
+				await chrome.tabs.update(tabId, { active: true });
+				// Also focus the window the tab lives in, otherwise the
+				// switch is invisible when the tab is in another window.
+				await chrome.windows.update(tab.windowId, { focused: true });
+				await refresh();
+			} catch (err) {
+				console.warn("[HTR NControl] activate tab failed:", err);
+			}
+		},
+		[refresh],
+	);
+
 	const requestAccess = useCallback(async (): Promise<void> => {
 		if (!chrome.permissions?.request) {
 			setGrantResult("permissions.request API unavailable in this context");
@@ -175,20 +191,24 @@ export function ConnectedTabs() {
 						</li>
 					) : (
 						tabs.map((tab) => (
-							<li
-								key={tab.id}
-								className={`ct-item${tab.active ? " ct-active" : ""}`}
-							>
-								{tab.favIconUrl ? (
-									<img className="ct-favicon" src={tab.favIconUrl} alt="" />
-								) : (
-									<span className="ct-favicon-placeholder" />
-								)}
-								<div className="ct-info">
-									<span className="ct-name">{tab.title || "(no title)"}</span>
-									<span className="ct-id">ID: {tab.id}</span>
-								</div>
-								{tab.active && <span className="ct-badge">active</span>}
+							<li key={tab.id}>
+								<button
+									type="button"
+									className={`ct-item${tab.active ? " ct-active" : ""}`}
+									title="Switch to this tab"
+									onClick={() => void activateTab(tab.id)}
+								>
+									{tab.favIconUrl ? (
+										<img className="ct-favicon" src={tab.favIconUrl} alt="" />
+									) : (
+										<span className="ct-favicon-placeholder" />
+									)}
+									<div className="ct-info">
+										<span className="ct-name">{tab.title || "(no title)"}</span>
+										<span className="ct-id">ID: {tab.id}</span>
+									</div>
+									{tab.active && <span className="ct-badge">active</span>}
+								</button>
 							</li>
 						))
 					)}

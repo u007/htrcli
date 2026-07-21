@@ -98,6 +98,15 @@
 	border-radius: 6px;
 	border: 1px solid var(--border-color);
 	background: var(--bg-secondary);
+	width: 100%;
+	font: inherit;
+	text-align: left;
+	color: inherit;
+	cursor: pointer;
+}
+
+.ct-item:hover {
+	background: var(--bg-hover);
 }
 
 .ct-item.ct-active {
