@@ -1,6 +1,6 @@
 # htrcli Element Refs, findAll & File Upload Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Ship the `findAll` CLI subcommand, persistent element refs (`@e1`, `@e2`, …) that later commands accept transparently, and a `upload` command that sets file inputs without an OS file-picker — with the ref plumbing landing before upload depends on it.
 
@@ -34,7 +34,7 @@ The `findAll` `CommandAction` and `handleFindAll` already exist on both the exte
 - Consumes: `GetClient()`, `GetTabID()`, `UseCDP()`, `runInspectCDP(action, selector, attr string) error`, `parseSelector(arg string) *api.TargetSelector` (all existing).
 - Produces: `findAllCmd` cobra command registered on `rootCmd`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `htrcli/internal/commands/findall_test.go`:
 
@@ -87,12 +87,12 @@ func TestFindAllSendsFindAllAction(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd htrcli && go test ./internal/commands/... -run TestFindAllSendsFindAllAction -v`
 Expected: FAIL — `findAllCmd` undefined.
 
-- [ ] **Step 3: Add `findAllCmd`**
+- [x] **Step 3: Add `findAllCmd`**
 
 In `htrcli/internal/commands/inspect.go`, add after `findCmd` (near line 50):
 
@@ -137,12 +137,12 @@ Register it in the existing `init()` (near line 714), right after `rootCmd.AddCo
 	rootCmd.AddCommand(findAllCmd)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd htrcli && go test ./internal/commands/... -run TestFindAllSendsFindAllAction -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add htrcli/internal/commands/inspect.go htrcli/internal/commands/findall_test.go
@@ -164,7 +164,7 @@ Adds the shared data field both transports key refs on, and teaches `parseSelect
 **Interfaces:**
 - Produces: `api.TargetSelector.Ref string` (JSON `ref`), `parseSelector("@e7") → &TargetSelector{Ref: "@e7"}`, TS `TargetSelector.ref?: string`, TS `RemoteElementInfo.ref?: string`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `htrcli/internal/commands/commands_test.go`:
 
@@ -188,12 +188,12 @@ func TestParseSelector_RefLeavesRealSelectorsAlone(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd htrcli && go test ./internal/commands/... -run TestParseSelector_Ref -v`
 Expected: FAIL — `s.Ref` undefined (field does not exist).
 
-- [ ] **Step 3: Add the `Ref` field**
+- [x] **Step 3: Add the `Ref` field**
 
 In `htrcli/internal/api/types.go`, add to the `TargetSelector` struct (after the `XPath` field near line 9):
 
@@ -204,7 +204,7 @@ In `htrcli/internal/api/types.go`, add to the `TargetSelector` struct (after the
 	Ref string `json:"ref,omitempty"`
 ```
 
-- [ ] **Step 4: Add the `@`-prefix branch to `parseSelector`**
+- [x] **Step 4: Add the `@`-prefix branch to `parseSelector`**
 
 In `htrcli/internal/commands/interact.go`, add at the very top of `parseSelector` (before the `name=` check, near line 15):
 
@@ -216,7 +216,7 @@ In `htrcli/internal/commands/interact.go`, add at the very top of `parseSelector
 	}
 ```
 
-- [ ] **Step 5: Add the TS fields**
+- [x] **Step 5: Add the TS fields**
 
 In `src/types/commands.ts`, add to `interface TargetSelector` (find the interface; add near its other optional string fields):
 
@@ -232,14 +232,14 @@ And to `interface RemoteElementInfo` (after `attributes?` near line 84):
 	ref?: string;
 ```
 
-- [ ] **Step 6: Run the Go test + TS typecheck**
+- [x] **Step 6: Run the Go test + TS typecheck**
 
 Run: `cd htrcli && go test ./internal/commands/... -run TestParseSelector -v`
 Expected: PASS
 Run: `bun run typecheck`
 Expected: no type errors
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add htrcli/internal/api/types.go htrcli/internal/commands/interact.go src/types/commands.ts
@@ -259,7 +259,7 @@ A content-script-world `Map<string, Element>`. Lives in the isolated content-scr
 **Interfaces:**
 - Produces: `assignRef(el: Element): string`, `resolveRef(refId: string): Element` (throws on stale/unknown), `clearRefs(): void`, `refCount(): number`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/contentScript/refRegistry.test.ts`:
 
@@ -309,12 +309,12 @@ describe("refRegistry", () => {
 
 Note: the `domSetup` helper lives at `src/test/domSetup.ts`, so from a test file in `src/contentScript/` the import is `../test/domSetup` (matching `commandExecutor.test.ts` and `elementFinder.test.ts`).
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun test src/contentScript/refRegistry.test.ts`
 Expected: FAIL — `./refRegistry` module does not exist.
 
-- [ ] **Step 3: Implement `refRegistry.ts`**
+- [x] **Step 3: Implement `refRegistry.ts`**
 
 Create `src/contentScript/refRegistry.ts`:
 
@@ -381,17 +381,17 @@ export function refCount(): number {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun test src/contentScript/refRegistry.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Biome check**
+- [x] **Step 5: Biome check**
 
 Run: `bun run check:fix`
 Expected: no errors on the new files
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/contentScript/refRegistry.ts src/contentScript/refRegistry.test.ts
@@ -413,7 +413,7 @@ Wires the registry into the two ends: `findElement`/`findAllElementsRaw` resolve
 - Consumes: `assignRef`, `resolveRef` from `refRegistry` (Task 3); `findElement`, `findElementInfo`, `getElementInfo` (existing).
 - Produces: ref-aware `findAllElementsRaw`; `handleFind`/`handleFindAll` populate `RemoteElementInfo.ref` when `options.assignRef` is set.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/contentScript/refResolution.test.ts`:
 
@@ -477,12 +477,12 @@ describe("ref resolution end-to-end", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun test src/contentScript/refResolution.test.ts`
 Expected: FAIL — refs are not resolved (getText by ref finds nothing) and `info.ref` is undefined.
 
-- [ ] **Step 3: Resolve refs in `elementFinder`**
+- [x] **Step 3: Resolve refs in `elementFinder`**
 
 In `src/contentScript/elementFinder.ts`, add the import at the top (after the existing type imports near line 12):
 
@@ -500,7 +500,7 @@ Add a ref branch at the very top of `findAllElementsRaw` (before the `// 1. CSS 
 	}
 ```
 
-- [ ] **Step 4: Assign refs in the find/findAll handlers**
+- [x] **Step 4: Assign refs in the find/findAll handlers**
 
 In `src/contentScript/commandExecutor.ts`, add the import (after the `elementFinder` import block near line 28):
 
@@ -559,17 +559,17 @@ import {
 
 (`findElementInfo` may now be unused in `commandExecutor.ts`. If `bun run check` / typecheck flags it as unused, remove it from the import — it was only used by the old `handleFindAll`. Verify with the typecheck step before removing.)
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `bun test src/contentScript/refResolution.test.ts`
 Expected: PASS
 
-- [ ] **Step 6: Run the full content-script test suite + typecheck**
+- [x] **Step 6: Run the full content-script test suite + typecheck**
 
 Run: `bun test src/contentScript/ && bun run typecheck`
 Expected: PASS, no type errors (fix an unused `findElementInfo` import if flagged, per Step 4)
 
-- [ ] **Step 7: Biome + commit**
+- [x] **Step 7: Biome + commit**
 
 ```bash
 bun run check:fix
@@ -591,7 +591,7 @@ Adds the `--ref` flag that sets `options.assignRef` and prints the minted ref id
 - Consumes: `findCmd`, `findAllCmd` (Tasks 1 + existing), `api.Command.Options`.
 - Produces: `--ref` bool flag on both commands; `Options{"assignRef": true}` sent when set.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `htrcli/internal/commands/findall_test.go`:
 
@@ -627,12 +627,12 @@ func TestFindWithRefSetsAssignRefOption(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd htrcli && go test ./internal/commands/... -run TestFindWithRefSetsAssignRefOption -v`
 Expected: FAIL — `findRef` undefined.
 
-- [ ] **Step 3: Add the `--ref` flag and thread the option**
+- [x] **Step 3: Add the `--ref` flag and thread the option**
 
 In `htrcli/internal/commands/inspect.go`, add a package-level var near the top (after the imports, before `findCmd`):
 
@@ -730,14 +730,14 @@ func runFindRefCDP(selector string, all bool) error {
 }
 ```
 
-- [ ] **Step 4: Run test + full commands suite**
+- [x] **Step 4: Run test + full commands suite**
 
 Run: `cd htrcli && go test ./internal/commands/... -run 'TestFind' -v`
 Expected: PASS
 Run: `cd htrcli && go test ./internal/commands/...`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add htrcli/internal/commands/inspect.go htrcli/internal/commands/findall_test.go
@@ -765,7 +765,7 @@ The CDP transport has no in-page JS registry the CLI can address across its shor
   - `commands.RefStore` with `LoadRefStore() (*RefStore, error)`, `(*RefStore) Alloc(backendNodeID int64) string`, `(*RefStore) Lookup(refID string) (int64, bool)`, `(*RefStore) Save() error`.
   - `commands.runFindRefCDP(selector string, all bool) error`.
 
-- [ ] **Step 1: Write the failing CDP test**
+- [x] **Step 1: Write the failing CDP test**
 
 Create `htrcli/internal/cdp/elementref_test.go`:
 
@@ -847,12 +847,12 @@ func TestResolveBackendNodeIDNotFound(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd htrcli && go test ./internal/cdp/... -run TestResolveBackendNodeID -v`
 Expected: FAIL — `ResolveBackendNodeID` undefined.
 
-- [ ] **Step 3: Implement `elementref.go`**
+- [x] **Step 3: Implement `elementref.go`**
 
 Create `htrcli/internal/cdp/elementref.go`:
 
@@ -943,12 +943,12 @@ func ResolveRefTargets(s *Session, cssSelector string) ([]int64, error) {
 }
 ```
 
-- [ ] **Step 4: Run the CDP test to verify it passes**
+- [x] **Step 4: Run the CDP test to verify it passes**
 
 Run: `cd htrcli && go test ./internal/cdp/... -run TestResolveBackendNodeID -v`
 Expected: PASS
 
-- [ ] **Step 5: Write the failing ref-store test**
+- [x] **Step 5: Write the failing ref-store test**
 
 Create `htrcli/internal/commands/refstore_test.go`:
 
@@ -997,12 +997,12 @@ func TestRefStoreAllocAndLookup(t *testing.T) {
 }
 ```
 
-- [ ] **Step 6: Run test to verify it fails**
+- [x] **Step 6: Run test to verify it fails**
 
 Run: `cd htrcli && go test ./internal/commands/... -run TestRefStoreAllocAndLookup -v`
 Expected: FAIL — `LoadRefStore` / `refStorePathOverride` undefined.
 
-- [ ] **Step 7: Implement `refstore.go`**
+- [x] **Step 7: Implement `refstore.go`**
 
 Create `htrcli/internal/commands/refstore.go`:
 
@@ -1096,12 +1096,12 @@ func (rs *RefStore) Save() error {
 }
 ```
 
-- [ ] **Step 8: Run the ref-store test to verify it passes**
+- [x] **Step 8: Run the ref-store test to verify it passes**
 
 Run: `cd htrcli && go test ./internal/commands/... -run TestRefStoreAllocAndLookup -v`
 Expected: PASS
 
-- [ ] **Step 9: Replace the Task 5 stub with the real `runFindRefCDP`**
+- [x] **Step 9: Replace the Task 5 stub with the real `runFindRefCDP`**
 
 In `htrcli/internal/commands/inspect.go`, DELETE the temporary `runFindRefCDP` stub added in Task 5, and add the real implementation (it needs the `cdp` package, already imported in `cdp_exec.go` but confirm `inspect.go`'s imports — if `inspect.go` does not import `github.com/u007/htrcli/internal/cdp`, place `runFindRefCDP` in `cdp_exec.go` instead, which already imports it). Place it in `cdp_exec.go`:
 
@@ -1155,12 +1155,12 @@ func runFindRefCDP(selector string, all bool) error {
 }
 ```
 
-- [ ] **Step 10: Run the full CDP + commands suites**
+- [x] **Step 10: Run the full CDP + commands suites**
 
 Run: `cd htrcli && go test ./internal/cdp/... ./internal/commands/...`
 Expected: PASS (all existing + new)
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add htrcli/internal/cdp/elementref.go htrcli/internal/cdp/elementref_test.go htrcli/internal/commands/refstore.go htrcli/internal/commands/refstore_test.go htrcli/internal/commands/inspect.go htrcli/internal/commands/cdp_exec.go
@@ -1182,7 +1182,7 @@ The spec's headline deliverable: the first real `DOM.setFileInputFiles` on the G
 - Consumes: `cdp.ResolveBackendNodeID` (Task 6), `LoadRefStore`/`Lookup` (Task 6), `cdpSession()` (existing).
 - Produces: `cdp.SetFileInputFiles(s *Session, backendNodeID int64, files []string) error`, `commands.uploadCmd`.
 
-- [ ] **Step 1: Write the failing CDP test**
+- [x] **Step 1: Write the failing CDP test**
 
 Create `htrcli/internal/cdp/upload_test.go`:
 
@@ -1226,12 +1226,12 @@ func TestSetFileInputFiles(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd htrcli && go test ./internal/cdp/... -run TestSetFileInputFiles -v`
 Expected: FAIL — `SetFileInputFiles` undefined.
 
-- [ ] **Step 3: Implement `upload.go` (CDP)**
+- [x] **Step 3: Implement `upload.go` (CDP)**
 
 Create `htrcli/internal/cdp/upload.go`:
 
@@ -1255,12 +1255,12 @@ func SetFileInputFiles(s *Session, backendNodeID int64, files []string) error {
 }
 ```
 
-- [ ] **Step 4: Run the CDP test to verify it passes**
+- [x] **Step 4: Run the CDP test to verify it passes**
 
 Run: `cd htrcli && go test ./internal/cdp/... -run TestSetFileInputFiles -v`
 Expected: PASS
 
-- [ ] **Step 5: Implement the `upload` command (CDP branch)**
+- [x] **Step 5: Implement the `upload` command (CDP branch)**
 
 Create `htrcli/internal/commands/upload.go`:
 
@@ -1380,12 +1380,12 @@ func runUploadExt(target string, files []string) error {
 }
 ```
 
-- [ ] **Step 6: Run the CDP + commands suites**
+- [x] **Step 6: Run the CDP + commands suites**
 
 Run: `cd htrcli && go test ./internal/cdp/... ./internal/commands/...`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add htrcli/internal/cdp/upload.go htrcli/internal/cdp/upload_test.go htrcli/internal/commands/upload.go
@@ -1409,7 +1409,7 @@ The default transport is `ext`, so upload must work there too. The extension's b
 - Consumes: `api.Command` with `Action: "uploadFiles"`, `Options{"files": []string}`.
 - Produces: extension-side `resolveAndSetFiles(sendCommand, selector, files)` (test seam), `runUploadExt` sending the command over the daemon.
 
-- [ ] **Step 1: Write the failing extension test**
+- [x] **Step 1: Write the failing extension test**
 
 Create `src/background/uploadFiles.test.ts`. The CDP `send` is injected so no real debugger is needed:
 
@@ -1453,12 +1453,12 @@ describe("resolveAndSetFiles", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun test src/background/uploadFiles.test.ts`
 Expected: FAIL — `./uploadFiles` module does not exist.
 
-- [ ] **Step 3: Implement `uploadFiles.ts`**
+- [x] **Step 3: Implement `uploadFiles.ts`**
 
 Create `src/background/uploadFiles.ts`:
 
@@ -1502,12 +1502,12 @@ export async function resolveAndSetFiles(
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun test src/background/uploadFiles.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Add the `uploadFiles` action + background wiring**
+- [x] **Step 5: Add the `uploadFiles` action + background wiring**
 
 In `src/types/commands.ts`, add to the `CommandAction` union (near the Script Execution group, after `"printToPDF"`):
 
@@ -1580,7 +1580,7 @@ async function handleUploadFiles(tabId: number, payload: Command): Promise<void>
 
 Confirm `replyError`, `sendToNative`, and the `Command`/`CommandResult` imports already exist in `nativeHost.ts` (they are used by the sibling handlers) and add the `resolveAndSetFiles` import from `./uploadFiles`.
 
-- [ ] **Step 6: Replace the Task 7 `runUploadExt` stub with the real command send**
+- [x] **Step 6: Replace the Task 7 `runUploadExt` stub with the real command send**
 
 In `htrcli/internal/commands/upload.go`, DELETE the temporary `runUploadExt` stub and replace it with:
 
@@ -1629,14 +1629,14 @@ func runUploadExt(target string, files []string) error {
 
 Add the `api` import to `upload.go`'s import block (`github.com/u007/htrcli/internal/api`).
 
-- [ ] **Step 7: Run everything**
+- [x] **Step 7: Run everything**
 
 Run: `cd htrcli && go test ./...`
 Expected: PASS
 Run: `bun test src/background/uploadFiles.test.ts && bun run typecheck && bun run check:fix`
 Expected: PASS, no type errors, no lint errors
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/types/commands.ts src/background/index.ts src/background/nativeHost.ts src/background/uploadFiles.ts src/background/uploadFiles.test.ts htrcli/internal/commands/upload.go
@@ -1649,23 +1649,23 @@ git commit -m "feat(htrcli): upload on extension transport (Chrome), unsupported
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: findAll end-to-end**
+- [x] **Step 1: findAll end-to-end**
 
 With `htrcli serve` running and the extension loaded in Chrome, on a page with several buttons run `htrcli findAll button --json` and confirm an array of element infos is printed.
 
-- [ ] **Step 2: Extension refs round-trip**
+- [x] **Step 2: Extension refs round-trip**
 
 Run `htrcli find "#some-button" --ref` → confirm it prints `@e1`. Then `htrcli click @e1` → confirm the button is clicked (the ref resolved). Navigate the page (full reload), then `htrcli click @e1` again → confirm an explicit `stale ref` error, not a wrong-element click or silent success.
 
-- [ ] **Step 3: CDP refs round-trip**
+- [x] **Step 3: CDP refs round-trip**
 
 With Chrome started for CDP (`--cdp`, port 9222), run `htrcli --cdp find "#some-button" --ref` → prints `@e1`, and `~/.htrcli/refs.json` now contains it. Then `htrcli --cdp upload "#file-input" ./a.png` and `htrcli --cdp upload @e2 ./a.png` (after minting `@e2` on the file input) → confirm the input's files are set (`htrcli --cdp eval "document.querySelector('#file-input').files.length"` returns 1). Navigate the page, then reuse the ref → confirm `DOM.setFileInputFiles` fails (stale), surfaced as a non-zero exit.
 
-- [ ] **Step 4: Upload on the extension transport (Chrome) + Firefox**
+- [x] **Step 4: Upload on the extension transport (Chrome) + Firefox**
 
 On Chrome (default transport): `htrcli upload "#file-input" ./a.png,./b.png` → confirm two files set, no OS picker. On Firefox (extension loaded via `about:debugging`): `htrcli upload "#file-input" ./a.png` → confirm it exits non-zero with the explicit "not supported on Firefox" message (never a silent no-op).
 
-- [ ] **Step 5: Self-review against the spec**
+- [x] **Step 5: Self-review against the spec**
 
 Re-read spec §4 (refs + findAll) and §5 (upload). Confirm:
   - findAll subcommand mirrors find's flags/output (Task 1). ✓
@@ -1676,7 +1676,7 @@ Re-read spec §4 (refs + findAll) and §5 (upload). Confirm:
   - Placeholder scan: grep the new files for `TODO`/`TBD`/`FIXME`/`placeholder` — expect none except the two clearly-labelled cross-task stubs, which must be **deleted** by Tasks 6 and 8 respectively. Verify neither stub survives: `grep -rn "Temporary stub" htrcli/internal/commands/` returns nothing.
   - Type consistency: `assignRef` option key is spelled identically in `inspect.go`, `commandExecutor.ts`; ref id format `@e<N>` matches between `refRegistry.ts` (`@e${nextRef}`) and `refstore.go` (`@e%d`).
 
-- [ ] **Step 6: Final full-suite run**
+- [x] **Step 6: Final full-suite run**
 
 Run: `cd htrcli && go test ./... && cd .. && bun test && bun run typecheck`
 Expected: PASS across Go and extension suites.
