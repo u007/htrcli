@@ -13,6 +13,81 @@ import (
 	"github.com/u007/htrcli/internal/output"
 )
 
+// runFindRefCDP finds an element via CDP, mints a ref for it, and saves it
+// to the persistent ref store (~/.htrcli/refs.json).
+func runFindRefCDP(selector string, all bool) error {
+	sel := parseSelector(selector)
+	cssSel := ""
+	if sel.Ref != "" {
+		// Resolve from the ref store directly.
+		rs, err := LoadRefStore()
+		if err != nil {
+			return err
+		}
+		backendID, ok := rs.Lookup(sel.Ref)
+		if !ok {
+			return fmt.Errorf("stale ref: %s is not known in the CDP ref store", sel.Ref)
+		}
+		if output.JSONOutput {
+			output.PrintJSON(map[string]any{"ref": sel.Ref, "backendNodeId": backendID})
+			return nil
+		}
+		fmt.Printf("%s => backendNodeId %d (from store)\n", sel.Ref, backendID)
+		return nil
+	}
+	cssSel = sel.Selector
+	if cssSel == "" {
+		return fmt.Errorf("find --ref on CDP requires a CSS selector or an @eN ref, got %q", selector)
+	}
+
+	s, _, err := cdpSession()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	rs, err := LoadRefStore()
+	if err != nil {
+		return err
+	}
+
+	if all {
+		ids, err := cdp.ResolveRefTargets(s, cssSel)
+		if err != nil {
+			return fmt.Errorf("resolving ref targets: %w", err)
+		}
+		refs := make([]string, len(ids))
+		for i, id := range ids {
+			refs[i] = rs.Alloc(id)
+		}
+		if err := rs.Save(); err != nil {
+			return fmt.Errorf("saving ref store: %w", err)
+		}
+		if output.JSONOutput {
+			output.PrintJSON(map[string]any{"refs": refs, "backendNodeIds": ids})
+			return nil
+		}
+		for _, r := range refs {
+			fmt.Println(r)
+		}
+	} else {
+		backendID, err := cdp.ResolveBackendNodeID(s, cssSel)
+		if err != nil {
+			return fmt.Errorf("resolving backend node: %w", err)
+		}
+		ref := rs.Alloc(backendID)
+		if err := rs.Save(); err != nil {
+			return fmt.Errorf("saving ref store: %w", err)
+		}
+		if output.JSONOutput {
+			output.PrintJSON(map[string]any{"ref": ref, "backendNodeId": backendID})
+			return nil
+		}
+		fmt.Println(ref)
+	}
+	return nil
+}
+
 // errUnsupportedCDP guards verbs not yet ported to the CDP transport, so a
 // sticky `transport=cdp` config can never silently misroute them to the
 // extension daemon (pressing keys or scrolling in the wrong browser).

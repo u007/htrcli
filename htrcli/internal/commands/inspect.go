@@ -792,8 +792,3 @@ func init() {
 	rootCmd.AddCommand(downloadReceiptsCmd)
 }
 
-// runFindRefCDP is implemented in Task 6 (cdp_ref.go). Temporary stub so this
-// task compiles on its own; DELETE this stub when Task 6 adds the real one.
-func runFindRefCDP(selector string, all bool) error {
-	return errUnsupportedCDP("find --ref")
-}
