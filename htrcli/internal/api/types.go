@@ -1,5 +1,7 @@
 package api
 
+import "encoding/json"
+
 // TargetSelector defines how to find an element on the page.
 // Multiple strategies can be combined; they are tried in priority order.
 type TargetSelector struct {
@@ -70,9 +72,31 @@ type PageInfo struct {
 
 // ApiResponse is the standard response envelope from the server.
 type ApiResponse struct {
-	OK    bool `json:"ok"`
-	Data  any  `json:"data,omitempty"`
+	OK    bool   `json:"ok"`
+	Data  any    `json:"data,omitempty"`
 	Error string `json:"error,omitempty"`
+}
+
+// EventEntry is one captured page event. The Data payload is caller-specific.
+type EventEntry struct {
+	Seq       int             `json:"seq"`
+	Kind      string          `json:"kind"`
+	Timestamp int64           `json:"timestamp"`
+	Data      json.RawMessage `json:"data"`
+}
+
+// EventsResponse is returned by GET /api/events.
+type EventsResponse struct {
+	Entries            []EventEntry `json:"entries"`
+	Dropped            int          `json:"dropped"`
+	OldestAvailableSeq int          `json:"oldestAvailableSeq"`
+}
+
+// IngestEventsRequest is the request body for POST /api/events/ingest.
+type IngestEventsRequest struct {
+	TabID   int          `json:"tabId"`
+	Kind    string       `json:"kind"`
+	Entries []EventEntry `json:"entries"`
 }
 
 // CommandRequest is the request body for POST /api/command.

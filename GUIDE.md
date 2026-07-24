@@ -55,7 +55,7 @@ htrcli serve
 ```
 
 This binds:
-- HTTP API on `:3845` (same surface as the Bun server)
+- HTTP API on `:3845`
 - A Unix socket that the extension's native messaging relay connects to
 
 Only one process can hold `:3845`.
@@ -81,6 +81,13 @@ htrcli health
 - Confirm the extension was reloaded after `htrcli install`
 - Confirm `htrcli serve` is running and the extension shows as connected (check the side panel / background console for `[NativeHost]` logs)
 
+Once connected, page console output is available through the event buffer:
+
+```bash
+htrcli console read --since 0
+htrcli console watch --since 0 --timeout 10000
+```
+
 ## 6. Drive the browser
 
 ```bash
@@ -103,10 +110,9 @@ htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
 # Reload the add-on in about:debugging, then htrcli serve is already covering it
 ```
 
-If you don't install the native host (or the daemon isn't running), the
-Firefox extension automatically falls back to a direct WebSocket connection
-to the Bun server — see **Alternative: Bun server** below. The side-panel
-indicator shows **Online** for either transport.
+If you don't install the native host (or the daemon isn't running), remote
+control is unavailable and the sidebar shows **Install htrcli**. There is no
+WebSocket fallback anymore; `htrcli serve` is the only backend.
 
 ## CDP transport: direct Chrome control
 
@@ -141,4 +147,3 @@ Notes:
   target ID on `--cdp`.
 - The debugging port is a localhost-only control channel into a signed-in
   profile; treat it like a trusted local admin surface.
-

@@ -17,7 +17,7 @@ import (
 // (the tray feature's clean-shutdown sequence depends on this). The accept
 // loop runs in a background goroutine; StartUnixSocketServer itself returns
 // as soon as the listener is bound.
-func StartUnixSocketServer(d *Daemon, socketPath string) (net.Listener, error) {
+func StartUnixSocketServer(d *Daemon, socketPath string, port int, bearerToken string) (net.Listener, error) {
 	if err := ensureSocketParentDir(socketPath); err != nil {
 		return nil, fmt.Errorf("create socket dir: %w", err)
 	}
@@ -42,7 +42,7 @@ func StartUnixSocketServer(d *Daemon, socketPath string) (net.Listener, error) {
 				// Listener closed during shutdown — exit the loop.
 				return
 			}
-			go handleRelayConn(d, conn)
+			go handleRelayConn(d, conn, port, bearerToken)
 		}
 	}()
 
@@ -53,7 +53,7 @@ func ensureSocketParentDir(socketPath string) error {
 	return os.MkdirAll(filepath.Dir(socketPath), 0700)
 }
 
-func handleRelayConn(d *Daemon, conn net.Conn) {
+func handleRelayConn(d *Daemon, conn net.Conn, port int, bearerToken string) {
 	defer conn.Close()
 
 	// Each relay connection is one browser. Scope its tabs to this connection
@@ -68,7 +68,12 @@ func handleRelayConn(d *Daemon, conn net.Conn) {
 	// Greet the relay with an immediate ping. The extension treats the first
 	// daemon message as proof the daemon is reachable (connectNative alone
 	// succeeds even when it isn't) and only then reports itself connected.
-	if greeting, err := json.Marshal(NativeMessage{Type: "ping"}); err == nil {
+	genPayload, _ := json.Marshal(map[string]any{
+		"generation":  d.Events.Generation(),
+		"httpBaseUrl": fmt.Sprintf("http://127.0.0.1:%d", port),
+		"token":       bearerToken,
+	})
+	if greeting, err := json.Marshal(NativeMessage{Type: "ping", Payload: genPayload}); err == nil {
 		if err := WriteMessage(conn, greeting); err != nil {
 			log.Printf("[htrcli serve] greeting ping failed, dropping relay: %v", err)
 			return

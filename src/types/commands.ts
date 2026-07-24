@@ -169,6 +169,9 @@ export type CommandAction =
 	| "evaluateViaCdp"
 	// ─── Network Capture (background-handled via CDP / webRequest) ──
 	| "networkCapture"
+	// ─── Network Mock / Block (background-handled via CDP Fetch / webRequest) ──
+	| "networkMock"
+	| "networkUnmock"
 	// ─── Dialog Handling (background-handled via CDP / content-script override) ──
 	| "dialogPolicy";
 

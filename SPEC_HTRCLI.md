@@ -2,16 +2,16 @@
 
 **Package:** `github.com/u007/htrcli`
 **Language:** Go
-**Status:** Draft
+**Status:** Partially shipped
 
 ---
 
 ## Overview
 
-A Go CLI for controlling browser tabs via the HTR NControl's HTTP remote control API. The CLI is a thin HTTP client talking to a server on :3845. That server is either the Bun server (`server/index.ts`, WebSocket transport) or the `htrcli serve` native-messaging daemon (`internal/host/`, Unix-socket relay transport) — both expose the same HTTP API and drive the Chrome or Firefox extension. The native-messaging daemon supports Chrome and Firefox connected simultaneously, routing each command to the browser that owns the target tab.
+A Go CLI for controlling browser tabs via the HTR NControl's HTTP remote control API. The CLI is a thin HTTP client talking to the `htrcli serve` native-messaging daemon on :3845 (the sole backend for remote control). It drives the Chrome or Firefox extension over the daemon's Unix-socket relay transport, and the daemon supports Chrome and Firefox connected simultaneously, routing each command to the browser that owns the target tab.
 
 ```
-htrcli (Go) ──HTTP──► Server (Bun, port 3845) ──WebSocket──► Extension ──DOM──► Chrome
+htrcli (Go) ──HTTP──► htrcli serve (:3845) ──Unix socket──► relay ──stdio──► Extension ──DOM──► Chrome / Firefox
 ```
 
 ---
@@ -28,13 +28,14 @@ htrcli/
 │   │   ├── client.go                  # HTTP client wrapper (GET/POST helpers)
 │   │   ├── types.go                   # All request/response types (mirrors server/types.ts)
 │   │   └── errors.go                  # API error types (NotFoundError, AuthError, etc.)
-│   ├── commands/
-│   │   ├── root.go                    # Root cobra command, global flags (--server, --token, --json)
-│   │   ├── tabs.go                    # htr tabs list | tabs get <id>
-│   │   ├── navigate.go               # htr open <url> | back | forward | reload
-│   │   ├── interact.go               # htr click | fill | type | hover | press | scroll | check | select
-│   │   ├── inspect.go                # htr snapshot | screenshot | page | eval | find | get text|value|attr|html
-│   │   ├── config.go                 # htr config set-server | set-token | show
+	│   ├── commands/
+	│   │   ├── root.go                    # Root cobra command, global flags (--server, --token, --json)
+	│   │   ├── tabs.go                    # htr tabs list | tabs get <id>
+	│   │   ├── console.go                 # htr console read | watch (event buffer)
+	│   │   ├── navigate.go               # htr open <url> | back | forward | reload
+	│   │   ├── interact.go               # htr click | fill | type | hover | press | scroll | check | select
+	│   │   ├── inspect.go                # htr snapshot | screenshot | page | eval | find | get text|value|attr|html
+	│   │   ├── config.go                 # htr config set-server | set-token | show
 │   │   └── health.go                 # htr health
 │   └── output/
 │       ├── format.go                  # JSON / human-readable output switcher
@@ -885,4 +886,399 @@ See `docs/tray.md` for the user-facing reference and
 `docs/superpowers/specs/2026-07-18-htrcli-desktop-tray-design.md` for the
 full design rationale.
 
-*Spec version: 1.2 — 2026-06-10*
+---
+
+## Feature Parity: Network, Console, Refs, Upload, Dialogs, Contexts & Video
+
+**Status:** Partially shipped — console capture / durable event buffer landed in code; the remaining network/dialog/ref/upload/video phases below are still draft.
+
+**Goal:** bring htrcli to parity with Playwright / the claude-in-chrome MCP
+extension. htrcli now ships console capture, but still lacks network
+inspection, persistent element refs, file upload, dialog handling, browser-
+context support, and video/trace support. Every
+Chrome-only mechanism below (anything needing `chrome.debugger`/CDP) also
+gets a designed Firefox fallback rather than an explicit "unsupported"
+error — Firefox lacks `chrome.debugger`, so its fallbacks use
+`browser.webRequest`, injected page-world scripts, or separate-process
+tricks instead of CDP.
+
+### Foundational mechanism: event buffer + poll
+
+Network capture, console capture, and dialog capture are all "arm before it
+happens, read later" event streams, unlike the existing request/response
+actions (`click`, `fill`, `eval`). This is built **once** and reused by all
+three features below it, rather than three bespoke implementations.
+
+**Extension side (`src/background/index.ts`):** a per-tab ring buffer:
+
+```typescript
+interface EventEntry {
+  seq: number;           // monotonic, per tab
+  kind: "console" | "network" | "dialog";
+  timestamp: number;
+  data: ConsoleEntry | NetworkEntry | DialogEntry;
+}
+
+interface ConsoleEntry {
+  level: "log" | "warn" | "error" | "info" | "debug";
+  args: string[];        // JSON-stringified args
+  source?: string;       // file:line if available
+}
+
+interface NetworkEntry {
+  requestId: string;
+  url: string;
+  method: string;
+  status?: number;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
+  bodyTruncated?: boolean;   // true if body exceeded size cap
+  body?: string;             // omitted/truncated for large payloads
+  durationMs?: number;
+}
+
+interface DialogEntry {
+  dialogType: "alert" | "confirm" | "prompt" | "beforeunload";
+  message: string;
+  resolvedAction: "accept" | "dismiss";
+  respondedText?: string;
+}
+```
+
+Producers write into this buffer:
+- MAIN-world injected script wrapping `console.*` (Chrome + Firefox, no CDP).
+- Chrome: `chrome.debugger` `Network.*` / `Page.javascriptDialogOpening` listeners.
+- Firefox: `browser.webRequest.onBeforeRequest/onCompleted`, injected `window.alert/confirm/prompt` override.
+
+Large payloads (response bodies, later video frames) reuse the existing
+screenshot pattern — POST directly to a new HTTP endpoint on the daemon
+instead of going through the native-messaging relay's 1MB frame cap.
+
+**Daemon side (`internal/host/server.go`):** new endpoint:
+
+```
+POST /api/events/ingest          # extension → daemon, body: EventEntry[]
+GET  /api/events?since=<seq>&kind=<kind>&tab=<id>   # CLI → daemon, cursor-based
+```
+
+The CLI always polls with `since=<seq>` (never "return everything") to avoid
+duplicate/missed entries across polls.
+
+**CLI side (`internal/commands/console.go`):** shared helper used by
+`console`, `network`, and `dialog` subcommands:
+
+```go
+type EventPoller struct {
+    Client   *api.Client
+    TabID    *int
+    Kind     string
+    Since    int
+}
+
+func (p *EventPoller) Read() ([]api.EventEntry, error)              // one snapshot
+func (p *EventPoller) Watch(ctx context.Context, timeout time.Duration, match func(api.EventEntry) bool) (*api.EventEntry, error)  // blocking long-poll
+```
+
+`watch` underlies `network wait`, and could later back a `console wait
+--level error` style command; `read` underlies the plain `read` subcommands.
+
+**CDP-transport equivalent:** `internal/cdp/session.go`'s existing
+`Session.Call`/`WaitEvent` dispatcher already buffers raw CDP events per
+session. Add:
+
+```go
+func (s *Session) Events(domain string, since int) []Event
+```
+
+so the same cursor-based `EventPoller` works transparently whether htrcli
+is talking to the extension or directly to CDP.
+
+---
+
+### 1. Network inspection
+
+Two distinct sub-designs — passive capture is a read; mocking is a
+standing rule, not a live round trip (a paused request can't wait on a CLI
+process fast enough, and CDP pause timeouts are short).
+
+**1a. Passive capture + `waitForResponse`**
+
+```bash
+htrcli network read [--since N] [--json]
+htrcl network watch [--timeout 10000] [--json]      # blocking tail, Ctrl-C to stop
+htrcli network wait --url <glob> [--status 200] [--timeout 10000]
+```
+
+- Chrome: `Network.requestWillBeSent` / `responseReceived` / `loadingFinished`
+  via `chrome.debugger`, wired into new `internal/cdp/network.go` using the
+  existing `Session.Call`/`WaitEvent`.
+- Firefox: `browser.webRequest.onBeforeRequest`/`onCompleted` in
+  `src/background/index.ts`, same `NetworkEntry` shape written to the buffer.
+- `network wait` is a CLI-side filtered `EventPoller.Watch` call — no new
+  server primitive.
+
+**1b. Interception / mocking** — declarative rules registered ahead of time:
+
+```bash
+htrcli network mock --url-pattern <glob> --status 200 --body-file resp.json [--method GET]
+htrcli network block --url-pattern <glob>
+htrcli network unmock [--all | --url-pattern <glob>]
+```
+
+New `CommandAction: "mockNetworkRule"` pushes a rule list to the extension.
+- Chrome: `Fetch.enable` + `requestPaused` handler in background, matches
+  registered rules, fulfills/fails/continues locally — no CLI round trip
+  per request.
+- Firefox: `webRequest.onBeforeRequest` blocking listener. Requires adding
+  `webRequestBlocking` to `src/manifest.ts` permissions (currently only has
+  `host_permissions: <all_urls>`, no `webRequest`/`webRequestBlocking`).
+
+New: `internal/cdp/network.go`, `src/background/networkMock.ts`.
+Modified: `src/manifest.ts`, `src/background/index.ts`, `internal/commands/network.go`.
+
+---
+
+### 2. Console log capture
+
+Build this first — it needs no CDP at all, so it's the cheapest end-to-end
+proof of the event-buffer mechanism, and doubles as the Firefox reference
+implementation.
+
+```bash
+htrcli console read [--since N] [--level error,warn] [--json]
+htrcli console watch [--timeout 10000]
+```
+
+New `src/contentScript/consoleCapture.ts`, injected as a MAIN-world script,
+wraps `console.log/warn/error/info/debug`, posts each call via
+`chrome.runtime.sendMessage` to background, which appends a `ConsoleEntry`
+to the ring buffer. Identical on Chrome and Firefox.
+
+New: `src/contentScript/consoleCapture.ts`, `internal/commands/console.go`.
+Modified: `src/contentScript/index.ts` (inject), `src/background/index.ts`
+(buffer + relay), `internal/host/server.go` (`/api/events*`),
+`internal/api/client.go` (poll client).
+
+---
+
+### 3. Full-page + annotated screenshots
+
+Current state: the extension only does `chrome.tabs.captureVisibleTab`
+(viewport) plus an internal `captureScreenshotWithHighlight` used during
+recording — no full-page stitching or CLI-exposed annotate mode exists
+today, despite the docs noting them as "side-panel only." This section
+supersedes that note.
+
+```bash
+htrcli screenshot --full-page [path]
+htrcli screenshot --annotate "button,input,a" [path]
+htrcli screenshot --full-page --annotate "role=button" [path]
+```
+
+- **Full-page:** Chrome via CDP `Page.captureScreenshot({captureBeyondViewport: true})`
+  + `Page.getLayoutMetrics` for content size, in new `internal/cdp/screenshot.go`.
+  Extension-transport/Firefox fallback: scroll-and-stitch — resize/scroll
+  loop, multiple `captureVisibleTab` calls, composited via `OffscreenCanvas`
+  in the background script.
+- **Annotate:** generalize the existing `captureScreenshotWithHighlight` /
+  `src/contentScript/highlighter.ts` pattern to accept an arbitrary
+  selector/box list from the CLI (reusing `TargetSelector` matching) instead
+  of only recording-step highlights.
+
+```go
+type ScreenshotOptions struct {
+    Full     bool     `json:"full,omitempty"`
+    FullPage bool     `json:"fullPage,omitempty"`
+    Annotate []string `json:"annotate,omitempty"`   // selectors to number/box
+    Format   string   `json:"format,omitempty"`
+    Quality  *int     `json:"quality,omitempty"`
+}
+```
+
+Reuses the existing screenshot POST-back path (extension → daemon HTTP,
+bypassing the native-messaging relay) — no protocol change needed beyond
+the options above.
+
+New: `internal/cdp/screenshot.go`. Modified: `internal/commands/inspect.go`,
+`src/background/index.ts`, `src/contentScript/highlighter.ts`.
+
+---
+
+### 4. Persistent element refs (`@e1`) + `findAll` subcommand
+
+**`findAll` — ship immediately, no new plumbing needed.** The `findAll`
+`CommandAction`/`handleFindAll` already exist server- and extension-side;
+only the CLI subcommand is missing.
+
+```bash
+htrcli findAll <selector> [--json]
+```
+
+Mirrors `find`'s flags and output shape, in `internal/commands/inspect.go`.
+
+**Persistent refs** — explicit storage decision per transport, since
+neither transport has one today:
+
+- **Extension-transport:** an in-page registry (new content-script module)
+  holding a `Map<string, Element>`, assigning `@e1`, `@e2`, ... when
+  `find`/`findAll` is called with `--ref`. Later commands resolve `@e1`
+  back to the element within the same document. **Navigation invalidates
+  the registry** — a stale ref must return an explicit "stale ref: page
+  navigated" error, never silently re-resolve by guessing.
+- **CDP path:** use CDP's own `backendNodeId` (via `DOM.enable` +
+  `DOM.describeNode`) instead of a bespoke JS registry.  `RemoteObjectId`
+  expires on GC; `backendNodeId` is durable for a document's lifetime. This
+  is the first place the Go CDP side needs real `DOM.*` calls rather than
+  only the injected JS bundle (`internal/cdp/bundle/htrcli-dom.js`).
+
+```bash
+htrcli find <selector> --ref          # returns e.g. "@e7" instead of resolving inline
+htrcli click "@e7"                    # interact commands accept refs transparently
+```
+
+`internal/commands/interact.go`'s selector parsing gains an `@e`-prefix
+branch that skips normal `TargetSelector` resolution and sends the ref id
+instead.
+
+New: `internal/cdp/elementref.go`, extension-side ref registry module.
+Modified: `internal/commands/interact.go`, `internal/commands/inspect.go`,
+`src/contentScript/elementFinder.ts`.
+
+---
+
+### 5. File upload
+
+```bash
+htrcli upload <selector> <file-path>[,<file-path>...]
+```
+
+- **Chrome:** CDP `DOM.setFileInputFiles` (first real `DOM.*` usage on the
+  Go side) given a `backendNodeId` (reuses feature 4's ref plumbing, or a
+  fresh selector resolve) and a list of local file paths — no OS
+  file-picker dialog appears.
+- **Firefox:** genuine limitation, not equivalent parity. Firefox has no
+  remote-debugging primitive to fabricate a real `File` object with
+  content. Document this explicitly as unsupported/degraded on Firefox
+  (OS-level file-picker automation is out of extension scope) — do not
+  claim false parity.
+
+New: `internal/cdp/upload.go`. Modified: `internal/commands/interact.go`.
+
+---
+
+### 6. Dialog handling
+
+The handler must be armed **before** the action that triggers the dialog.
+CLI sets a standing policy for the session, applied to whatever fires next,
+plus a readable log of what already happened.
+
+```bash
+htrcli dialog handle --action accept|dismiss|respond --text "..."
+htrcli dialog list [--since N]
+```
+
+- **Chrome:** `Page.javascriptDialogOpening` event → immediately
+  `Page.handleJavaScriptDialog` per the current policy, logged as a
+  `DialogEntry` in the event buffer.
+- **Firefox fallback:** MAIN-world override of `window.alert/confirm/prompt`
+  injected at `document_start`, before page scripts run. Explicit
+  limitations to document: racy against dialogs a page fires before the
+  override lands, and cannot intercept true native dialogs like
+  `beforeunload`.
+
+New: `internal/cdp/dialog.go`, `src/contentScript/dialogOverride.ts`.
+Modified: `src/background/index.ts`, `internal/commands/console.go`.
+
+---
+
+### 7. Browser contexts + video/trace recording
+
+Highest risk section — build last, after 1–4 exist since trace export
+depends on their data.
+
+**7a. Contexts**
+
+```bash
+htrcli --context work open https://example.com    # new global flag, alongside --tab
+htrcli context list
+```
+
+Extend `internal/cdp/launch.go` (already launches Chrome) to accept
+`--context <name>`, backed by either a separate `--user-data-dir` profile
+(true isolation) or CDP `Target.createBrowserContext` (lighter, in-process,
+Chrome-only). Firefox fallback: a separate Firefox process via
+`-profile <dir>` — no CDP-context equivalent exists on Firefox. New global
+`--context` flag threaded through `internal/commands/root.go`.
+
+**7b. Video recording**
+
+No native "record to file" primitive exists anywhere in the stack today.
+Playwright itself builds this from `Page.startScreencast` streaming JPEG
+frames as CDP events, encoded client-side — htrcli follows the same
+approach:
+
+```bash
+htrcli record start [--context <name>]
+htrcli record stop <output.mp4>
+```
+
+Frames flow through the event-buffer POST-back path (same large-binary
+pattern as screenshots) into a temp frame directory; an **external ffmpeg
+dependency** stitches frames into video. This is the single riskiest new
+piece — new external binary dependency, frame-timing/drop concerns.
+**Firefox has no stable remote-screencast equivalent — document as
+infeasible on Firefox, not a fallback.** `htrcli health`/`record start`
+must fail with a clear "ffmpeg not found" error rather than hang if the
+binary is missing.
+
+**Trace export** is an aggregation, not new capture — it bundles network
+(§1) + console (§2) + screenshots (§3) + timestamped actions into one file.
+Must be built after §1–§3 exist.
+
+```bash
+htrcli trace export <path.zip>
+```
+
+Mirrors the existing `src/utils/exportZip.ts`/`exportJson.ts` export
+patterns already in the codebase.
+
+New: `internal/cdp/context.go`, `internal/cdp/screencast.go`,
+`internal/commands/context.go`, `internal/commands/trace.go`. Modified:
+`internal/cdp/launch.go`, `internal/commands/root.go`,
+`src/utils/exportZip.ts` (trace variant).
+
+---
+
+### Build order
+
+1. **Phase 0** (parallel, ship immediately): `findAll` subcommand (§4);
+   viewport-annotate wiring (§3, defer full-page stitching).
+2. **Phase 1** (foundational — blocks 3 downstream features): event buffer +
+   poll infra, validated end-to-end via console capture (§2), which needs
+   no CDP at all.
+3. **Phase 2:** passive network capture + `waitForResponse` (§1a), dialog
+   handling (§6) — both build on the Phase 1 buffer.
+4. **Phase 3:** declarative network mock/intercept (§1b), persistent
+   element refs via `backendNodeId`/in-page registry (§4), file upload (§5,
+   reuses refs from this phase).
+5. **Phase 4:** full-page screenshot stitching (§3) — independent, can slot
+   in any time after Phase 0.
+6. **Phase 5** (highest risk, last): browser contexts (§7a), then
+   screencast → ffmpeg video → trace export (§7b), layered on data from
+   Phases 1–4.
+
+### Verification
+
+- Each new CLI subcommand gets a Go test in `internal/commands/*_test.go`
+  following the existing pattern (`cdp_exec_test.go`, `root_test.go`) —
+  mock the daemon/CDP session, assert flag parsing and output shape.
+- Manual end-to-end pass per phase: run `htrcli serve`, load the extension
+  in both Chrome and Firefox, drive the new subcommands against a local
+  test page with a `console.log`, a `fetch` call, a `confirm()`, and a file
+  input. Confirm Chrome behavior matches Playwright's equivalent API, and
+  confirm Firefox fallbacks either work as designed or fail with the
+  explicitly documented limitation — never a silent no-op.
+- For §7b, verify the ffmpeg prerequisite is documented in the README/docs
+  and that its absence produces an explicit error, not a hang.
+
+*Spec version: 1.3 — 2026-07-23*

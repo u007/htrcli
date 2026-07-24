@@ -76,6 +76,67 @@ func TestListTabs(t *testing.T) {
 	}
 }
 
+func TestPostEvents(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/events/ingest" {
+			t.Errorf("expected path /api/events/ingest, got %s", r.URL.Path)
+		}
+		var req IngestEventsRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.TabID != 1 || req.Kind != "console" || len(req.Entries) != 1 {
+			t.Fatalf("unexpected request body: %+v", req)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ApiResponse{OK: true, Data: map[string]any{"received": true}})
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "")
+	err := c.PostEvents(1, "console", []EventEntry{{
+		Seq:       1,
+		Kind:      "console",
+		Timestamp: 1000,
+		Data:      json.RawMessage(`{"level":"log","args":["hi"]}`),
+	}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetEvents(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("since") != "40" || r.URL.Query().Get("kind") != "console" {
+			t.Fatalf("unexpected query: %s", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ApiResponse{
+			OK: true,
+			Data: EventsResponse{
+				Entries: []EventEntry{{
+					Seq:       41,
+					Kind:      "console",
+					Timestamp: 2000,
+					Data:      json.RawMessage(`{"level":"error","args":["boom"]}`),
+				}},
+				Dropped:            0,
+				OldestAvailableSeq: 1,
+			},
+		})
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "")
+	resp, err := c.GetEvents(nil, "console", 40)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Entries) != 1 || resp.Entries[0].Seq != 41 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
 func TestExecuteCommand(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {

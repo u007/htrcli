@@ -79,6 +79,8 @@ type Daemon struct {
 	mu      sync.Mutex
 	conns   map[*RelayConn]struct{}
 	pending map[string]*pendingCommand
+	// Events is the CLI-facing event store for console/network/dialog capture.
+	Events *EventStore
 	// pendingShots correlates a capture_screenshot trigger with the HTTP
 	// upload the extension POSTs back, keyed by command ID.
 	pendingShots map[string]chan shotResult
@@ -125,6 +127,7 @@ func NewDaemon() *Daemon {
 	return &Daemon{
 		conns:        make(map[*RelayConn]struct{}),
 		pending:      make(map[string]*pendingCommand),
+		Events:       NewEventStore(),
 		pendingShots: make(map[string]chan shotResult),
 		stop:         make(chan struct{}),
 	}

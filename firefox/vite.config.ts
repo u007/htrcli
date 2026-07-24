@@ -144,6 +144,7 @@ function buildFirefoxManifest(): Plugin {
 					"scripting",
 					"nativeMessaging",
 					"webRequest",
+					"webRequestBlocking",
 				],
 				host_permissions: ["<all_urls>"],
 				browser_specific_settings: {

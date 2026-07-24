@@ -12,6 +12,7 @@ The same source code ships as a **Chrome extension** (Manifest V3) and a **Firef
 - 📝 **Multiple Export Formats** - JSON, Markdown, and ZIP with images
 - 🦊 **Cross-browser** - Chrome side panel and Firefox sidebar (identical UI, same React source)
 - 🎨 **Visual Timeline** - Side panel interface for managing recordings
+- 🧾 **Console Capture** - Read page `console.*` output with `htrcli console read/watch`
 - 🎙️ **Audio Support** (planned) - Add voice narration to recordings
 
 ## Installation
@@ -121,6 +122,13 @@ htrcli serve
 
 # 2. Send commands
 curl http://127.0.0.1:3845/api/tabs
+```
+
+For page console logs, use the cursor-based event buffer:
+
+```bash
+htrcli console read --since 0
+htrcli console watch --since 100 --timeout 10000
 ```
 
 ### Architecture

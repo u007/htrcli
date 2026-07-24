@@ -100,6 +100,49 @@ func (c *Client) doRequestWithEnvelope(method, path string, body any) (any, erro
 	return apiResp.Data, nil
 }
 
+// PostEvents forwards captured events to the daemon.
+func (c *Client) PostEvents(tabID int, kind string, entries []EventEntry) error {
+	_, err := c.doRequestWithEnvelope("POST", "/api/events/ingest", IngestEventsRequest{
+		TabID:   tabID,
+		Kind:    kind,
+		Entries: entries,
+	})
+	return err
+}
+
+// GetEvents polls captured events since a cursor.
+func (c *Client) GetEvents(tabID *int, kind string, since int) (*EventsResponse, error) {
+	path := fmt.Sprintf("/api/events?kind=%s&since=%d", kind, since)
+	if tabID != nil {
+		path += "&tab=" + strconv.Itoa(*tabID)
+	}
+
+	data, err := c.doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var apiResp ApiResponse
+	if err := json.Unmarshal(data, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+	if !apiResp.OK {
+		return nil, &APIError{Message: apiResp.Error}
+	}
+
+	dataBytes, err := json.Marshal(apiResp.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal data: %w", err)
+	}
+
+	var events EventsResponse
+	if err := json.Unmarshal(dataBytes, &events); err != nil {
+		return nil, fmt.Errorf("failed to parse events response: %w", err)
+	}
+
+	return &events, nil
+}
+
 // GetHealth checks server health.
 func (c *Client) GetHealth() (*HealthResponse, error) {
 	data, err := c.doRequest("GET", "/api/health", nil)

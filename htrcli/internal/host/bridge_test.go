@@ -1,6 +1,8 @@
 package host
 
 import (
+	"encoding/json"
+	"net"
 	"testing"
 	"time"
 )
@@ -24,5 +26,38 @@ func TestSendCommandTimeoutClearsPending(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 	if len(d.pending) != 0 {
 		t.Fatalf("pending map was repopulated unexpectedly, got %d entries", len(d.pending))
+	}
+}
+
+func TestGreetingIncludesGenerationAndConnectionInfo(t *testing.T) {
+	d := NewDaemon()
+	server, client := net.Pipe()
+	defer client.Close()
+
+	go handleRelayConn(d, server, 3845, "secret-token")
+
+	msg, err := ReadMessage(client)
+	if err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+	var nm NativeMessage
+	if err := json.Unmarshal(msg, &nm); err != nil {
+		t.Fatalf("unmarshal greeting: %v", err)
+	}
+	if nm.Type != "ping" {
+		t.Fatalf("want type ping, got %s", nm.Type)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(nm.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if _, ok := payload["generation"]; !ok {
+		t.Fatalf("expected generation in greeting payload, got %+v", payload)
+	}
+	if payload["httpBaseUrl"] != "http://127.0.0.1:3845" {
+		t.Fatalf("expected httpBaseUrl in payload, got %+v", payload)
+	}
+	if payload["token"] != "secret-token" {
+		t.Fatalf("expected token in payload, got %+v", payload)
 	}
 }

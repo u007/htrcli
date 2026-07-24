@@ -4,6 +4,10 @@
 
 ### Added
 
+- **Console event buffer**: `htrcli console read` and `htrcli console watch` now expose a durable cursor-based buffer for page `console.*` output. The extension captures console calls in the page's MAIN world, buffers them in `chrome.storage.session`, and flushes them to `htrcli serve` so logs survive service-worker restarts.
+- **Network mock/block/unmock**: `htrcli network mock --url-pattern <glob> --status <code> --body-file <path>` and `htrcli network block --url-pattern <glob>` for declarative request interception. Chrome uses `Fetch.enable` via the debugger; Firefox uses `browser.webRequest` blocking listeners (`src/background/networkMock.ts`, `src/background/networkMockMatch.ts`, `src/background/networkMockFirefox.ts`, `internal/commands/network_mock.go`)
+- **Event buffer API on daemon**: new `POST /api/events/ingest` and `GET /api/events?since=N&kind=<type>&tab=<id>` endpoints on `htrcli serve` for cursor-based event polling, shared by console, network, and dialog capture (`internal/host/server.go`, `internal/host/events.go`, `internal/api/client.go`)
+- **Firefox console capture**: dedicated MAIN-world script entry point (`firefox/src/consoleCapture-entry.ts`) and separate Vite config (`firefox/vite.consoleCapture.config.ts`) so the Firefox build includes the console capture script
 - **Tray icon (desktop)**: `htrcli serve` now shows a cross-platform
   system-tray icon on macOS, Windows, and Linux desktops. Menu provides
   live status (port, relay count, last error) and maintenance actions:
@@ -20,6 +24,8 @@
 ### Changed
 
 - **ConnectedTabs**: tab list items are now clickable buttons that switch to and focus the target tab's window, improving the multi-window UX (`src/sidepanel/components/ConnectedTabs.tsx`, `src/sidepanel/components/ConnectedTabs.css`)
+- **Firefox manifest**: added `webRequestBlocking` permission required for network mock/block interception (`firefox/vite.config.ts`)
+- **Docs**: updated `GUIDE.md`, `README.md`, `SPEC_HTRCLI.md`, `htrcli/README.md`, `firefox/README.md` — console capture usage, architecture diagrams, and general alignment with the consolidated `htrcli serve` backend
 - **FETCH_URL error logging**: background now includes the HTTP method and URL in error messages for easier debugging (`src/background/index.ts`)
 - `htrcli config set-extension-id <id> [--browser chrome|firefox]` stores
   the browser extension ID used by the tray's "Reinstall native host" menu.

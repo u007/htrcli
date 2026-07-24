@@ -49,7 +49,7 @@ var serveCmd = &cobra.Command{
 
 		// Start Unix socket server (for relay connections from Chrome).
 		// The listener is owned here so it can be closed during shutdown.
-		unixLn, err := host.StartUnixSocketServer(d, socketPath)
+		unixLn, err := host.StartUnixSocketServer(d, socketPath, port, bearerToken)
 		if err != nil {
 			return fmt.Errorf("unix socket server: %w", err)
 		}
@@ -176,7 +176,6 @@ func resolveBearerToken() string {
 	}
 	return viper.GetString("token")
 }
-
 
 // attachServeLog redirects the standard logger to also write to
 // ~/.htrcli/serve.log (keeping stderr for journald/launchd). Returns a closer

@@ -56,6 +56,19 @@ list` shows tabs from both, and `--tab <id>` routes to whichever browser owns
 that tab. Screenshots and large command results (e.g. `fetch` bodies) travel
 over HTTP, so they are not limited by the 1 MB native-messaging frame size.
 
+### Captured console output
+
+The daemon now keeps a cursor-based event buffer for page `console.*` output.
+Use it to read what happened after a specific sequence number or block until a
+new log line arrives:
+
+```bash
+htrcli console read --since 0
+htrcli console watch --since 100 --timeout 10000
+```
+
+`console read` prints a warning when the buffer evicted older entries.
+
 The daemon pings each relay every 15s (`{"type":"ping"}`); the extension
 replies with `{"type":"heartbeat"}`. Any relay silent for 45s is force-closed
 and its tabs dropped, so stale/duplicate relays (e.g. a browser respawned its

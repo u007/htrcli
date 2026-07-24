@@ -26,6 +26,9 @@ import {
 	setLastKnownGeneration,
 } from "./eventStore";
 import { NetworkCaptureBuffer } from "./networkCapture";
+import { addRules, removeRules } from "./networkMock";
+import { addRulesFirefox, removeRulesFirefox } from "./networkMockFirefox";
+import type { NetworkMockRule } from "./networkMockMatch";
 
 const HOST_NAME = "com.htrcontrol.host";
 const RECONNECT_BASE_MS = 1000;
@@ -500,6 +503,74 @@ function replyError(tabId: number, id: string, error: string): void {
 		tabId,
 		payload: { id, success: false, error },
 	});
+}
+
+// ─── Network mock / block handler ──────────────────────────────────
+
+async function handleNetworkMock(
+	tabId: number,
+	payload: Command,
+): Promise<void> {
+	if (typeof chrome.debugger === "undefined") {
+		// Firefox: use the webRequest blocking interceptor instead of CDP Fetch.
+		try {
+			if (payload.action === "networkMock") {
+				addRulesFirefox(
+					tabId,
+					(payload.options?.rules as NetworkMockRule[]) ?? [],
+				);
+			} else {
+				removeRulesFirefox(tabId, {
+					all: (payload.options?.all as boolean) ?? false,
+					urlPattern: payload.options?.urlPattern as string | undefined,
+				});
+			}
+			sendToNative({
+				type: "command_result",
+				tabId,
+				payload: {
+					id: payload.id,
+					success: true,
+					data: { applied: true, engine: "webRequest" },
+				} as CommandResult,
+			});
+		} catch (error) {
+			console.error("[HTR NControl] networkMock (firefox) error:", error);
+			replyError(
+				tabId,
+				payload.id,
+				error instanceof Error ? error.message : String(error),
+			);
+		}
+		return;
+	}
+	try {
+		if (payload.action === "networkMock") {
+			const rules = (payload.options?.rules as NetworkMockRule[]) ?? [];
+			await addRules(tabId, rules);
+		} else {
+			await removeRules(tabId, {
+				all: (payload.options?.all as boolean) ?? false,
+				urlPattern: payload.options?.urlPattern as string | undefined,
+			});
+		}
+		sendToNative({
+			type: "command_result",
+			tabId,
+			payload: {
+				id: payload.id,
+				success: true,
+				data: { applied: true },
+			} as CommandResult,
+		});
+	} catch (error) {
+		console.error("[HTR NControl] networkMock error:", error);
+		replyError(
+			tabId,
+			payload.id,
+			error instanceof Error ? error.message : String(error),
+		);
+	}
 }
 
 async function handleFetchInPage(
@@ -1379,6 +1450,10 @@ async function sendCommandToTab(
 	}
 	if (payload.action === "dialogPolicy") {
 		await handleDialogPolicy(tabId, payload);
+		return;
+	}
+	if (payload.action === "networkMock" || payload.action === "networkUnmock") {
+		await handleNetworkMock(tabId, payload);
 		return;
 	}
 	// On Chrome, route `evaluate` through CDP so the script runs in the page's

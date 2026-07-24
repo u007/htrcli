@@ -83,6 +83,64 @@ func TestBearerTokenEnforced(t *testing.T) {
 	}
 }
 
+func TestEventsIngestAndRead(t *testing.T) {
+	d := host.NewDaemon()
+	// Give the daemon a tab so /api/events defaults cleanly if needed.
+	rc := d.AddConn(func(_ []byte) error { return nil })
+	d.RegisterTab(rc, 1, host.TabInfo{ID: 1, URL: "https://a.com", Title: "A", Active: true})
+	srv := host.NewHTTPServer(d, 0, "", nil)
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	ingestBody := `{"tabId":1,"kind":"console","entries":[{"kind":"console","timestamp":1000,"data":{"level":"log","args":["hi"]}}]}`
+	resp, err := http.Post(ts.URL+"/api/events/ingest", "application/json", strings.NewReader(ingestBody))
+	if err != nil {
+		t.Fatalf("POST /api/events/ingest: %v", err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("ingest status = %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp2, err := http.Get(ts.URL + "/api/events?kind=console&tab=1&since=0")
+	if err != nil {
+		t.Fatalf("GET /api/events: %v", err)
+	}
+	defer resp2.Body.Close()
+	var body map[string]interface{}
+	if err := json.NewDecoder(resp2.Body).Decode(&body); err != nil {
+		t.Fatalf("decode events body: %v", err)
+	}
+	data := body["data"].(map[string]interface{})
+	entries := data["entries"].([]interface{})
+	if len(entries) != 1 {
+		t.Fatalf("want 1 entry, got %d", len(entries))
+	}
+}
+
+func TestEventsGenerationEndpoint(t *testing.T) {
+	d := host.NewDaemon()
+	srv := host.NewHTTPServer(d, 0, "", nil)
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/events/generation")
+	if err != nil {
+		t.Fatalf("GET /api/events/generation: %v", err)
+	}
+	defer resp.Body.Close()
+	var body map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode generation body: %v", err)
+	}
+	if body["ok"] != true {
+		t.Fatalf("body.ok = %v, want true", body["ok"])
+	}
+	if _, ok := body["data"].(map[string]interface{})["generation"]; !ok {
+		t.Fatalf("expected data.generation in response, got %+v", body)
+	}
+}
+
 func TestScreenshotRoundTrip(t *testing.T) {
 	d := host.NewDaemon()
 

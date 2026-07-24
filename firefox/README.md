@@ -136,8 +136,8 @@ add-on after each change (`bun run firefox:build` is fast — sub-second).
 
 Everything else — recording state, IndexedDB sessions, exports, the
 `htrcli` native messaging host, screenshots, sensitive-field masking,
-audio capture, the devtools panel, etc. — is shared code under `src/`
-and behaves identically.
+audio capture, page console capture, the devtools panel, etc. — is shared
+code under `src/` and behaves identically.
 
 ## Remote control via `htrcli` (native messaging)
 
@@ -158,6 +158,9 @@ Firefox and Chrome can both be registered and connected to the same daemon
 at once; commands route to whichever browser owns the target tab. See the
 [htrcli README](../htrcli/README.md#native-messaging-daemon-mode) for details.
 
+Console output is captured in the page's MAIN world and is available through
+`htrcli console read` / `htrcli console watch` exactly the same as Chrome.
+
 > The add-on ID comes from `browser_specific_settings.gecko.id` in the
 > built `manifest.json`. The native host requires the `nativeMessaging`
 > permission, which the manifest already declares.
@@ -165,8 +168,7 @@ at once; commands route to whichever browser owns the target tab. See the
 ### Remote control requires native messaging
 
 Remote control requires `htrcli` to be installed and the `htrcli serve` daemon
-to be running. Native messaging is the only transport — the WebSocket fallback
-was removed when the extension consolidated on `htrcli serve` as its sole backend.
+to be running. Native messaging is the only transport.
 
 If native messaging is unavailable, the side panel shows **Install htrcli**.
 Install the Go CLI and register the native host:

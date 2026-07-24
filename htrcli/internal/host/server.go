@@ -11,6 +11,12 @@ import (
 	"github.com/u007/htrcli/internal/api"
 )
 
+// knownEventKinds lists the only event kinds the server accepts on ingest
+// and returns on read. Any other kind creates an unreachable orphan bucket.
+var knownEventKinds = map[string]bool{
+	"console": true,
+}
+
 // NewHTTPServer builds the HTTP server with all API routes.
 // bearerToken: if non-empty, all requests must supply "Authorization: Bearer <token>".
 // allowedIPs: if non-nil and non-empty, requests from other IPs are rejected.
@@ -90,6 +96,15 @@ func apiHandler(d *Daemon, port int, bearerToken string) http.Handler {
 
 		case path == "/api/page" && r.Method == "GET":
 			handlePageGet(w, r, d)
+
+		case path == "/api/events" && r.Method == "GET":
+			handleEventsGet(w, r, d)
+
+		case path == "/api/events/ingest" && r.Method == "POST":
+			handleEventsIngest(w, r, d)
+
+		case path == "/api/events/generation" && r.Method == "GET":
+			apiOK(w, map[string]any{"generation": d.Events.Generation()})
 
 		case tabGetRe.MatchString(path) && r.Method == "GET":
 			m := tabGetRe.FindStringSubmatch(path)
@@ -199,6 +214,80 @@ func handlePageGet(w http.ResponseWriter, r *http.Request, d *Daemon) {
 		return
 	}
 	apiOK(w, page)
+}
+
+type eventEntryWire struct {
+	Seq       int             `json:"seq,omitempty"`
+	Kind      string          `json:"kind"`
+	Timestamp int64           `json:"timestamp"`
+	Data      json.RawMessage `json:"data"`
+}
+
+type ingestEventsRequest struct {
+	TabID   int              `json:"tabId"`
+	Kind    string           `json:"kind"`
+	Entries []eventEntryWire `json:"entries"`
+}
+
+// handleEventsIngest receives a batch of newly captured events from the
+// extension and appends them to the daemon's EventStore.
+func handleEventsIngest(w http.ResponseWriter, r *http.Request, d *Daemon) {
+	var req ingestEventsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TabID == 0 || req.Kind == "" {
+		apiError(w, 400, "invalid request body")
+		return
+	}
+	if !knownEventKinds[req.Kind] {
+		apiError(w, 400, "unknown event kind: '"+req.Kind+"'")
+		return
+	}
+	events := make([]Event, len(req.Entries))
+	for i, e := range req.Entries {
+		events[i] = Event{Kind: req.Kind, Timestamp: e.Timestamp, Data: e.Data}
+	}
+	d.Events.Ingest(req.TabID, req.Kind, events)
+	apiOK(w, map[string]any{"received": true})
+}
+
+// handleEventsGet answers a cursor-based poll: ?kind=console&since=40&tab=1.
+func handleEventsGet(w http.ResponseWriter, r *http.Request, d *Daemon) {
+	kind := r.URL.Query().Get("kind")
+	if kind == "" {
+		apiError(w, 400, "kind is required")
+		return
+	}
+	if !knownEventKinds[kind] {
+		apiError(w, 400, "unknown event kind: '"+kind+"'")
+		return
+	}
+
+	var tabID int
+	if q := r.URL.Query().Get("tab"); q != "" {
+		tabID = parseTabID(q)
+		if tabID == 0 {
+			apiError(w, 400, "invalid tab id: "+q)
+			return
+		}
+	} else {
+		id, ok := d.FirstTabID()
+		if !ok {
+			apiError(w, 404, "no tabs connected")
+			return
+		}
+		tabID = id
+	}
+
+	since := parseTabID(r.URL.Query().Get("since"))
+	entries, dropped, oldest := d.Events.Read(tabID, kind, since)
+	out := make([]eventEntryWire, len(entries))
+	for i, e := range entries {
+		out[i] = eventEntryWire{Seq: e.Seq, Kind: e.Kind, Timestamp: e.Timestamp, Data: e.Data}
+	}
+	apiOK(w, map[string]any{
+		"entries":            out,
+		"dropped":            dropped,
+		"oldestAvailableSeq": oldest,
+	})
 }
 
 // screenshotTimeout bounds how long GET /api/screenshot waits for the
