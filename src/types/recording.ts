@@ -122,6 +122,8 @@ export type MessageType =
 	| "RECONNECT_NATIVE"
 	| "CDP_EVAL"
 	| "CONSOLE_ENTRY"
+	| "DIALOG_ENTRY"
+	| "DIALOG_POLICY"
 	// Server/WS path relays trusted (CDP) click/pressKey/type to the background,
 	// which owns the debugger connection. The content script sends this and
 	// awaits the CommandResult the background produces.
@@ -262,6 +264,13 @@ export interface ConsoleEntryMessage extends BaseMessage {
 	entry: ConsoleEntry;
 }
 
+// Dialog entry relayed from the MAIN-world override (or CDP) to the background
+// for durable buffering.
+export interface DialogEntryMessage extends BaseMessage {
+	type: "DIALOG_ENTRY";
+	entry: DialogEntry;
+}
+
 // Content script → background: relay a trusted (CDP) input command (click /
 // pressKey / type) to the background, which owns the debugger connection.
 export interface CdpInputMessage extends BaseMessage {
@@ -291,7 +300,8 @@ export type RecordingMessage =
 	| HideHighlightMessage
 	| ConnectionStatusMessage
 	| CdpInputMessage
-	| ConsoleEntryMessage;
+	| ConsoleEntryMessage
+	| DialogEntryMessage;
 
 // Export format types
 export interface ExportedStep {

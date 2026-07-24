@@ -17,6 +17,7 @@ import type {
 	ConnectionMode,
 	ConsoleEntryMessage,
 	DeleteAnnotationMessage,
+	DialogEntryMessage,
 	InputEventMessage,
 	RecordingMessage,
 	RecordingSession,
@@ -27,7 +28,12 @@ import type {
 } from "../types/recording";
 import { cdpEvaluate } from "./cdpEval";
 import { dispatchCdpInput } from "./cdpInput";
-import { flushPending, recordConsoleEntry, resetForResync } from "./eventStore";
+import {
+	flushPending,
+	recordConsoleEntry,
+	recordDialogEntry,
+	resetForResync,
+} from "./eventStore";
 import {
 	getDaemonConnectionInfo,
 	registerTab,
@@ -894,6 +900,15 @@ chrome.runtime.onMessage.addListener(
 						);
 						sendResponse({ success: false, error: "No tab id" });
 					}
+					break;
+				}
+
+				case "DIALOG_ENTRY": {
+					const msg = message as DialogEntryMessage;
+					if (sender.tab?.id) {
+						await recordDialogEntry(sender.tab.id, msg.entry);
+					}
+					sendResponse({ success: true });
 					break;
 				}
 

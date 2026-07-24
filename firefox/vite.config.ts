@@ -116,6 +116,13 @@ function buildFirefoxManifest(): Plugin {
 						run_at: "document_start",
 						all_frames: false,
 					},
+					{
+						matches: ["http://*/*", "https://*/*"],
+						js: ["dialogOverride.js"],
+						world: "MAIN",
+						run_at: "document_start",
+						all_frames: false,
+					},
 				],
 				web_accessible_resources: [
 					{
@@ -217,6 +224,7 @@ export default defineConfig(() => {
 					background: "firefox/src/background-entry.ts",
 					content: "firefox/src/contentScript-entry.ts",
 					consoleCapture: "firefox/src/consoleCapture-entry.ts",
+					dialogOverride: "firefox/src/dialogOverride-entry.ts",
 				},
 				output: {
 					chunkFileNames: "assets/chunk-[hash].js",

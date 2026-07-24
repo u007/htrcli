@@ -34,6 +34,12 @@ export default defineManifest({
 			world: "MAIN",
 			run_at: "document_start",
 		},
+		{
+			matches: ["http://*/*", "https://*/*"],
+			js: ["src/contentScript/dialogOverride.ts"],
+			world: "MAIN",
+			run_at: "document_start",
+		},
 	],
 	side_panel: {
 		default_path: "sidepanel.html",

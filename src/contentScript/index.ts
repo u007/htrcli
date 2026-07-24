@@ -8,6 +8,8 @@
 import type { Command, CommandResult } from "../types/commands";
 import type {
 	ClickEventMessage,
+	ConsoleEntry,
+	DialogEntry,
 	EnableRecordingMessage,
 	HighlightElementMessage,
 	InputEventMessage,
@@ -37,6 +39,16 @@ let recordingStartTime: number | null = null;
 
 let remoteControlEnabled = false;
 
+const CONSOLE_CAPTURE_SOURCE = "htrncontrol-console-capture";
+
+const DIALOG_CAPTURE_SOURCE = "htrncontrol-dialog-override";
+
+interface ConsoleCaptureRelayMessage {
+	source: typeof CONSOLE_CAPTURE_SOURCE;
+	type: "CONSOLE_ENTRY";
+	entry: ConsoleEntry;
+}
+
 // ─── Message Helpers ──────────────────────────────────────────────
 
 /**
@@ -61,6 +73,44 @@ function handleClickEvent(message: ClickEventMessage): void {
  */
 function handleInputEvent(message: InputEventMessage): void {
 	sendToBackground(message);
+}
+
+function handleConsoleCaptureMessage(event: MessageEvent): void {
+	if (event.source !== window) return;
+	const data = event.data as ConsoleCaptureRelayMessage | undefined;
+	if (
+		!data ||
+		data.source !== CONSOLE_CAPTURE_SOURCE ||
+		data.type !== "CONSOLE_ENTRY"
+	) {
+		return;
+	}
+	sendToBackground({
+		type: "CONSOLE_ENTRY",
+		entry: data.entry,
+	});
+}
+
+interface DialogCaptureRelayMessage {
+	source: typeof DIALOG_CAPTURE_SOURCE;
+	type: "DIALOG_ENTRY";
+	entry: DialogEntry;
+}
+
+function handleDialogCaptureMessage(event: MessageEvent): void {
+	if (event.source !== window) return;
+	const data = event.data as DialogCaptureRelayMessage | undefined;
+	if (
+		!data ||
+		data.source !== DIALOG_CAPTURE_SOURCE ||
+		data.type !== "DIALOG_ENTRY"
+	) {
+		return;
+	}
+	sendToBackground({
+		type: "DIALOG_ENTRY",
+		entry: data.entry,
+	});
 }
 
 // ─── Recording Controls ───────────────────────────────────────────
@@ -204,7 +254,8 @@ function handleMessage(
 		| { type: "EXECUTE_COMMAND"; command: Command; tabId?: number }
 		| { type: "ENABLE_REMOTE_CONTROL"; serverUrl?: string }
 		| { type: "DISABLE_REMOTE_CONTROL" }
-		| { type: "GET_CURRENT_TAB_ID" },
+		| { type: "GET_CURRENT_TAB_ID" }
+		| { type: "DIALOG_POLICY"; policy: unknown },
 	_sender: chrome.runtime.MessageSender,
 	sendResponse: (response?: unknown) => void,
 ): boolean {
@@ -282,6 +333,24 @@ function handleMessage(
 			sendResponse({ success: true });
 			break;
 
+		case "DIALOG_POLICY": {
+			const dialogMsg = message as {
+				type: "DIALOG_POLICY";
+				policy: unknown;
+			};
+			// Forward the policy to the MAIN-world dialog override via postMessage.
+			window.postMessage(
+				{
+					source: DIALOG_CAPTURE_SOURCE,
+					type: "DIALOG_POLICY",
+					policy: dialogMsg.policy,
+				},
+				"*",
+			);
+			sendResponse({ success: true });
+			break;
+		}
+
 		default:
 			// Unknown message type
 			break;
@@ -324,6 +393,26 @@ if (!contentWindow.__htrncontrolInitialized) {
 	window.addEventListener("htrncontrol:unhighlight", () => {
 		hideHighlight();
 	});
+
+	window.addEventListener("message", handleConsoleCaptureMessage);
+	window.addEventListener("message", handleDialogCaptureMessage);
+	// Tell the MAIN-world console-capture script (which runs at
+	// document_start, ahead of this isolated-world script's default timing)
+	// that this relay listener is now attached, so it can flush anything it
+	// buffered instead of losing early console calls to an unattached
+	// window.postMessage listener.
+	window.postMessage(
+		{ source: CONSOLE_CAPTURE_SOURCE, type: "HTR_CONSOLE_CAPTURE_RELAY_READY" },
+		"*",
+	);
+	// Same for the dialog-override script.
+	window.postMessage(
+		{
+			source: DIALOG_CAPTURE_SOURCE,
+			type: "HTR_DIALOG_OVERRIDE_RELAY_READY",
+		},
+		"*",
+	);
 
 	// Handle page unload - ensure any pending data is sent
 	window.addEventListener("beforeunload", () => {
