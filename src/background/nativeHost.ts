@@ -51,7 +51,10 @@ let lastKnownGeneration: number | null = null;
 let onDaemonRestart: (() => void) | null = null;
 
 type ScreenshotResult = { data?: string; error?: string };
-type ScreenshotCapturer = (tabId: number) => Promise<ScreenshotResult>;
+type ScreenshotCapturer = (
+	tabId: number,
+	opts?: { fullPage?: boolean; annotate?: unknown[] },
+) => Promise<ScreenshotResult>;
 let captureScreenshot: ScreenshotCapturer | null = null;
 
 const MAX_RESPONSE_BODY_BYTES = 64 * 1024;
@@ -359,7 +362,12 @@ interface NativeCaptureScreenshotMessage {
 	type: "capture_screenshot";
 	tabId: number;
 	commandId: string;
-	payload: { uploadUrl: string; token?: string };
+	payload: {
+		uploadUrl: string;
+		token?: string;
+		fullPage?: boolean;
+		annotate?: unknown[];
+	};
 }
 
 interface NativePingMessage {
@@ -457,7 +465,10 @@ async function handleCaptureScreenshot(
 	let errMsg = "";
 	try {
 		const res: ScreenshotResult = captureScreenshot
-			? await captureScreenshot(tabId)
+			? await captureScreenshot(tabId, {
+					fullPage: payload.fullPage,
+					annotate: payload.annotate,
+				})
 			: { error: "no screenshot capturer registered" };
 		data = res.data;
 		errMsg = res.error ?? (data ? "" : "screenshot capture returned no data");

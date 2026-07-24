@@ -47,6 +47,10 @@ import {
 	stopNetworkCapture,
 } from "./nativeHost";
 import { startWebRequestCapture } from "./networkWebRequest";
+import { computeStitchPlan } from "./stitch";
+
+/** Minimum ms between scroll-and-capture steps during full-page stitching. */
+const CAPTURE_THROTTLE_MS = 600;
 
 type ChromeWithSidebarAction = typeof chrome & {
 	sidebarAction?: unknown;
@@ -750,6 +754,99 @@ async function captureTabScreenshot(
 	return captureScreenshot(tabId);
 }
 
+export interface ScreenshotUploadOptions {
+	fullPage?: boolean;
+	/** Elements to annotate (unknown[] at bridge boundary; content script casts to TargetSelector[]). */
+	annotate?: unknown[];
+}
+
+/**
+ * Convert a Blob to a data URL base64 string.
+ * Uses chunked processing to avoid stack issues with large blobs.
+ */
+async function blobToBase64(blob: Blob): Promise<string> {
+	const bytes = new Uint8Array(await blob.arrayBuffer());
+	let binary = "";
+	const chunk = 0x8000;
+	for (let i = 0; i < bytes.length; i += chunk) {
+		binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+	}
+	return btoa(binary);
+}
+
+/**
+ * Capture a full-page screenshot by scrolling through the page and stitching
+ * viewport-sized tiles together on an OffscreenCanvas.
+ */
+async function captureFullPageScreenshot(
+	tabId: number,
+): Promise<{ data?: string; error?: string }> {
+	const tab = await chrome.tabs.get(tabId);
+	if (!tab.windowId) return { error: "tab has no windowId" };
+	if (!tab.active) {
+		await chrome.tabs.update(tabId, { active: true });
+	}
+
+	const [{ result: metrics }] = await chrome.scripting.executeScript({
+		target: { tabId },
+		func: () => ({
+			contentWidth: document.documentElement.scrollWidth,
+			contentHeight: document.documentElement.scrollHeight,
+			viewportWidth: window.innerWidth,
+			viewportHeight: window.innerHeight,
+			dpr: window.devicePixelRatio || 1,
+			originX: window.scrollX,
+			originY: window.scrollY,
+		}),
+	});
+	if (!metrics) return { error: "could not read page metrics" };
+
+	const plan = computeStitchPlan(
+		metrics.contentWidth,
+		metrics.contentHeight,
+		metrics.viewportWidth,
+		metrics.viewportHeight,
+		metrics.dpr,
+	);
+
+	const canvas = new OffscreenCanvas(plan.canvasWidth, plan.canvasHeight);
+	const ctx = canvas.getContext("2d");
+	if (!ctx) return { error: "could not get OffscreenCanvas 2D context" };
+
+	try {
+		for (const seg of plan.segments) {
+			await chrome.scripting.executeScript({
+				target: { tabId },
+				func: (x: number, y: number) => window.scrollTo(x, y),
+				args: [seg.scrollX, seg.scrollY],
+			});
+			await new Promise((r) => setTimeout(r, CAPTURE_THROTTLE_MS));
+
+			const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+				format: "png",
+			});
+			if (!dataUrl) return { error: "captureVisibleTab returned empty" };
+
+			const bmp = await createImageBitmap(await (await fetch(dataUrl)).blob());
+			ctx.drawImage(
+				bmp,
+				Math.round(seg.scrollX * metrics.dpr),
+				Math.round(seg.scrollY * metrics.dpr),
+			);
+			bmp.close();
+		}
+	} finally {
+		await chrome.scripting.executeScript({
+			target: { tabId },
+			func: (x: number, y: number) => window.scrollTo(x, y),
+			args: [metrics.originX, metrics.originY],
+		});
+	}
+
+	const blob = await canvas.convertToBlob({ type: "image/png" });
+	return { data: `data:image/png;base64,${await blobToBase64(blob)}` };
+}
+
 /**
  * Capture a screenshot for native-host upload, surfacing the real failure
  * reason instead of swallowing it, so the daemon's GET /api/screenshot returns
@@ -759,23 +856,55 @@ async function captureTabScreenshot(
  * the requested tab isn't currently active in its window we activate it first
  * — otherwise this silently captures whatever unrelated tab happens to be
  * active, which is data leakage across tabs.
+ *
+ * Supports optional full-page stitching and element annotation via opts.
  */
 async function captureScreenshotForUpload(
 	tabId: number,
+	opts: ScreenshotUploadOptions = {},
 ): Promise<{ data?: string; error?: string }> {
+	const hasAnnotations = (opts.annotate?.length ?? 0) > 0;
+
 	try {
-		const tab = await chrome.tabs.get(tabId);
-		if (!tab.windowId) return { error: "tab has no windowId" };
-		if (!tab.active) {
-			await chrome.tabs.update(tabId, { active: true });
+		if (hasAnnotations) {
+			await chrome.tabs.sendMessage(tabId, {
+				type: "ANNOTATE_ELEMENTS",
+				targets: opts.annotate,
+			});
 		}
-		const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-			format: "png",
-		});
-		if (!dataUrl) return { error: "captureVisibleTab returned empty" };
-		return { data: dataUrl };
+
+		let result: { data?: string; error?: string };
+		if (opts.fullPage) {
+			result = await captureFullPageScreenshot(tabId);
+		} else {
+			const tab = await chrome.tabs.get(tabId);
+			if (!tab.windowId) {
+				result = { error: "tab has no windowId" };
+			} else {
+				if (!tab.active) {
+					await chrome.tabs.update(tabId, { active: true });
+				}
+				const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+					format: "png",
+				});
+				result = dataUrl
+					? { data: dataUrl }
+					: { error: "captureVisibleTab returned empty" };
+			}
+		}
+		return result;
 	} catch (err) {
 		return { error: err instanceof Error ? err.message : String(err) };
+	} finally {
+		if (hasAnnotations) {
+			try {
+				await chrome.tabs.sendMessage(tabId, {
+					type: "CLEAR_ANNOTATIONS",
+				});
+			} catch (err) {
+				console.warn("[HTR NControl] Failed to clear annotations:", err);
+			}
+		}
 	}
 }
 
