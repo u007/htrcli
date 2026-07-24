@@ -83,6 +83,50 @@ func TestBearerTokenEnforced(t *testing.T) {
 	}
 }
 
+func TestTriggerScreenshotIncludesOptions(t *testing.T) {
+	d := host.NewDaemon()
+	var written [][]byte
+	rc := d.AddConn(func(msg []byte) error {
+		written = append(written, msg)
+		return nil
+	})
+	d.RegisterTab(rc, 1, host.TabInfo{ID: 1, URL: "https://a.com", Title: "A", Active: true})
+
+	annotate := json.RawMessage(`[{"selector":"button"}]`)
+	_, err := d.TriggerScreenshot(1, "cmd1", "http://127.0.0.1:3845/api/screenshot", "",
+		host.ScreenshotOpts{FullPage: true, Annotate: annotate})
+	if err != nil {
+		t.Fatalf("TriggerScreenshot: %v", err)
+	}
+	if len(written) != 1 {
+		t.Fatalf("want 1 native message written, got %d", len(written))
+	}
+	var nm struct {
+		Type    string          `json:"type"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(written[0], &nm); err != nil {
+		t.Fatalf("unmarshal native message: %v", err)
+	}
+	if nm.Type != "capture_screenshot" {
+		t.Fatalf("type = %q, want capture_screenshot", nm.Type)
+	}
+	var payload struct {
+		UploadURL string          `json:"uploadUrl"`
+		FullPage  bool            `json:"fullPage"`
+		Annotate  json.RawMessage `json:"annotate"`
+	}
+	if err := json.Unmarshal(nm.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if !payload.FullPage {
+		t.Fatalf("payload.fullPage = false, want true")
+	}
+	if string(payload.Annotate) != `[{"selector":"button"}]` {
+		t.Fatalf("payload.annotate = %s, want the selector array", payload.Annotate)
+	}
+}
+
 func TestEventsIngestAndRead(t *testing.T) {
 	d := host.NewDaemon()
 	// Give the daemon a tab so /api/events defaults cleanly if needed.

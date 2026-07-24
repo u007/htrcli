@@ -294,7 +294,10 @@ func handleEventsGet(w http.ResponseWriter, r *http.Request, d *Daemon) {
 // extension to capture and upload the PNG over HTTP. Kept below the htrcli
 // client's 30s HTTP timeout so the caller receives the daemon's explicit
 // "screenshot timed out" error rather than an opaque client-side deadline.
-const screenshotTimeout = 25 * time.Second
+const (
+	screenshotTimeout         = 25 * time.Second
+	fullPageScreenshotTimeout = 45 * time.Second
+)
 
 // handleScreenshotGet triggers a capture in the extension and blocks until the
 // extension POSTs the PNG back (or the wait times out). The screenshot travels
@@ -309,13 +312,24 @@ func handleScreenshotGet(w http.ResponseWriter, r *http.Request, d *Daemon, port
 	commandID := generateID()
 	uploadURL := fmt.Sprintf("http://127.0.0.1:%d/api/screenshot", port)
 
-	ch, err := d.TriggerScreenshot(tabID, commandID, uploadURL, bearerToken)
+	fullPage := r.URL.Query().Get("fullPage") == "true"
+	var annotate json.RawMessage
+	if raw := r.URL.Query().Get("annotate"); raw != "" {
+		annotate = json.RawMessage(raw)
+	}
+
+	ch, err := d.TriggerScreenshot(tabID, commandID, uploadURL, bearerToken,
+		ScreenshotOpts{FullPage: fullPage, Annotate: annotate})
 	if err != nil {
 		apiError(w, 404, err.Error())
 		return
 	}
 
-	timer := time.NewTimer(screenshotTimeout)
+	wait := screenshotTimeout
+	if fullPage {
+		wait = fullPageScreenshotTimeout
+	}
+	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
 	case res := <-ch:

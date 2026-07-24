@@ -385,9 +385,17 @@ func (d *Daemon) ResolveCommand(commandID string, result CommandResult) {
 // screenshotTrigger is the payload of a capture_screenshot native message.
 // It tells the extension where to upload the captured PNG over HTTP, since the
 // extension has no other way to learn the daemon's URL + token in native mode.
+// ScreenshotOpts carries optional parameters for a screenshot capture.
+type ScreenshotOpts struct {
+	FullPage bool
+	Annotate json.RawMessage
+}
+
 type screenshotTrigger struct {
-	UploadURL string `json:"uploadUrl"`
-	Token     string `json:"token,omitempty"`
+	UploadURL string          `json:"uploadUrl"`
+	Token     string          `json:"token,omitempty"`
+	FullPage  bool            `json:"fullPage,omitempty"`
+	Annotate  json.RawMessage `json:"annotate,omitempty"`
 }
 
 // TriggerScreenshot asks the extension (via the relay) to capture tab tabID and
@@ -395,7 +403,7 @@ type screenshotTrigger struct {
 // Screenshots are deliberately NOT returned over the relay: a base64 PNG
 // routinely exceeds the 1 MB native-messaging frame limit, so they travel over
 // HTTP instead (see POST /api/screenshot).
-func (d *Daemon) TriggerScreenshot(tabID int, commandID, uploadURL, token string) (<-chan shotResult, error) {
+func (d *Daemon) TriggerScreenshot(tabID int, commandID, uploadURL, token string, opts ScreenshotOpts) (<-chan shotResult, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -411,7 +419,12 @@ func (d *Daemon) TriggerScreenshot(tabID int, commandID, uploadURL, token string
 		Type:      "capture_screenshot",
 		TabID:     tabID,
 		CommandID: commandID,
-		Payload:   mustMarshal(screenshotTrigger{UploadURL: uploadURL, Token: token}),
+		Payload: mustMarshal(screenshotTrigger{
+			UploadURL: uploadURL,
+			Token:     token,
+			FullPage:  opts.FullPage,
+			Annotate:  opts.Annotate,
+		}),
 	}
 	data, _ := json.Marshal(msg)
 	if err := rc.write(data); err != nil {
