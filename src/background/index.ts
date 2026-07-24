@@ -1391,6 +1391,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 		void registerNativeTab(tabId, tab);
 	}
 
+	// Tear down dialog capture when the armed tab starts navigating,
+	// so the debugger is released before the new page loads.
+	if (changeInfo.status === "loading") {
+		void stopDialogCapture(tabId);
+	}
+
 	if (!currentSession?.isRecording) return;
 	if (!currentSession.trackedTabIds.includes(tabId)) return;
 
