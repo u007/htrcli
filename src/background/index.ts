@@ -39,6 +39,7 @@ import {
 	startNativeHost,
 	stopNetworkCapture,
 } from "./nativeHost";
+import { startWebRequestCapture } from "./networkWebRequest";
 
 type ChromeWithSidebarAction = typeof chrome & {
 	sidebarAction?: unknown;
@@ -1490,6 +1491,13 @@ setOnDaemonRestart(() => {
 	console.warn("[HTR NControl] daemon restarted; resuming event flush");
 });
 startNativeHost();
+
+// Firefox: no chrome.debugger, so passive network capture uses always-on
+// webRequest observation. Chrome uses bounded CDP capture windows instead
+// (see nativeHost.ts handleNetworkCapture), so skip webRequest there.
+if (typeof chrome.debugger === "undefined") {
+	startWebRequestCapture();
+}
 
 // Fold native-host status into the unified connection mode. Any change
 // (connect, transient disconnect, or permanent failure) re-broadcasts a

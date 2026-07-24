@@ -109,6 +109,13 @@ function buildFirefoxManifest(): Plugin {
 						run_at: "document_start",
 						all_frames: false,
 					},
+					{
+						matches: ["http://*/*", "https://*/*"],
+						js: ["consoleCapture.js"],
+						world: "MAIN",
+						run_at: "document_start",
+						all_frames: false,
+					},
 				],
 				web_accessible_resources: [
 					{
@@ -129,16 +136,18 @@ function buildFirefoxManifest(): Plugin {
 					"storage",
 					"scripting",
 					"nativeMessaging",
+					"webRequest",
 				],
 				host_permissions: ["<all_urls>"],
 				browser_specific_settings: {
 					gecko: {
 						id: "htrncontrol@mercstudio.com",
-						// 112+ is required for `background.type` and
-						// is also the first version that ships the
-						// data-collection-consent UX we declare
-						// below.
-						strict_min_version: "112.0",
+						// 128+ is required for content_scripts world:
+						// "MAIN" (used by the console-capture script) —
+						// this supersedes the prior 112.0 floor, which
+						// only covered `background.type` and the
+						// data-collection-consent UX declared below.
+						strict_min_version: "128.0",
 						// Required by addons-linter for new Firefox
 						// extension submissions. We don't collect
 						// any data ourselves; the optional remote
@@ -207,6 +216,7 @@ export default defineConfig(() => {
 					// `entryFileNames` callback below adds it back.
 					background: "firefox/src/background-entry.ts",
 					content: "firefox/src/contentScript-entry.ts",
+					consoleCapture: "firefox/src/consoleCapture-entry.ts",
 				},
 				output: {
 					chunkFileNames: "assets/chunk-[hash].js",

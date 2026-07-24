@@ -28,6 +28,12 @@ export default defineManifest({
 			matches: ["http://*/*", "https://*/*"],
 			js: ["src/contentScript/index.ts"],
 		},
+		{
+			matches: ["http://*/*", "https://*/*"],
+			js: ["src/contentScript/consoleCapture.ts"],
+			world: "MAIN",
+			run_at: "document_start",
+		},
 	],
 	side_panel: {
 		default_path: "sidepanel.html",
@@ -53,6 +59,7 @@ export default defineManifest({
 		"sidePanel", // Main UI
 		"nativeMessaging", // Connect to htrcli native host
 		"debugger", // CDP Page.printToPDF for headless PDF capture
+		"webRequest", // Firefox passive network capture (observation only)
 	],
 	host_permissions: ["<all_urls>"], // Content script injection on any page
 });
