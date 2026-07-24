@@ -126,6 +126,34 @@
     }
     throw new Error(`resolveKey: unknown key "${key}"`);
   }
+  const refToEl = /* @__PURE__ */ new Map();
+  let nextRef = 0;
+  function assignRef(el) {
+    for (const [refId2, existing] of refToEl) {
+      if (existing === el) {
+        return refId2;
+      }
+    }
+    nextRef++;
+    const refId = `@e${nextRef}`;
+    refToEl.set(refId, el);
+    return refId;
+  }
+  function resolveRef(refId) {
+    const el = refToEl.get(refId);
+    if (!el) {
+      throw new Error(
+        `stale ref: ${refId} is not known on this page (it may have navigated or the ref was minted elsewhere)`
+      );
+    }
+    if (!el.isConnected) {
+      refToEl.delete(refId);
+      throw new Error(
+        `stale ref: ${refId} points to an element that is no longer in the document (page re-rendered or navigated)`
+      );
+    }
+    return el;
+  }
   function generateXPath(element) {
     const idXPath = generateIdXPath(element);
     if (idXPath) return idXPath;
@@ -171,9 +199,8 @@
     const index = target.index ?? 0;
     return elements[index] ?? null;
   }
-  function findElementInfo(target) {
-    const elements = findAllElementsRaw(target);
-    return elements.map((el) => getElementInfo(el));
+  function findAllElements(target) {
+    return findAllElementsRaw(target);
   }
   function waitForElement(target, timeoutMs = 5e3, options = {}) {
     const { force = false, throwOnTimeout = false } = options;
@@ -226,6 +253,10 @@
   }
   function findAllElementsRaw(target) {
     let elements = [];
+    if (target.ref) {
+      const el = resolveRef(target.ref);
+      return el ? [el] : [];
+    }
     if (target.selector) {
       elements = querySelectorAllSafe(target.selector);
       return applyFilters(elements, target);
@@ -639,9 +670,9 @@
     switch (action) {
       // ─── Finding / Inspection ─────────────────────────────────────
       case "find":
-        return handleFind(requireTarget(target, action));
+        return handleFind(requireTarget(target, action), options);
       case "findAll":
-        return handleFindAll(requireTarget(target, action));
+        return handleFindAll(requireTarget(target, action), options);
       case "wait":
         return handleWait(
           requireTarget(target, action),
@@ -829,13 +860,20 @@
         throw new Error(`Unknown action: ${action}`);
     }
   }
-  function handleFind(target) {
+  function handleFind(target, options) {
     const element = findElement(target);
     if (!element) return null;
-    return getElementInfo(element);
+    const info = getElementInfo(element);
+    if (options == null ? void 0 : options.assignRef) info.ref = assignRef(element);
+    return info;
   }
-  function handleFindAll(target) {
-    return findElementInfo(target);
+  function handleFindAll(target, options) {
+    const elements = findAllElements(target);
+    return elements.map((el) => {
+      const info = getElementInfo(el);
+      if (options == null ? void 0 : options.assignRef) info.ref = assignRef(el);
+      return info;
+    });
   }
   async function handleWait(target, timeout) {
     const timeoutMs = timeout ?? 5e3;

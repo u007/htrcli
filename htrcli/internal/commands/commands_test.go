@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/u007/htrcli/internal/api"
@@ -139,5 +140,29 @@ func TestFindWithRefSetsAssignRefOption(t *testing.T) {
 	}
 	if !gotAssignRef {
 		t.Fatalf("expected assignRef=true option to be sent")
+	}
+}
+
+func TestParseUploadFiles_ExtRejectsRef(t *testing.T) {
+	err := runUploadExt("@e1", []string{"/tmp/a.png"})
+	if err == nil {
+		t.Fatal("expected error for @eN ref on extension transport, got nil")
+	}
+	if !strings.Contains(err.Error(), "only supported on the --cdp transport") {
+		t.Fatalf("want 'only supported on the --cdp transport' in error, got %q", err.Error())
+	}
+}
+
+func TestParseUploadFiles_CDPRejectsUnknownRef(t *testing.T) {
+	dir := t.TempDir()
+	refStorePathOverride = dir + "/refs.json"
+	defer func() { refStorePathOverride = "" }()
+
+	err := runUploadCDP("@e999", []string{"/tmp/a.png"})
+	if err == nil {
+		t.Fatal("expected error for unknown ref, got nil")
+	}
+	if !strings.Contains(err.Error(), "stale ref") {
+		t.Fatalf("want 'stale ref' in error, got %q", err.Error())
 	}
 }
