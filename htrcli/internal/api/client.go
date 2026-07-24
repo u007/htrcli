@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -28,8 +29,8 @@ func NewClient(baseURL, token string) *Client {
 	}
 }
 
-// doRequest executes an HTTP request and returns the response body.
-func (c *Client) doRequest(method, path string, body any) ([]byte, error) {
+// doRequestClient executes an HTTP request with the given client and returns the response body.
+func (c *Client) doRequestClient(client *http.Client, method, path string, body any) ([]byte, error) {
 	url := c.BaseURL + path
 
 	var bodyReader io.Reader
@@ -51,7 +52,7 @@ func (c *Client) doRequest(method, path string, body any) ([]byte, error) {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 
-	resp, err := c.HTTPClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, &ConnectionError{Message: fmt.Sprintf("failed to connect to server: %v", err)}
 	}
@@ -79,6 +80,11 @@ func (c *Client) doRequest(method, path string, body any) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+// doRequest executes an HTTP request using the default client and returns the response body.
+func (c *Client) doRequest(method, path string, body any) ([]byte, error) {
+	return c.doRequestClient(c.HTTPClient, method, path, body)
 }
 
 // doRequestWithEnvelope executes a request and unpacks the ApiResponse envelope.
@@ -302,9 +308,37 @@ func (c *Client) GetPageInfo(tabID *int) (*PageInfo, error) {
 	return &page, nil
 }
 
-// GetScreenshot captures a screenshot and returns the base64 PNG data.
+// GetScreenshot captures a viewport screenshot and returns the base64 PNG data.
 func (c *Client) GetScreenshot() (string, error) {
-	data, err := c.doRequest("GET", "/api/screenshot", nil)
+	return c.GetScreenshotOpts(ScreenshotOptions{})
+}
+
+// GetScreenshotOpts captures a screenshot with the given options and returns the
+// base64 PNG data. When FullPage is true, the HTTP timeout is extended to 90s.
+func (c *Client) GetScreenshotOpts(opts ScreenshotOptions) (string, error) {
+	q := url.Values{}
+	if opts.FullPage {
+		q.Set("fullPage", "true")
+	}
+	if len(opts.Annotate) > 0 {
+		raw, err := json.Marshal(opts.Annotate)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal annotate selectors: %w", err)
+		}
+		q.Set("annotate", string(raw))
+	}
+
+	path := "/api/screenshot"
+	if enc := q.Encode(); enc != "" {
+		path += "?" + enc
+	}
+
+	client := c.HTTPClient
+	if opts.FullPage {
+		client = &http.Client{Timeout: 90 * time.Second}
+	}
+
+	data, err := c.doRequestClient(client, "GET", path, nil)
 	if err != nil {
 		return "", err
 	}

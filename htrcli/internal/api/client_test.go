@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"testing"
 )
 
@@ -202,6 +203,56 @@ func TestNotFoundError(t *testing.T) {
 	}
 	if _, ok := err.(*NotFoundError); !ok {
 		t.Errorf("expected NotFoundError, got %T", err)
+	}
+}
+
+func TestGetScreenshotOptsSendsFullPageAndAnnotate(t *testing.T) {
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ApiResponse{OK: true, Data: "QUJD"})
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "")
+	data, err := c.GetScreenshotOpts(ScreenshotOptions{
+		FullPage: true,
+		Annotate: []TargetSelector{{Selector: "button"}, {Role: "link"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data != "QUJD" {
+		t.Fatalf("data = %q, want QUJD", data)
+	}
+	q, err := neturl.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", gotQuery, err)
+	}
+	if q.Get("fullPage") != "true" {
+		t.Fatalf("fullPage = %q, want true", q.Get("fullPage"))
+	}
+	if q.Get("annotate") != `[{"selector":"button"},{"role":"link"}]` {
+		t.Fatalf("annotate = %q, want the selector JSON array", q.Get("annotate"))
+	}
+}
+
+func TestGetScreenshotViewportSendsNoOptions(t *testing.T) {
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ApiResponse{OK: true, Data: "QUJD"})
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "")
+	if _, err := c.GetScreenshot(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotQuery != "" {
+		t.Fatalf("viewport screenshot should send no query params, got %q", gotQuery)
 	}
 }
 

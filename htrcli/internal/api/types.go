@@ -24,6 +24,14 @@ type TargetSelector struct {
 	Ref           string `json:"ref,omitempty"`
 }
 
+// ScreenshotOptions controls htrcli screenshot capture. Annotate is a list of
+// selectors whose matched elements get numbered overlay boxes drawn before
+// capture. Empty options = plain viewport screenshot (unchanged behavior).
+type ScreenshotOptions struct {
+	FullPage bool             `json:"fullPage,omitempty"`
+	Annotate []TargetSelector `json:"annotate,omitempty"`
+}
+
 // Command represents a remote control command to execute on a browser tab.
 type Command struct {
 	ID      string          `json:"id"`
