@@ -15,6 +15,7 @@ import type {
 	Annotation,
 	ClickEventMessage,
 	ConnectionMode,
+	ConsoleEntryMessage,
 	DeleteAnnotationMessage,
 	InputEventMessage,
 	RecordingMessage,
@@ -26,13 +27,17 @@ import type {
 } from "../types/recording";
 import { cdpEvaluate } from "./cdpEval";
 import { dispatchCdpInput } from "./cdpInput";
+import { flushPending, recordConsoleEntry, resetForResync } from "./eventStore";
 import {
+	getDaemonConnectionInfo,
 	registerTab,
 	retryConnect,
+	setOnDaemonRestart,
 	setReadyTabsProvider,
 	setScreenshotCapturer,
 	setStatusListener,
 	startNativeHost,
+	stopNetworkCapture,
 } from "./nativeHost";
 
 type ChromeWithSidebarAction = typeof chrome & {
@@ -785,6 +790,7 @@ chrome.runtime.onMessage.addListener(
 			| { type: "GET_CONNECTION_STATUS" }
 			| { type: "RECONNECT_NATIVE" }
 			| { type: "GET_TAB_ID" }
+			| ConsoleEntryMessage
 			| {
 					type: "FETCH_URL";
 					url: string;
@@ -867,6 +873,22 @@ chrome.runtime.onMessage.addListener(
 					} else {
 						console.warn(
 							"[HTR NControl] INPUT_EVENT received but no sender.tab.id",
+						);
+						sendResponse({ success: false, error: "No tab id" });
+					}
+					break;
+				}
+
+				case "CONSOLE_ENTRY": {
+					const msg = message as ConsoleEntryMessage;
+					if (sender.tab?.id) {
+						await recordConsoleEntry(sender.tab.id, {
+							...msg.entry,
+						});
+						sendResponse({ success: true });
+					} else {
+						console.warn(
+							"[HTR NControl] CONSOLE_ENTRY received but no sender.tab.id",
 						);
 						sendResponse({ success: false, error: "No tab id" });
 					}
@@ -1402,6 +1424,9 @@ chrome.tabs.onCreated.addListener(async (tab) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
 	readyTabs.delete(tabId);
 
+	// Tear down any active network capture window (Chrome CDP) on the closing tab.
+	void stopNetworkCapture(tabId);
+
 	if (currentSession?.isRecording) {
 		const index = currentSession.trackedTabIds.indexOf(tabId);
 		if (index !== -1) {
@@ -1455,6 +1480,15 @@ chrome.sidePanel
 // Start native host connection
 setScreenshotCapturer(captureScreenshotForUpload);
 setReadyTabsProvider(getReadyTabsInfo);
+setOnDaemonRestart(() => {
+	void (async () => {
+		await resetForResync();
+		await flushPending(postEventsToDaemon);
+	})().catch((error) => {
+		console.warn("[HTR NControl] daemon restart resync failed:", error);
+	});
+	console.warn("[HTR NControl] daemon restarted; resuming event flush");
+});
 startNativeHost();
 
 // Fold native-host status into the unified connection mode. Any change
@@ -1464,6 +1498,44 @@ setStatusListener((mode) => {
 	nativeHostMode = mode;
 	broadcastConnectionStatus();
 });
+
+const FLUSH_INTERVAL_MS = 2000;
+
+async function postEventsToDaemon(
+	tabId: number,
+	kind: string,
+	entries: unknown[],
+): Promise<boolean> {
+	const { httpBaseUrl, token } = getDaemonConnectionInfo();
+	if (!httpBaseUrl) return false;
+
+	try {
+		const res = await fetch(`${httpBaseUrl}/api/events/ingest`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				...(token ? { Authorization: `Bearer ${token}` } : {}),
+			},
+			body: JSON.stringify({ tabId, kind, entries }),
+		});
+		if (!res.ok) {
+			console.warn(
+				`[HTR NControl] events POST failed: ${res.status} ${res.statusText}`,
+			);
+			return false;
+		}
+		return true;
+	} catch (error) {
+		console.warn("[HTR NControl] events POST failed:", error);
+		return false;
+	}
+}
+
+setInterval(() => {
+	void flushPending(postEventsToDaemon).catch((error) => {
+		console.warn("[HTR NControl] event flush failed:", error);
+	});
+}, FLUSH_INTERVAL_MS);
 
 // Connect already-open tabs on install/enable and on browser startup.
 // Declarative content scripts only run on navigation, so without this a

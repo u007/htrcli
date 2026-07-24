@@ -166,7 +166,9 @@ export type CommandAction =
 	/** Internal: server uses this to route `evaluate` through CDP. Content
 	 *  script forwards to background, which calls Runtime.evaluate. Keeps the
 	 *  user's `evaluate` action surface intact. */
-	| "evaluateViaCdp";
+	| "evaluateViaCdp"
+	// ─── Network Capture (background-handled via CDP / webRequest) ──
+	| "networkCapture";
 
 // ─── Command ────────────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@
  */
 
 import type { Command, CommandResult, TabInfo } from "../types/commands";
-import type { ConnectionMode } from "../types/recording";
+import type { ConnectionMode, NetworkEntry } from "../types/recording";
 import { AIA_API_KEY } from "../utils/aiaConfig";
 import { cdpEvaluate } from "./cdpEval";
 import {
@@ -12,6 +12,18 @@ import {
 	ContentScriptNotReadyError,
 	dispatchCdpInput,
 } from "./cdpInput";
+import {
+	attachShared,
+	detachShared,
+	onDebuggerEvent,
+	sendToTab,
+} from "./debuggerManager";
+import {
+	getGeneration,
+	recordNetworkEntry,
+	setLastKnownGeneration,
+} from "./eventStore";
+import { NetworkCaptureBuffer } from "./networkCapture";
 
 const HOST_NAME = "com.htrcontrol.host";
 const RECONNECT_BASE_MS = 1000;
@@ -27,9 +39,29 @@ let reconnectAttempts = 0;
 // connectNative alone is not proof of a working chain — see confirmConnected.
 let portConfirmed = false;
 
+let daemonHttpBaseUrl: string | null = null;
+let daemonToken: string | undefined;
+let lastKnownGeneration: number | null = null;
+let onDaemonRestart: (() => void) | null = null;
+
 type ScreenshotResult = { data?: string; error?: string };
 type ScreenshotCapturer = (tabId: number) => Promise<ScreenshotResult>;
 let captureScreenshot: ScreenshotCapturer | null = null;
+
+const MAX_RESPONSE_BODY_BYTES = 64 * 1024;
+
+interface NetworkCaptureHandle {
+	buffer: NetworkCaptureBuffer;
+	unsubscribe: () => void;
+	timer: ReturnType<typeof setTimeout>;
+}
+
+const activeNetworkCaptures = new Map<number, NetworkCaptureHandle>();
+
+function clampDuration(ms: number | undefined): number {
+	const v = typeof ms === "number" && Number.isFinite(ms) ? ms : 10000;
+	return Math.min(120000, Math.max(1000, v));
+}
 
 // ─── Public API ────────────────────────────────────────────────────
 
@@ -44,6 +76,22 @@ export function startNativeHost(): void {
  */
 export function setScreenshotCapturer(fn: ScreenshotCapturer): void {
 	captureScreenshot = fn;
+}
+
+export function getDaemonConnectionInfo(): {
+	generation: number | null;
+	httpBaseUrl: string | null;
+	token: string | undefined;
+} {
+	return {
+		generation: lastKnownGeneration,
+		httpBaseUrl: daemonHttpBaseUrl,
+		token: daemonToken,
+	};
+}
+
+export function setOnDaemonRestart(fn: () => void): void {
+	onDaemonRestart = fn;
 }
 
 // Provides the background's readyTabs view (tabs with a live content script)
@@ -298,6 +346,7 @@ interface NativeCaptureScreenshotMessage {
 
 interface NativePingMessage {
 	type: "ping";
+	payload?: unknown;
 }
 
 // Written by the relay itself (not the daemon) when it cannot reach the
@@ -337,9 +386,41 @@ function handleNativeMessage(msg: NativeMessage): void {
 	}
 
 	if (msg.type === "ping") {
+		if (msg.payload && typeof msg.payload === "object") {
+			const info = msg.payload as {
+				generation?: number;
+				httpBaseUrl?: string;
+				token?: string;
+			};
+			if (typeof info.httpBaseUrl === "string") {
+				daemonHttpBaseUrl = info.httpBaseUrl;
+			}
+			daemonToken = typeof info.token === "string" ? info.token : undefined;
+			if (typeof info.generation === "number") {
+				void handleDaemonGeneration(info.generation);
+			}
+		}
 		// Liveness probe from the daemon; reply so it doesn't reap this
 		// relay as stale (see SweepConns in htrcli).
 		sendToNative({ type: "heartbeat" });
+	}
+}
+
+async function handleDaemonGeneration(generation: number): Promise<void> {
+	try {
+		const stored = await getGeneration();
+		const previous = lastKnownGeneration ?? stored;
+		const restarted = previous !== null && previous !== generation;
+		lastKnownGeneration = generation;
+		await setLastKnownGeneration(generation);
+		if (restarted) {
+			console.warn(
+				"[NativeHost] Daemon restarted (generation changed) — resync needed",
+			);
+			onDaemonRestart?.();
+		}
+	} catch (error) {
+		console.warn("[NativeHost] Failed to persist daemon generation:", error);
 	}
 }
 
@@ -521,6 +602,164 @@ async function handleDebuggerEval(
 	} catch (err) {
 		replyError(tabId, id, err instanceof Error ? err.message : String(err));
 	}
+}
+
+// ─── CDP Network Capture ──────────────────────────────────────────
+
+/**
+ * Fetch a completed request's response body via CDP, capped. Returns the body
+ * text plus whether it was truncated. Failures (body evicted, binary, etc.)
+ * are non-fatal: the entry is still recorded without a body.
+ */
+async function fetchResponseBody(
+	tabId: number,
+	requestId: string,
+): Promise<{ body?: string; bodyTruncated?: boolean }> {
+	try {
+		const res = (await sendToTab(tabId, "Network.getResponseBody", {
+			requestId,
+		})) as { body: string; base64Encoded: boolean };
+		let body = res.base64Encoded ? "[base64 body omitted]" : res.body;
+		let bodyTruncated = false;
+		if (body.length > MAX_RESPONSE_BODY_BYTES) {
+			body = body.slice(0, MAX_RESPONSE_BODY_BYTES);
+			bodyTruncated = true;
+		}
+		return { body, bodyTruncated };
+	} catch (err) {
+		// Body may be unavailable (evicted, redirect, no content). Not fatal.
+		console.warn("[HTR NControl] getResponseBody failed:", err);
+		return {};
+	}
+}
+
+async function recordCompletedRequest(
+	tabId: number,
+	entry: NetworkEntry,
+): Promise<void> {
+	const { body, bodyTruncated } = await fetchResponseBody(
+		tabId,
+		entry.requestId,
+	);
+	await recordNetworkEntry(tabId, { ...entry, body, bodyTruncated });
+}
+
+// Tear down a capture window: unsubscribe, disable Network, release the shared
+// attach. Idempotent — safe to call on an already-stopped tab.
+export async function stopNetworkCapture(tabId: number): Promise<void> {
+	const handle = activeNetworkCaptures.get(tabId);
+	if (!handle) return;
+	activeNetworkCaptures.delete(tabId);
+	clearTimeout(handle.timer);
+	handle.unsubscribe();
+	try {
+		await sendToTab(tabId, "Network.disable", {});
+	} catch (err) {
+		console.warn("[HTR NControl] Network.disable failed:", err);
+	}
+	await detachShared(tabId);
+}
+
+/**
+ * Arm a bounded Chrome network-capture window on a tab. Attaches the debugger
+ * via the shared refcounted manager, enables the CDP Network domain, streams
+ * request/response/finished events into a NetworkCaptureBuffer, records each
+ * completed entry, and auto-detaches after a self-held timer. Never a
+ * permanent attach. Firefox (no chrome.debugger) is handled by the caller as
+ * a no-op ack, since webRequest capture there is always-on.
+ */
+async function handleNetworkCapture(
+	tabId: number,
+	payload: Command,
+): Promise<void> {
+	// Firefox: no debugger. webRequest capture is always-on (see index.ts), so
+	// arming is a no-op — just ack.
+	if (typeof chrome.debugger === "undefined") {
+		sendToNative({
+			type: "command_result",
+			tabId,
+			payload: {
+				id: payload.id,
+				success: true,
+				data: { armed: true, transport: "webRequest" },
+			} as CommandResult,
+		});
+		return;
+	}
+
+	const durationMs = clampDuration(
+		(payload.options?.durationMs as number | undefined) ?? undefined,
+	);
+
+	// Re-arming an already-open window: extend it rather than double-attach.
+	const existing = activeNetworkCaptures.get(tabId);
+	if (existing) {
+		clearTimeout(existing.timer);
+		existing.timer = setTimeout(
+			() => void stopNetworkCapture(tabId),
+			durationMs,
+		);
+		sendToNative({
+			type: "command_result",
+			tabId,
+			payload: {
+				id: payload.id,
+				success: true,
+				data: { armed: true, durationMs, transport: "cdp" },
+			} as CommandResult,
+		});
+		return;
+	}
+
+	try {
+		await attachShared(tabId);
+		await sendToTab(tabId, "Network.enable", {});
+	} catch (err) {
+		// Detach the hold we may have taken, then fail loudly.
+		await detachShared(tabId).catch(() => {});
+		replyError(
+			tabId,
+			payload.id,
+			`failed to arm network capture: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		return;
+	}
+
+	const buffer = new NetworkCaptureBuffer();
+	const unsubscribe = onDebuggerEvent((source, method, params) => {
+		if (source.tabId !== tabId) return;
+		switch (method) {
+			case "Network.requestWillBeSent":
+				buffer.onRequestWillBeSent(params as never);
+				break;
+			case "Network.responseReceived":
+				buffer.onResponseReceived(params as never);
+				break;
+			case "Network.loadingFinished": {
+				const entry = buffer.onLoadingFinished(params as never);
+				if (entry) void recordCompletedRequest(tabId, entry);
+				break;
+			}
+			case "Network.loadingFailed": {
+				const entry = buffer.onLoadingFailed(params as never);
+				if (entry) void recordNetworkEntry(tabId, entry);
+				break;
+			}
+		}
+	});
+
+	const timer = setTimeout(() => void stopNetworkCapture(tabId), durationMs);
+	activeNetworkCaptures.set(tabId, { buffer, unsubscribe, timer });
+
+	sendToNative({
+		type: "command_result",
+		tabId,
+		payload: {
+			id: payload.id,
+			success: true,
+			data: { armed: true, durationMs, transport: "cdp" },
+		} as CommandResult,
+	});
 }
 
 // ─── Navigation with load-wait ────────────────────────────────────
@@ -981,10 +1220,13 @@ async function sendCommandToTab(
 		await handleDebuggerEval(tabId, payload);
 		return;
 	}
+	if (payload.action === "networkCapture") {
+		await handleNetworkCapture(tabId, payload);
+		return;
+	}
 	// On Chrome, route `evaluate` through CDP so the script runs in the page's
 	// main world (not the content script's isolated world) and isTrusted, with
 	// no `new Function` CSP issues. On Firefox `chrome.debugger` is undefined,
-	// so the content-script `new Function` path handles it there.
 	if (payload.action === "evaluate" && typeof chrome.debugger !== "undefined") {
 		await handleDebuggerEval(tabId, payload);
 		return;
