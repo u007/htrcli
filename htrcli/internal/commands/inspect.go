@@ -49,6 +49,42 @@ var findCmd = &cobra.Command{
 	},
 }
 
+var findAllCmd = &cobra.Command{
+	Use:   "findAll <selector>",
+	Short: "Find all elements matching selector",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if UseCDP() {
+			return runInspectCDP("findAll", args[0], "")
+		}
+		c := GetClient()
+		tabID, err := GetTabID()
+		if err != nil {
+			return err
+		}
+		result, err := c.ExecuteCommand(tabID, api.Command{
+			ID:     "1",
+			Action: "findAll",
+			Target: parseSelector(args[0]),
+		})
+		if err != nil {
+			return err
+		}
+
+		if output.JSONOutput {
+			output.PrintJSON(result)
+			return nil
+		}
+
+		if result.Data != nil {
+			output.PrintJSON(result.Data)
+		} else {
+			fmt.Printf("No elements found: %s\n", args[0])
+		}
+		return nil
+	},
+}
+
 var getTextCmd = &cobra.Command{
 	Use:   "text <selector>",
 	Short: "Get text content of element",
@@ -712,6 +748,7 @@ func hashPreviewURL(url string) int {
 
 func init() {
 	rootCmd.AddCommand(findCmd)
+	rootCmd.AddCommand(findAllCmd)
 	rootCmd.AddCommand(getTextCmd)
 	rootCmd.AddCommand(getValueCmd)
 	rootCmd.AddCommand(getAttrCmd)
