@@ -1,5 +1,5 @@
 // Element information captured during interactions
-import type { Command } from "./commands";
+import type { Command, TargetSelector } from "./commands";
 export interface ElementInfo {
 	tag: string;
 	text: string; // Button/link text content
@@ -127,7 +127,11 @@ export type MessageType =
 	// Server/WS path relays trusted (CDP) click/pressKey/type to the background,
 	// which owns the debugger connection. The content script sends this and
 	// awaits the CommandResult the background produces.
-	| "CDP_INPUT";
+	| "CDP_INPUT"
+	// Annotate elements on the page (numbered overlay boxes).
+	| "ANNOTATE_ELEMENTS"
+	// Clear the numbered annotation overlay.
+	| "CLEAR_ANNOTATIONS";
 
 // Base message structure
 export interface BaseMessage {
@@ -252,6 +256,17 @@ export interface HideHighlightMessage extends BaseMessage {
 	type: "HIDE_HIGHLIGHT";
 }
 
+// Annotate elements on the page (numbered overlay boxes).
+export interface AnnotateElementsMessage {
+	type: "ANNOTATE_ELEMENTS";
+	targets: TargetSelector[];
+}
+
+// Clear the numbered annotation overlay.
+export interface ClearAnnotationsMessage {
+	type: "CLEAR_ANNOTATIONS";
+}
+
 // Connection status message (background → sidepanel)
 export interface ConnectionStatusMessage extends BaseMessage {
 	type: "CONNECTION_STATUS";
@@ -278,7 +293,6 @@ export interface CdpInputMessage extends BaseMessage {
 	command: Command;
 }
 
-// Union type for all messages
 export type RecordingMessage =
 	| StartRecordingMessage
 	| StopRecordingMessage
@@ -298,6 +312,8 @@ export type RecordingMessage =
 	| ContentScriptReadyMessage
 	| HighlightElementMessage
 	| HideHighlightMessage
+	| AnnotateElementsMessage
+	| ClearAnnotationsMessage
 	| ConnectionStatusMessage
 	| CdpInputMessage
 	| ConsoleEntryMessage

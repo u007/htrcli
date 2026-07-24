@@ -7,6 +7,7 @@
 
 import type { Command, CommandResult } from "../types/commands";
 import type {
+	AnnotateElementsMessage,
 	ClickEventMessage,
 	ConsoleEntry,
 	DialogEntry,
@@ -21,7 +22,16 @@ import {
 	connect as connectRemote,
 	disconnect as disconnectRemote,
 } from "./connectionManager";
-import { hideHighlight, removeHighlight, showHighlight } from "./highlighter";
+import { findAllElements } from "./elementFinder";
+import type { AnnotationBox } from "./highlighter";
+import {
+	hideHighlight,
+	removeAnnotations,
+	removeHighlight,
+	showAnnotations,
+	showHighlight,
+	toAnnotationBox,
+} from "./highlighter";
 import {
 	flushPendingInputs,
 	startInputTracking,
@@ -305,6 +315,38 @@ function handleMessage(
 
 		case "HIDE_HIGHLIGHT":
 			hideHighlight();
+			sendResponse({ success: true });
+			break;
+
+		case "ANNOTATE_ELEMENTS": {
+			const annMsg = message as AnnotateElementsMessage;
+			try {
+				const boxes: AnnotationBox[] = [];
+				let n = 1;
+				for (const target of annMsg.targets) {
+					for (const el of findAllElements(target)) {
+						boxes.push(
+							toAnnotationBox(
+								el.getBoundingClientRect(),
+								window.scrollX,
+								window.scrollY,
+								n,
+							),
+						);
+						n += 1;
+					}
+				}
+				showAnnotations(boxes);
+				sendResponse({ success: true, count: boxes.length });
+			} catch (error) {
+				console.warn("[HTR NControl] Failed to annotate elements:", error);
+				sendResponse({ success: false, error: String(error) });
+			}
+			break;
+		}
+
+		case "CLEAR_ANNOTATIONS":
+			removeAnnotations();
 			sendResponse({ success: true });
 			break;
 

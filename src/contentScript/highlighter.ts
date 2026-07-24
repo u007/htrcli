@@ -121,3 +121,101 @@ export function getHighlightedElementSelector(element: Element): string | null {
 
 	return null;
 }
+
+// ─── Annotation Overlay (absolute-positioned, document-relative) ─────
+// Unlike showHighlight (which is position:fixed for a live recording
+// overlay), these markers are position:absolute so they scroll with the
+// page and land in the correct place in every segment of a full-page
+// scroll-stitch capture.
+
+export interface AnnotationBox {
+	number: number;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+let annotationContainer: HTMLDivElement | null = null;
+
+/**
+ * Convert a getBoundingClientRect() (viewport-relative) into document-
+ * absolute coordinates by adding the current scroll offset, and tag it
+ * with a marker number.
+ */
+export function toAnnotationBox(
+	rect: DOMRect,
+	scrollX: number,
+	scrollY: number,
+	number: number,
+): AnnotationBox {
+	return {
+		number,
+		x: rect.left + scrollX,
+		y: rect.top + scrollY,
+		width: rect.width,
+		height: rect.height,
+	};
+}
+
+/** Draw numbered overlay boxes. Replaces any existing annotation overlay. */
+export function showAnnotations(boxes: AnnotationBox[]): void {
+	removeAnnotations();
+
+	const container = document.createElement("div");
+	container.id = "htrncontrol-annotations";
+	container.setAttribute("data-htrncontrol-ignore", "true");
+	Object.assign(container.style, {
+		position: "absolute",
+		top: "0",
+		left: "0",
+		width: "0",
+		height: "0",
+		pointerEvents: "none",
+		zIndex: "2147483647",
+	});
+
+	for (const b of boxes) {
+		const rect = document.createElement("div");
+		Object.assign(rect.style, {
+			position: "absolute",
+			left: `${b.x}px`,
+			top: `${b.y}px`,
+			width: `${b.width}px`,
+			height: `${b.height}px`,
+			border: "2px solid #ef4444",
+			boxSizing: "border-box",
+			pointerEvents: "none",
+		});
+
+		const label = document.createElement("div");
+		label.textContent = String(b.number);
+		Object.assign(label.style, {
+			position: "absolute",
+			left: `${b.x}px`,
+			top: `${b.y}px`,
+			transform: "translateY(-100%)",
+			background: "#ef4444",
+			color: "#fff",
+			font: "bold 12px sans-serif",
+			padding: "1px 4px",
+			borderRadius: "3px",
+			pointerEvents: "none",
+			whiteSpace: "nowrap",
+		});
+
+		container.appendChild(rect);
+		container.appendChild(label);
+	}
+
+	document.body.appendChild(container);
+	annotationContainer = container;
+}
+
+/** Remove the annotation overlay from the DOM. */
+export function removeAnnotations(): void {
+	if (annotationContainer?.parentNode) {
+		annotationContainer.parentNode.removeChild(annotationContainer);
+	}
+	annotationContainer = null;
+}
