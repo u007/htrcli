@@ -12,6 +12,11 @@ import (
 
 // parseSelector converts a string argument into a TargetSelector.
 func parseSelector(arg string) *api.TargetSelector {
+	// Element ref (@eN) — must be checked first as it's the whole selector.
+	if strings.HasPrefix(arg, "@") && len(arg) > 2 && arg[1] == 'e' && arg[2] >= '0' && arg[2] <= '9' {
+		return &api.TargetSelector{Ref: arg}
+	}
+
 	// Check for prefix patterns.
 	if strings.HasPrefix(arg, "name=") {
 		return &api.TargetSelector{Name: strings.TrimPrefix(arg, "name=")}

@@ -21,6 +21,7 @@ type TargetSelector struct {
 	All           *bool  `json:"all,omitempty"`
 	Visible       *bool  `json:"visible,omitempty"`
 	Enabled       *bool  `json:"enabled,omitempty"`
+	Ref           string `json:"ref,omitempty"`
 }
 
 // Command represents a remote control command to execute on a browser tab.

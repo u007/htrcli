@@ -88,3 +88,21 @@ func TestFormatUptime(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSelector_Ref(t *testing.T) {
+	s := parseSelector("@e7")
+	if s.Ref != "@e7" {
+		t.Errorf("expected Ref '@e7', got %q (selector=%q)", s.Ref, s.Selector)
+	}
+	if s.Selector != "" {
+		t.Errorf("ref arg must not populate Selector, got %q", s.Selector)
+	}
+}
+
+func TestParseSelector_RefLeavesRealSelectorsAlone(t *testing.T) {
+	// An email like "@" mid-string is not a ref; only a leading @ is.
+	s := parseSelector("input[name=email]")
+	if s.Ref != "" {
+		t.Errorf("expected no Ref for a CSS selector, got %q", s.Ref)
+	}
+}

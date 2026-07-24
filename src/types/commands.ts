@@ -59,6 +59,9 @@ export interface TargetSelector {
 	enabled?: boolean;
 
 	// ─── Wait options ──────────────────────────────────────────────
+	/** Persistent element ref (@e1, @e2, ...) minted by a prior find --ref */
+	ref?: string;
+
 	/** Wait for element to appear in DOM (default: false) */
 	waitForAppear?: boolean;
 	/** Timeout in ms for wait (default: 5000) */
@@ -82,6 +85,8 @@ export interface RemoteElementInfo {
 	enabled?: boolean;
 	boundingBox?: BoundingBox;
 	attributes?: Record<string, string>;
+	/** Persistent element ref (@e1, @e2, ...) if minted via find --ref */
+	ref?: string;
 }
 
 export interface BoundingBox {
