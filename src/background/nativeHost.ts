@@ -29,6 +29,7 @@ import { NetworkCaptureBuffer } from "./networkCapture";
 import { addRules, removeRules } from "./networkMock";
 import { addRulesFirefox, removeRulesFirefox } from "./networkMockFirefox";
 import type { NetworkMockRule } from "./networkMockMatch";
+import { resolveAndSetFiles } from "./uploadFiles";
 
 const HOST_NAME = "com.htrcontrol.host";
 const RECONNECT_BASE_MS = 1000;
@@ -654,6 +655,97 @@ async function handleFetchInPage(
 		});
 	} catch (err) {
 		replyError(tabId, id, err instanceof Error ? err.message : String(err));
+	}
+}
+
+// Handles the uploadFiles action by resolving the CSS selector to a DOM nodeId
+// via chrome.debugger DOM.* calls and setting files via DOM.setFileInputFiles.
+// Firefox (no chrome.debugger) gets an explicit unsupported error.
+async function handleUploadFiles(
+	tabId: number,
+	payload: Command,
+): Promise<void> {
+	if (typeof chrome.debugger === "undefined") {
+		replyError(
+			tabId,
+			payload.id,
+			"upload is not supported on Firefox (chrome.debugger API unavailable). Use the --cdp transport against Chrome instead.",
+		);
+		return;
+	}
+	const selector = payload.target?.selector;
+	const files = (payload.options?.files as string[]) ?? [];
+	if (payload.target?.ref) {
+		replyError(
+			tabId,
+			payload.id,
+			"upload using @eN refs is only supported on the --cdp transport. On the extension transport, use a CSS selector.",
+		);
+		return;
+	}
+	if (!selector) {
+		replyError(
+			tabId,
+			payload.id,
+			"upload requires a CSS selector (target.selector)",
+		);
+		return;
+	}
+	if (files.length === 0) {
+		replyError(tabId, payload.id, "no files specified for upload");
+		return;
+	}
+
+	try {
+		await chrome.debugger.attach({ tabId }, "1.3");
+		const send = async (
+			method: string,
+			params: Record<string, unknown>,
+		): Promise<Record<string, unknown>> => {
+			return new Promise((resolve, reject) => {
+				chrome.debugger.sendCommand(
+					{ tabId },
+					method,
+					params as Record<string, unknown>,
+					(result) => {
+						if (chrome.runtime.lastError) {
+							reject(
+								new Error(
+									chrome.runtime.lastError.message ??
+										String(chrome.runtime.lastError),
+								),
+							);
+						} else {
+							resolve(result as Record<string, unknown>);
+						}
+					},
+				);
+			});
+		};
+
+		await resolveAndSetFiles(send, selector, files);
+
+		sendToNative({
+			type: "command_result",
+			tabId,
+			payload: {
+				id: payload.id,
+				success: true,
+				data: { files, selector },
+			} as CommandResult,
+		});
+	} catch (err) {
+		replyError(
+			tabId,
+			payload.id,
+			err instanceof Error ? err.message : String(err),
+		);
+	} finally {
+		try {
+			await chrome.debugger.detach({ tabId });
+		} catch {
+			// Ignore detach errors — the tab may already be gone.
+		}
 	}
 }
 
@@ -1454,6 +1546,10 @@ async function sendCommandToTab(
 	}
 	if (payload.action === "networkMock" || payload.action === "networkUnmock") {
 		await handleNetworkMock(tabId, payload);
+		return;
+	}
+	if (payload.action === "uploadFiles") {
+		await handleUploadFiles(tabId, payload);
 		return;
 	}
 	// On Chrome, route `evaluate` through CDP so the script runs in the page's

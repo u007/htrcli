@@ -150,6 +150,8 @@ export type CommandAction =
 	| "evaluate"
 	| "fetch"
 	| "printToPDF"
+	// ─── Upload (background-handled via chrome.debugger) ──────────
+	| "uploadFiles"
 	// ─── Highlight ──────────────────────────────────────────────────
 	| "highlight"
 	| "unhighlight"

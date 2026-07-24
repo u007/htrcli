@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/u007/htrcli/internal/api"
 	"github.com/u007/htrcli/internal/cdp"
 	"github.com/u007/htrcli/internal/output"
 )
@@ -108,10 +109,45 @@ func runUploadCDP(target string, files []string) error {
 	return nil
 }
 
-// runUploadExt is implemented in Task 8. Temporary stub; DELETE when Task 8
-// adds the real extension-transport upload.
+// runUploadExt sends an uploadFiles command via the extension daemon, which
+// handles the chrome.debugger attach -> DOM.* resolve -> DOM.setFileInputFiles
+// flow. @eN refs are not supported on the extension transport (CDP only).
 func runUploadExt(target string, files []string) error {
-	return fmt.Errorf("upload on the extension transport is added in a later task; use --cdp for now")
+	sel := parseSelector(target)
+	if sel.Ref != "" {
+		return fmt.Errorf("upload using @eN refs is only supported on the --cdp transport; use a CSS selector or --cdp")
+	}
+	if sel.Selector == "" {
+		return fmt.Errorf("upload on the extension transport supports CSS selectors only (got %q)", target)
+	}
+	c := GetClient()
+	tabID, err := GetTabID()
+	if err != nil {
+		return err
+	}
+	// Build []any so the JSON body carries a plain string array under files.
+	fileList := make([]any, len(files))
+	for i, f := range files {
+		fileList[i] = f
+	}
+	result, err := c.ExecuteCommand(tabID, api.Command{
+		ID:      "1",
+		Action:  "uploadFiles",
+		Target:  sel,
+		Options: map[string]any{"files": fileList},
+	})
+	if err != nil {
+		return err
+	}
+	if err := commandError(result); err != nil {
+		return err
+	}
+	if output.JSONOutput {
+		output.PrintJSON(result)
+		return nil
+	}
+	fmt.Printf("Uploaded %d file(s) to %s\n", len(files), target)
+	return nil
 }
 
 func init() {
