@@ -1,7 +1,12 @@
 package commands
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/u007/htrcli/internal/api"
 )
 
 func TestParseSelector_CSS(t *testing.T) {
@@ -104,5 +109,35 @@ func TestParseSelector_RefLeavesRealSelectorsAlone(t *testing.T) {
 	s := parseSelector("input[name=email]")
 	if s.Ref != "" {
 		t.Errorf("expected no Ref for a CSS selector, got %q", s.Ref)
+	}
+}
+
+func TestFindWithRefSetsAssignRefOption(t *testing.T) {
+	var gotAssignRef bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req api.CommandRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		if req.Command.Options != nil {
+			gotAssignRef, _ = req.Command.Options["assignRef"].(bool)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(api.ApiResponse{
+			OK:   true,
+			Data: api.CommandResult{ID: "1", Success: true, Data: map[string]any{"ref": "@e1", "tag": "button"}},
+		})
+	}))
+	defer server.Close()
+
+	client = api.NewClient(server.URL, "")
+	tabTarget = ""
+	transportFlag = "ext"
+	findRef = true
+	defer func() { client = nil; transportFlag = ""; findRef = false }()
+
+	if err := findCmd.RunE(findCmd, []string{"#go"}); err != nil {
+		t.Fatalf("find --ref RunE: %v", err)
+	}
+	if !gotAssignRef {
+		t.Fatalf("expected assignRef=true option to be sent")
 	}
 }

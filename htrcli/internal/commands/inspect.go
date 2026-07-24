@@ -13,12 +13,19 @@ import (
 	"github.com/u007/htrcli/internal/output"
 )
 
+// findRef, when set by --ref, makes find/findAll mint a persistent element
+// ref ("@e7") the CLI can pass to later commands as the selector.
+var findRef bool
+
 var findCmd = &cobra.Command{
 	Use:   "find <selector>",
 	Short: "Find element and return info",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
+			if findRef {
+				return runFindRefCDP(args[0], false)
+			}
 			return runInspectCDP("find", args[0], "")
 		}
 		c := GetClient()
@@ -26,12 +33,19 @@ var findCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		result, err := c.ExecuteCommand(tabID, api.Command{
+		cmdPayload := api.Command{
 			ID:     "1",
 			Action: "find",
 			Target: parseSelector(args[0]),
-		})
+		}
+		if findRef {
+			cmdPayload.Options = map[string]any{"assignRef": true}
+		}
+		result, err := c.ExecuteCommand(tabID, cmdPayload)
 		if err != nil {
+			return err
+		}
+		if err := commandError(result); err != nil {
 			return err
 		}
 
@@ -55,6 +69,9 @@ var findAllCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
+			if findRef {
+				return runFindRefCDP(args[0], true)
+			}
 			return runInspectCDP("findAll", args[0], "")
 		}
 		c := GetClient()
@@ -62,12 +79,19 @@ var findAllCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		result, err := c.ExecuteCommand(tabID, api.Command{
+		cmdPayload := api.Command{
 			ID:     "1",
 			Action: "findAll",
 			Target: parseSelector(args[0]),
-		})
+		}
+		if findRef {
+			cmdPayload.Options = map[string]any{"assignRef": true}
+		}
+		result, err := c.ExecuteCommand(tabID, cmdPayload)
 		if err != nil {
+			return err
+		}
+		if err := commandError(result); err != nil {
 			return err
 		}
 
@@ -748,7 +772,9 @@ func hashPreviewURL(url string) int {
 
 func init() {
 	rootCmd.AddCommand(findCmd)
+	findCmd.Flags().BoolVar(&findRef, "ref", false, "mint a persistent element ref (@e7) instead of resolving inline")
 	rootCmd.AddCommand(findAllCmd)
+	findAllCmd.Flags().BoolVar(&findRef, "ref", false, "mint persistent element refs for every match")
 	rootCmd.AddCommand(getTextCmd)
 	rootCmd.AddCommand(getValueCmd)
 	rootCmd.AddCommand(getAttrCmd)
@@ -764,4 +790,10 @@ func init() {
 	rootCmd.AddCommand(printPDFCmd)
 	downloadReceiptsCmd.Flags().String("out", os.ExpandEnv("$HOME/personal/2025tax/receipts/aia"), "Output directory for PDFs")
 	rootCmd.AddCommand(downloadReceiptsCmd)
+}
+
+// runFindRefCDP is implemented in Task 6 (cdp_ref.go). Temporary stub so this
+// task compiles on its own; DELETE this stub when Task 6 adds the real one.
+func runFindRefCDP(selector string, all bool) error {
+	return errUnsupportedCDP("find --ref")
 }
