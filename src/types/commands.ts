@@ -168,7 +168,9 @@ export type CommandAction =
 	 *  user's `evaluate` action surface intact. */
 	| "evaluateViaCdp"
 	// ─── Network Capture (background-handled via CDP / webRequest) ──
-	| "networkCapture";
+	| "networkCapture"
+	// ─── Dialog Handling (background-handled via CDP / content-script override) ──
+	| "dialogPolicy";
 
 // ─── Command ────────────────────────────────────────────────────────
 

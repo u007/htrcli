@@ -37,6 +37,7 @@ import {
 	setScreenshotCapturer,
 	setStatusListener,
 	startNativeHost,
+	stopDialogCapture,
 	stopNetworkCapture,
 } from "./nativeHost";
 import { startWebRequestCapture } from "./networkWebRequest";
@@ -1427,6 +1428,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 	// Tear down any active network capture window (Chrome CDP) on the closing tab.
 	void stopNetworkCapture(tabId);
+	void stopDialogCapture(tabId);
 
 	if (currentSession?.isRecording) {
 		const index = currentSession.trackedTabIds.indexOf(tabId);

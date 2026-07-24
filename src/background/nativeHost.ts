@@ -18,8 +18,10 @@ import {
 	onDebuggerEvent,
 	sendToTab,
 } from "./debuggerManager";
+import { type DialogPolicy, resolveDialog } from "./dialogPolicy";
 import {
 	getGeneration,
+	recordDialogEntry,
 	recordNetworkEntry,
 	setLastKnownGeneration,
 } from "./eventStore";
@@ -58,9 +60,21 @@ interface NetworkCaptureHandle {
 
 const activeNetworkCaptures = new Map<number, NetworkCaptureHandle>();
 
+interface DialogCaptureHandle {
+	unsubscribe: () => void;
+	timer: ReturnType<typeof setTimeout>;
+}
+
+const activeDialogCaptures = new Map<number, DialogCaptureHandle>();
+
 function clampDuration(ms: number | undefined): number {
 	const v = typeof ms === "number" && Number.isFinite(ms) ? ms : 10000;
 	return Math.min(120000, Math.max(1000, v));
+}
+
+function clampDialogDuration(ms: number | undefined): number {
+	const v = typeof ms === "number" && Number.isFinite(ms) ? ms : 30000;
+	return Math.min(300000, Math.max(1000, v));
 }
 
 // ─── Public API ────────────────────────────────────────────────────
@@ -762,6 +776,145 @@ async function handleNetworkCapture(
 	});
 }
 
+// ─── Dialog Handling (CDP / content-script override) ──────────────
+
+/**
+ * Arm a bounded Chrome dialog-handling window on a tab. Attaches the debugger
+ * via the shared refcounted manager, enables the CDP Page domain, and answers
+ * each Page.javascriptDialogOpening per the armed policy, logging a DialogEntry.
+ * Auto-detaches after a self-held timer. Never a permanent attach. Firefox (no
+ * chrome.debugger) is handled by the caller: the policy is forwarded to the
+ * MAIN-world override in the content script instead.
+ */
+async function handleDialogPolicyChrome(
+	tabId: number,
+	payload: Command,
+	policy: DialogPolicy,
+): Promise<void> {
+	const durationMs = clampDialogDuration(
+		payload.options?.durationMs as number | undefined,
+	);
+
+	// Re-arming: replace the policy + extend the window rather than double-attach.
+	const existing = activeDialogCaptures.get(tabId);
+	if (existing) {
+		existing.unsubscribe();
+		clearTimeout(existing.timer);
+		activeDialogCaptures.delete(tabId);
+	}
+
+	try {
+		await attachShared(tabId);
+		await sendToTab(tabId, "Page.enable", {});
+	} catch (err) {
+		await detachShared(tabId).catch(() => {});
+		replyError(
+			tabId,
+			payload.id,
+			`failed to arm dialog handling: ${err instanceof Error ? err.message : String(err)}`,
+		);
+		return;
+	}
+
+	const unsubscribe = onDebuggerEvent((source, method, params) => {
+		if (source.tabId !== tabId) return;
+		if (method !== "Page.javascriptDialogOpening") return;
+		const p = params as { type: string; message: string };
+		const dialogType = (
+			["alert", "confirm", "prompt", "beforeunload"].includes(p.type)
+				? p.type
+				: "alert"
+		) as "alert" | "confirm" | "prompt" | "beforeunload";
+		const { accept, promptText, entry } = resolveDialog(
+			policy,
+			dialogType,
+			p.message,
+		);
+		void sendToTab(tabId, "Page.handleJavaScriptDialog", {
+			accept,
+			...(promptText !== undefined ? { promptText } : {}),
+		}).catch((err) => {
+			console.warn("[HTR NControl] handleJavaScriptDialog failed:", err);
+		});
+		void recordDialogEntry(tabId, entry);
+	});
+
+	const timer = setTimeout(() => void stopDialogCapture(tabId), durationMs);
+	activeDialogCaptures.set(tabId, { unsubscribe, timer });
+
+	sendToNative({
+		type: "command_result",
+		tabId,
+		payload: {
+			id: payload.id,
+			success: true,
+			data: { armed: true, durationMs, transport: "cdp" },
+		} as CommandResult,
+	});
+}
+
+// Tear down a dialog-handling window. Idempotent.
+export async function stopDialogCapture(tabId: number): Promise<void> {
+	const handle = activeDialogCaptures.get(tabId);
+	if (!handle) return;
+	activeDialogCaptures.delete(tabId);
+	clearTimeout(handle.timer);
+	handle.unsubscribe();
+	try {
+		await sendToTab(tabId, "Page.disable", {});
+	} catch (err) {
+		console.warn("[HTR NControl] Page.disable failed:", err);
+	}
+	await detachShared(tabId);
+}
+
+/**
+ * Entry point for the dialogPolicy command. Parses the policy, then dispatches
+ * to the CDP path (Chrome) or forwards the policy to the content-script MAIN-
+ * world override (Firefox).
+ */
+async function handleDialogPolicy(
+	tabId: number,
+	payload: Command,
+): Promise<void> {
+	const action = (payload.options?.action as string | undefined) ?? "accept";
+	if (action !== "accept" && action !== "dismiss" && action !== "respond") {
+		replyError(tabId, payload.id, `invalid dialog action: ${action}`);
+		return;
+	}
+	const policy: DialogPolicy = {
+		action,
+		text: payload.options?.text as string | undefined,
+	};
+
+	if (typeof chrome.debugger === "undefined") {
+		// Firefox: forward the policy to the content script, which relays it to
+		// the MAIN-world override. Ack after the content script acknowledges.
+		chrome.tabs.sendMessage(tabId, { type: "DIALOG_POLICY", policy }, () => {
+			if (chrome.runtime.lastError) {
+				replyError(
+					tabId,
+					payload.id,
+					`content script not ready to arm dialog policy: ${chrome.runtime.lastError.message}`,
+				);
+				return;
+			}
+			sendToNative({
+				type: "command_result",
+				tabId,
+				payload: {
+					id: payload.id,
+					success: true,
+					data: { armed: true, transport: "override" },
+				} as CommandResult,
+			});
+		});
+		return;
+	}
+
+	await handleDialogPolicyChrome(tabId, payload, policy);
+}
+
 // ─── Navigation with load-wait ────────────────────────────────────
 // Navigation actions are handled here (not in the content script) because the
 // content script is destroyed by the navigation and can only reply before the
@@ -1222,6 +1375,10 @@ async function sendCommandToTab(
 	}
 	if (payload.action === "networkCapture") {
 		await handleNetworkCapture(tabId, payload);
+		return;
+	}
+	if (payload.action === "dialogPolicy") {
+		await handleDialogPolicy(tabId, payload);
 		return;
 	}
 	// On Chrome, route `evaluate` through CDP so the script runs in the page's
