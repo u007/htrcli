@@ -65,6 +65,29 @@ export interface RecordingSession {
 // - "unavailable": permanent — host not installed/forbidden, or max retries exceeded
 export type ConnectionMode = "native" | "disconnected" | "unavailable";
 
+// Console capture levels forwarded from the main-world wrapper.
+export type ConsoleLevel = "log" | "warn" | "error" | "info" | "debug";
+
+// Structured console payload captured in the page's MAIN world.
+export interface ConsoleEntry {
+	level: ConsoleLevel;
+	args: string[];
+	source?: string;
+}
+
+// Structured network payload captured via CDP (Chrome) or webRequest (Firefox).
+export interface NetworkEntry {
+	requestId: string;
+	url: string;
+	method: string;
+	status?: number;
+	requestHeaders?: Record<string, string>;
+	responseHeaders?: Record<string, string>;
+	bodyTruncated?: boolean; // true if the response body was capped
+	body?: string; // response body, omitted on Firefox (webRequest can't cheaply read it)
+	durationMs?: number;
+}
+
 // Message types for communication between components
 export type MessageType =
 	| "START_RECORDING"
@@ -90,6 +113,7 @@ export type MessageType =
 	| "CONNECTION_STATUS"
 	| "RECONNECT_NATIVE"
 	| "CDP_EVAL"
+	| "CONSOLE_ENTRY"
 	// Server/WS path relays trusted (CDP) click/pressKey/type to the background,
 	// which owns the debugger connection. The content script sends this and
 	// awaits the CommandResult the background produces.
@@ -224,6 +248,12 @@ export interface ConnectionStatusMessage extends BaseMessage {
 	mode: ConnectionMode;
 }
 
+// MAIN-world console entry forwarded to the background for durable buffering.
+export interface ConsoleEntryMessage extends BaseMessage {
+	type: "CONSOLE_ENTRY";
+	entry: ConsoleEntry;
+}
+
 // Content script → background: relay a trusted (CDP) input command (click /
 // pressKey / type) to the background, which owns the debugger connection.
 export interface CdpInputMessage extends BaseMessage {
@@ -252,7 +282,8 @@ export type RecordingMessage =
 	| HighlightElementMessage
 	| HideHighlightMessage
 	| ConnectionStatusMessage
-	| CdpInputMessage;
+	| CdpInputMessage
+	| ConsoleEntryMessage;
 
 // Export format types
 export interface ExportedStep {
