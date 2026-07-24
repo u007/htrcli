@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,6 +17,30 @@ import (
 // findRef, when set by --ref, makes find/findAll mint a persistent element
 // ref ("@e7") the CLI can pass to later commands as the selector.
 var findRef bool
+
+var (
+	screenshotFullPage bool
+	screenshotAnnotate string
+)
+
+// parseAnnotateSelectors splits a comma-separated string of selectors into
+// api.TargetSelector values, trimming whitespace on each token. Returns nil
+// for empty/whitespace input.
+func parseAnnotateSelectors(s string) []api.TargetSelector {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	var out []api.TargetSelector
+	for _, tok := range strings.Split(s, ",") {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		out = append(out, *parseSelector(tok))
+	}
+	return out
+}
 
 var findCmd = &cobra.Command{
 	Use:   "find <selector>",
@@ -218,20 +243,24 @@ var snapshotCmd = &cobra.Command{
 
 var screenshotCmd = &cobra.Command{
 	Use:   "screenshot [path]",
-	Short: "Take screenshot (saves PNG)",
+	Short: "Take screenshot (viewport, --full-page, and/or --annotate)",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if UseCDP() {
-			path := ""
-			if len(args) > 0 {
-				path = args[0]
-			}
-			return runScreenshotCDP(path)
+		path := ""
+		if len(args) > 0 {
+			path = args[0]
 		}
-		c := GetClient()
+		annotate := parseAnnotateSelectors(screenshotAnnotate)
 
-		// Get screenshot data.
-		data, err := c.GetScreenshot()
+		if UseCDP() {
+			return runScreenshotCDP(path, screenshotFullPage, annotate)
+		}
+
+		c := GetClient()
+		data, err := c.GetScreenshotOpts(api.ScreenshotOptions{
+			FullPage: screenshotFullPage,
+			Annotate: annotate,
+		})
 		if err != nil {
 			return err
 		}
@@ -247,23 +276,15 @@ var screenshotCmd = &cobra.Command{
 			return fmt.Errorf("failed to decode screenshot: %w", err)
 		}
 
-		// Determine output path.
-		path := ""
-		if len(args) > 0 {
-			path = args[0]
-		} else {
-			// Use temp file.
-			tmpDir := os.TempDir()
-			filename := fmt.Sprintf("screenshot-%d.png", time.Now().UnixMilli())
-			path = filepath.Join(tmpDir, filename)
+		out := path
+		if out == "" {
+			out = filepath.Join(os.TempDir(), fmt.Sprintf("screenshot-%d.png", time.Now().UnixMilli()))
 		}
-
-		// Write file.
-		if err := os.WriteFile(path, imgData, 0644); err != nil {
+		if err := os.WriteFile(out, imgData, 0644); err != nil {
 			return fmt.Errorf("failed to write screenshot: %w", err)
 		}
 
-		fmt.Printf("Screenshot saved to %s\n", path)
+		fmt.Printf("Screenshot saved to %s\n", out)
 		return nil
 	},
 }
@@ -781,6 +802,8 @@ func init() {
 	rootCmd.AddCommand(getHTMLCmd)
 	rootCmd.AddCommand(snapshotCmd)
 	rootCmd.AddCommand(screenshotCmd)
+	screenshotCmd.Flags().BoolVar(&screenshotFullPage, "full-page", false, "capture the entire scrollable page, not just the viewport")
+	screenshotCmd.Flags().StringVar(&screenshotAnnotate, "annotate", "", "comma-separated selectors to draw numbered overlay boxes on before capture (extension transport only)")
 	rootCmd.AddCommand(pageInfoCmd)
 	rootCmd.AddCommand(evalCmd)
 	rootCmd.AddCommand(commandCmd)

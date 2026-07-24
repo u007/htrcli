@@ -166,3 +166,25 @@ func TestParseUploadFiles_CDPRejectsUnknownRef(t *testing.T) {
 		t.Fatalf("want 'stale ref' in error, got %q", err.Error())
 	}
 }
+
+func TestParseAnnotateSelectors(t *testing.T) {
+	got := parseAnnotateSelectors("button, role=link ,#submit")
+	if len(got) != 3 {
+		t.Fatalf("want 3 selectors, got %d: %+v", len(got), got)
+	}
+	if got[0].Selector != "button" {
+		t.Errorf("got[0].Selector = %q, want button", got[0].Selector)
+	}
+	if got[1].Role != "link" {
+		t.Errorf("got[1].Role = %q, want link (whitespace trimmed)", got[1].Role)
+	}
+	if got[2].Selector != "#submit" {
+		t.Errorf("got[2].Selector = %q, want #submit", got[2].Selector)
+	}
+}
+
+func TestParseAnnotateSelectorsEmpty(t *testing.T) {
+	if got := parseAnnotateSelectors(""); got != nil {
+		t.Fatalf("empty string should yield nil, got %+v", got)
+	}
+}

@@ -195,18 +195,28 @@ func runEvalCDP(expression string) error {
 	return nil
 }
 
-// runScreenshotCDP captures the page via CDP Page.captureScreenshot.
-func runScreenshotCDP(path string) error {
+// runScreenshotCDP captures the page via CDP.
+func runScreenshotCDP(path string, fullPage bool, annotate []api.TargetSelector) error {
+	if len(annotate) > 0 {
+		return errUnsupportedCDP("screenshot --annotate")
+	}
+
 	s, _, err := cdpSession()
 	if err != nil {
 		return err
 	}
 	defer s.Close()
 
-	png, err := cdp.Screenshot(s)
+	var png []byte
+	if fullPage {
+		png, err = cdp.ScreenshotFullPage(s)
+	} else {
+		png, err = cdp.Screenshot(s)
+	}
 	if err != nil {
 		return err
 	}
+
 	out := path
 	if out == "" {
 		out = filepath.Join(os.TempDir(), fmt.Sprintf("screenshot-%d.png", time.Now().UnixMilli()))
