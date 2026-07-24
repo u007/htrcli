@@ -118,33 +118,25 @@ func PortAlive(port int) bool {
 	return err == nil
 }
 
-// StartBrowser launches Chrome detached, waits for the port, persists state.
-// If the port already answers, it records/refreshes state and returns without
-// launching (also covers Chrome's singleton-lock handoff to an existing
-// profile owner).
-func StartBrowser(chromePath string, port int, headless bool) (*BrowserState, error) {
+// launchChrome starts Chrome detached on port with the given profile dir and
+// waits for the debugging port to answer. It does NOT persist any state file —
+// callers record the result where appropriate (browser.json vs contexts.json).
+// If the port already answers it returns pid 0 (an already-running owner, e.g.
+// Chrome's singleton-lock handoff).
+func launchChrome(chromePath string, port int, profileDir string, headless bool) (int, error) {
 	if PortAlive(port) {
-		st, err := ReadState()
-		if err != nil || st == nil {
-			st = &BrowserState{Port: port, StartedAt: time.Now()}
-		}
-		return st, nil
+		return 0, nil
 	}
-	profile, err := ProfileDir()
-	if err != nil {
-		return nil, err
+	if err := os.MkdirAll(profileDir, 0700); err != nil {
+		return 0, fmt.Errorf("creating profile dir: %w", err)
 	}
-	if err := os.MkdirAll(profile, 0700); err != nil {
-		return nil, fmt.Errorf("creating profile dir: %w", err)
-	}
-
-	cmd := exec.Command(chromePath, LaunchArgs(port, profile, headless)...)
+	cmd := exec.Command(chromePath, LaunchArgs(port, profileDir, headless)...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach: survives htrcli exiting
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("launching Chrome %s: %w", chromePath, err)
+		return 0, fmt.Errorf("launching Chrome %s: %w", chromePath, err)
 	}
 	// Reap when Chrome eventually exits so a stopped browser never zombies
-	// against a still-running htrcli daemon process.
+	// against a still-running htrcli process.
 	go func() {
 		if err := cmd.Wait(); err != nil {
 			fmt.Fprintf(os.Stderr, "[htrcli] Chrome exited: %v\n", err)
@@ -154,15 +146,62 @@ func StartBrowser(chromePath string, port int, headless bool) (*BrowserState, er
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if PortAlive(port) {
-			st := &BrowserState{PID: cmd.Process.Pid, Port: port, StartedAt: time.Now(), Headless: headless}
-			if err := writeState(st); err != nil {
-				return nil, err
-			}
-			return st, nil
+			return cmd.Process.Pid, nil
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	return nil, fmt.Errorf("Chrome (pid %d) did not answer on port %d within 15s", cmd.Process.Pid, port)
+	return 0, fmt.Errorf("Chrome (pid %d) did not answer on port %d within 15s", cmd.Process.Pid, port)
+}
+
+// terminateProcess sends SIGTERM and, if needed, SIGKILL to a process that was
+// just started by htrcli. Best-effort only; dead PIDs are treated as success.
+func terminateProcess(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("signalling pid %d: %w", pid, err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				return nil
+			}
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("force-killing pid %d: %w", pid, err)
+	}
+	return nil
+}
+
+// StartBrowser launches the default-profile Chrome, waits for the port, and
+// persists advisory state to browser.json.
+func StartBrowser(chromePath string, port int, headless bool) (*BrowserState, error) {
+	profile, err := ProfileDir()
+	if err != nil {
+		return nil, err
+	}
+	pid, err := launchChrome(chromePath, port, profile, headless)
+	if err != nil {
+		return nil, err
+	}
+	if pid == 0 {
+		// Port already answered by an existing process.
+		st, err := ReadState()
+		if err != nil || st == nil {
+			st = &BrowserState{Port: port, StartedAt: time.Now()}
+		}
+		return st, nil
+	}
+	st := &BrowserState{PID: pid, Port: port, StartedAt: time.Now(), Headless: headless}
+	if err := writeState(st); err != nil {
+		return nil, err
+	}
+	return st, nil
 }
 
 // StopBrowser terminates the recorded PID after verifying its command line

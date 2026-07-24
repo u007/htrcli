@@ -1208,7 +1208,8 @@ Extend `internal/cdp/launch.go` (already launches Chrome) to accept
 (true isolation) or CDP `Target.createBrowserContext` (lighter, in-process,
 Chrome-only). Firefox fallback: a separate Firefox process via
 `-profile <dir>` — no CDP-context equivalent exists on Firefox. New global
-`--context` flag threaded through `internal/commands/root.go`.
+`--context` flag is resolved lazily only when a CDP command actually needs a
+debugging port; extension/HTTP-only commands leave it inert.
 
 **7b. Video recording**
 
@@ -1224,8 +1225,10 @@ htrcli record stop <output.mp4>
 
 Frames flow through the event-buffer POST-back path (same large-binary
 pattern as screenshots) into a temp frame directory; an **external ffmpeg
-dependency** stitches frames into video. This is the single riskiest new
-piece — new external binary dependency, frame-timing/drop concerns.
+dependency** stitches frames into video. If the recording state cannot be
+persisted, the newly spawned recorder is cleaned up rather than left orphaned.
+This is the single riskiest new piece — new external binary dependency,
+frame-timing/drop concerns.
 **Firefox has no stable remote-screencast equivalent — document as
 infeasible on Firefox, not a fallback.** `htrcli health`/`record start`
 must fail with a clear "ffmpeg not found" error rather than hang if the
@@ -1240,7 +1243,8 @@ htrcli trace export <path.zip>
 ```
 
 Mirrors the existing `src/utils/exportZip.ts`/`exportJson.ts` export
-patterns already in the codebase.
+patterns already in the codebase. When a tab is specified, the screenshot is
+captured for that same tab so the zip stays internally consistent.
 
 New: `internal/cdp/context.go`, `internal/cdp/screencast.go`,
 `internal/commands/context.go`, `internal/commands/trace.go`. Modified:

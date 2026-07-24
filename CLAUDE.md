@@ -29,6 +29,9 @@ htrcli install --browser chrome  --extension-id <id>   # register native host (C
 htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
 htrcli serve          # run daemon: HTTP :3845 + Unix socket relay (Chrome+Firefox)
 
+# Video recording requires ffmpeg ≥ 6 on PATH (brew install ffmpeg)
+# Missing ffmpeg produces explicit errors at both record start and stop.
+
 # Utility
 make close           # Kill process on :3845
 ```

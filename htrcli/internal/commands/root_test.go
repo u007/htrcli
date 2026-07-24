@@ -37,3 +37,66 @@ func TestGetTabTarget(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestGetCDPPortDefaultValue(t *testing.T) {
+	contextName = ""
+	contextCDPPort = 0
+	port := GetCDPPort()
+	if port != 9222 {
+		t.Fatalf("expected default port 9222, got %d", port)
+	}
+}
+
+func TestGetCDPPortContextCached(t *testing.T) {
+	contextName = "testctx"
+	contextCDPPort = 9555
+	defer func() { contextName = ""; contextCDPPort = 0 }()
+	port := GetCDPPort()
+	if port != 9555 {
+		t.Fatalf("expected cached context port 9555, got %d", port)
+	}
+}
+
+func TestEnsureContextResolvedLazily(t *testing.T) {
+	contextName = "testctx"
+	contextCDPPort = 0
+	called := false
+	orig := resolveContextFn
+	resolveContextFn = func() error {
+		called = true
+		contextCDPPort = 9666
+		return nil
+	}
+	t.Cleanup(func() {
+		resolveContextFn = orig
+		contextName = ""
+		contextCDPPort = 0
+	})
+	if err := ensureContextResolved(); err != nil {
+		t.Fatalf("ensureContextResolved: %v", err)
+	}
+	if !called {
+		t.Fatal("expected resolver to be called lazily")
+	}
+	if got := GetCDPPort(); got != 9666 {
+		t.Fatalf("expected resolved port 9666, got %d", got)
+	}
+}
+
+func TestPersistentPreRunDoesNotResolveContext(t *testing.T) {
+	contextName = "testctx"
+	contextCDPPort = 0
+	orig := resolveContextFn
+	resolveContextFn = func() error {
+		t.Fatal("resolveContextFn should not be called by PersistentPreRunE")
+		return nil
+	}
+	t.Cleanup(func() {
+		resolveContextFn = orig
+		contextName = ""
+		contextCDPPort = 0
+	})
+	if err := rootCmd.PersistentPreRunE(rootCmd, nil); err != nil {
+		t.Fatalf("PersistentPreRunE: %v", err)
+	}
+}

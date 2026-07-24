@@ -256,6 +256,29 @@ func TestGetScreenshotViewportSendsNoOptions(t *testing.T) {
 	}
 }
 
+func TestGetScreenshotOptsSendsTab(t *testing.T) {
+	var gotQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ApiResponse{OK: true, Data: "QUJD"})
+	}))
+	defer server.Close()
+
+	c := NewClient(server.URL, "")
+	tabID := 7
+	if _, err := c.GetScreenshotOpts(ScreenshotOptions{TabID: &tabID}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	q, err := neturl.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatalf("parse query %q: %v", gotQuery, err)
+	}
+	if q.Get("tab") != "7" {
+		t.Fatalf("tab = %q, want 7", q.Get("tab"))
+	}
+}
+
 func TestNoAuthHeader(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "" {

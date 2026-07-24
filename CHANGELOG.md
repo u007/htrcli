@@ -23,6 +23,8 @@
 
 ### Changed
 
+- **htrcli contexts/recording/trace**: `--context` is now resolved lazily only for CDP commands, `record start` cleans up if state persistence fails, context launches clean up failed registry writes, and screenshot capture follows the requested tab for `trace export` / `screenshot`.
+
 - **ConnectedTabs**: tab list items are now clickable buttons that switch to and focus the target tab's window, improving the multi-window UX (`src/sidepanel/components/ConnectedTabs.tsx`, `src/sidepanel/components/ConnectedTabs.css`)
 - **Firefox manifest**: added `webRequestBlocking` permission required for network mock/block interception (`firefox/vite.config.ts`)
 - **Docs**: updated `GUIDE.md`, `README.md`, `SPEC_HTRCLI.md`, `htrcli/README.md`, `firefox/README.md` — console capture usage, architecture diagrams, and general alignment with the consolidated `htrcli serve` backend

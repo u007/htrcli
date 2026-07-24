@@ -35,7 +35,7 @@
 - Consumes: the existing `eventStore.ts` internals (`BufferedEvent`, `getOrCreateBucket`, `recordConsoleEntry`, `flushPending`).
 - Produces: `NetworkEntry` interface in `recording.ts`; `EventKind = "console" | "network" | "dialog"`; a generic `recordEvent(tabId: number, kind: EventKind, data: BufferedEventData): Promise<void>`; `recordNetworkEntry(tabId: number, entry: NetworkEntry): Promise<void>`. `recordConsoleEntry` keeps its exact existing signature and behavior (now delegating to `recordEvent`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `src/background/eventStore.test.ts` (inside the existing `describe` block, reusing its `installStorageMock`/`__resetEventStoreForTests` setup — check the top of the file for the exact `beforeEach` already present and add these `it` blocks alongside the console ones):
 
@@ -88,12 +88,12 @@ Append to `src/background/eventStore.test.ts` (inside the existing `describe` bl
 
 Add `recordNetworkEntry` to the existing top-of-file import from `./eventStore` (it currently imports `flushPending`, `recordConsoleEntry`, and the test-reset helper).
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun test src/background/eventStore.test.ts`
 Expected: FAIL — `recordNetworkEntry` is not exported from `./eventStore`.
 
-- [ ] **Step 3: Add the `NetworkEntry` type**
+- [x] **Step 3: Add the `NetworkEntry` type**
 
 In `src/types/recording.ts`, immediately after the existing `ConsoleEntry` interface (around line 76), add:
 
@@ -112,7 +112,7 @@ export interface NetworkEntry {
 }
 ```
 
-- [ ] **Step 4: Generalize `eventStore.ts`**
+- [x] **Step 4: Generalize `eventStore.ts`**
 
 In `src/background/eventStore.ts`:
 
@@ -230,17 +230,17 @@ export async function recordNetworkEntry(
 
 The existing `flushPendingOnce` already splits `key.split(":", 2)` into `[tabID, kind]` and posts with that `kind`, so it handles `network` buckets with no change. Leave `flushPendingOnce`/`flushPending`/`trimBucket`/`normalizeLevel` as they are.
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `bun test src/background/eventStore.test.ts`
 Expected: PASS (existing console tests still green, plus the two new network tests)
 
-- [ ] **Step 6: Biome + typecheck**
+- [x] **Step 6: Biome + typecheck**
 
 Run: `bun run check:fix && bun run typecheck`
 Expected: no errors
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/types/recording.ts src/background/eventStore.ts src/background/eventStore.test.ts
@@ -261,7 +261,7 @@ git commit -m "feat(extension): generalize event buffer for network entries"
 
 This module is the single attach/detach path for the *long-lived* capture features (network here, dialogs in the sibling plan) so two features attaching the same tab share one real `chrome.debugger.attach` via a refcount, and one shared `onEvent` listener fans events out to all subscribers. It does **not** refactor the existing one-shot `cdpInput.ts`/`CDP_EVAL` attaches (see Global Constraints known-limitation note).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/background/debuggerManager.test.ts`:
 
@@ -345,12 +345,12 @@ describe("debuggerManager", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun test src/background/debuggerManager.test.ts`
 Expected: FAIL — `./debuggerManager` module does not exist.
 
-- [ ] **Step 3: Implement `debuggerManager.ts`**
+- [x] **Step 3: Implement `debuggerManager.ts`**
 
 Create `src/background/debuggerManager.ts`:
 
@@ -467,17 +467,17 @@ export function sendToTab(
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun test src/background/debuggerManager.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Biome + typecheck**
+- [x] **Step 5: Biome + typecheck**
 
 Run: `bun run check:fix && bun run typecheck`
 Expected: no errors
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/background/debuggerManager.ts src/background/debuggerManager.test.ts
@@ -496,7 +496,7 @@ git commit -m "feat(extension): add refcounted shared debugger manager"
 - Consumes: `NetworkEntry` (Task 1).
 - Produces: `class NetworkCaptureBuffer` with `onRequestWillBeSent(params)`, `onResponseReceived(params)`, `onLoadingFinished(params): NetworkEntry | null`, `onLoadingFailed(params): NetworkEntry | null`. Pure in-memory assembly of CDP `Network.*` events into a completed `NetworkEntry`; the live wiring (attach, `getResponseBody`, record) is Task 4 and consumes this.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/background/networkCapture.test.ts`:
 
@@ -550,12 +550,12 @@ describe("NetworkCaptureBuffer", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun test src/background/networkCapture.test.ts`
 Expected: FAIL — `./networkCapture` module does not exist.
 
-- [ ] **Step 3: Implement `networkCapture.ts`**
+- [x] **Step 3: Implement `networkCapture.ts`**
 
 Create `src/background/networkCapture.ts`:
 
@@ -640,17 +640,17 @@ export class NetworkCaptureBuffer {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun test src/background/networkCapture.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Biome + typecheck**
+- [x] **Step 5: Biome + typecheck**
 
 Run: `bun run check:fix && bun run typecheck`
 Expected: no errors
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/background/networkCapture.ts src/background/networkCapture.test.ts
@@ -669,7 +669,7 @@ git commit -m "feat(extension): add CDP network event assembly buffer"
 - Consumes: `attachShared`, `detachShared`, `onDebuggerEvent`, `sendToTab` (Task 2); `NetworkCaptureBuffer` (Task 3); `recordNetworkEntry` (Task 1).
 - Produces: a `networkCapture` command action handled in `sendCommandToTab`, arming a bounded Chrome capture window. Ack is immediate; a self-held timer detaches. The command's `options` are `{ durationMs?: number }` (default 10000, clamped to [1000, 120000]).
 
-- [ ] **Step 1: Add the imports and module state**
+- [x] **Step 1: Add the imports and module state**
 
 At the top of `src/background/nativeHost.ts`, alongside the existing `cdpInput` import (line ~11), add:
 
@@ -704,7 +704,7 @@ function clampDuration(ms: number | undefined): number {
 }
 ```
 
-- [ ] **Step 2: Add the arm handler function**
+- [x] **Step 2: Add the arm handler function**
 
 Add this function in `src/background/nativeHost.ts` (near `handleDebuggerEval`, so it sits with the other background-handled actions):
 
@@ -860,7 +860,7 @@ async function stopNetworkCapture(tabId: number): Promise<void> {
 }
 ```
 
-- [ ] **Step 3: Route the action in `sendCommandToTab`**
+- [x] **Step 3: Route the action in `sendCommandToTab`**
 
 In `sendCommandToTab` (line ~1004), add a branch alongside the existing `getReadyTabs`/`debuggerEval` early-return branches (before the navigation/CDP-input logic):
 
@@ -871,7 +871,7 @@ In `sendCommandToTab` (line ~1004), add a branch alongside the existing `getRead
 	}
 ```
 
-- [ ] **Step 4: Auto-detach on tab removal**
+- [x] **Step 4: Auto-detach on tab removal**
 
 To honor "never a permanent attach" when a tab closes mid-window, ensure the capture is torn down. In `src/background/nativeHost.ts`, find the existing `chrome.tabs.onRemoved` listener if one exists; if not, add this near the module's other `chrome.tabs.*` listeners:
 
@@ -885,17 +885,17 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 (If a `chrome.tabs.onRemoved` listener already exists, add the `stopNetworkCapture` call inside it rather than registering a second listener.)
 
-- [ ] **Step 5: Typecheck + Biome**
+- [x] **Step 5: Typecheck + Biome**
 
 Run: `bun run check:fix && bun run typecheck`
 Expected: no errors. (`Command`/`CommandResult`/`replyError`/`sendToNative` are already in scope in `nativeHost.ts`; confirm the `Command` type import covers `options`.)
 
-- [ ] **Step 6: Full extension test suite (regression check)**
+- [x] **Step 6: Full extension test suite (regression check)**
 
 Run: `bun run test`
 Expected: PASS — no existing tests broken by the `nativeHost.ts` additions.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/background/nativeHost.ts
@@ -917,7 +917,7 @@ git commit -m "feat(extension): arm bounded CDP network capture windows"
 - Consumes: `recordNetworkEntry` (Task 1); `browser.webRequest` (via the `chrome.webRequest` polyfill on Firefox).
 - Produces: `mapWebRequestEntry(details): NetworkEntry` (pure, testable) and `startWebRequestCapture(record): void` that registers `onBeforeRequest`/`onCompleted`/`onErrorOccurred` listeners. Metadata-only (no response body — `webRequest` cannot cheaply read bodies).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/background/networkWebRequest.test.ts`:
 
@@ -957,12 +957,12 @@ describe("mapWebRequestEntry", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun test src/background/networkWebRequest.test.ts`
 Expected: FAIL — `./networkWebRequest` module does not exist.
 
-- [ ] **Step 3: Implement `networkWebRequest.ts`**
+- [x] **Step 3: Implement `networkWebRequest.ts`**
 
 Create `src/background/networkWebRequest.ts`:
 
@@ -1038,12 +1038,12 @@ export function startWebRequestCapture(): void {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun test src/background/networkWebRequest.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Start webRequest capture on Firefox only**
+- [x] **Step 5: Start webRequest capture on Firefox only**
 
 In `src/background/index.ts`, near the bottom where the flush loop and `startNativeHost()` are wired (around line 1483), add a guarded start so it is a no-op on Chrome (which uses CDP capture instead):
 
@@ -1062,7 +1062,7 @@ Add the import near the other `./` imports at the top of `src/background/index.t
 import { startWebRequestCapture } from "./networkWebRequest";
 ```
 
-- [ ] **Step 6: Add the `webRequest` permission (both manifests)**
+- [x] **Step 6: Add the `webRequest` permission (both manifests)**
 
 In `src/manifest.ts`, add `"webRequest"` to the `permissions` array (after `"debugger"`):
 
@@ -1078,12 +1078,12 @@ In `firefox/vite.config.ts`, add `"webRequest"` to the manifest `permissions` ar
 					"webRequest",
 ```
 
-- [ ] **Step 7: Typecheck + Biome + full test suite**
+- [x] **Step 7: Typecheck + Biome + full test suite**
 
 Run: `bun run check:fix && bun run typecheck && bun run test`
 Expected: no errors, all tests pass
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/background/networkWebRequest.ts src/background/networkWebRequest.test.ts src/background/index.ts src/manifest.ts firefox/vite.config.ts
@@ -1104,7 +1104,7 @@ git commit -m "feat(extension): Firefox webRequest network capture"
 
 Note on `EventPoller.Watch`: its real signature is `Watch(ctx context.Context, timeout time.Duration, since int, match func(api.EventEntry) bool, handle func(api.EventsResponse) error) error` (see `console.go`). It loops until the context/timeout ends, calling `handle` per matching batch. To implement early-exit `wait`, pass a cancelable context and cancel it from `handle` on the first match — `Watch` returns `nil` on cancel, and the captured entry distinguishes match-found from timeout.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `htrcli/internal/commands/network_test.go`:
 
@@ -1175,12 +1175,12 @@ func TestNetworkEntryMatches(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd htrcli && go test ./internal/commands/... -run 'TestNetworkReadFormatsEntries|TestNetworkEntryMatches' -v`
 Expected: FAIL — `networkEventKind`, `networkEventData`, `formatNetworkEntries`, `networkEntryMatches` undefined.
 
-- [ ] **Step 3: Implement `network.go`**
+- [x] **Step 3: Implement `network.go`**
 
 Create `htrcli/internal/commands/network.go`:
 
@@ -1439,22 +1439,22 @@ func init() {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd htrcli && go test ./internal/commands/... -run 'TestNetworkReadFormatsEntries|TestNetworkEntryMatches' -v`
 Expected: PASS
 
-- [ ] **Step 5: Full commands suite (regression check)**
+- [x] **Step 5: Full commands suite (regression check)**
 
 Run: `cd htrcli && go test ./internal/commands/... -v`
 Expected: PASS
 
-- [ ] **Step 6: Build the CLI**
+- [x] **Step 6: Build the CLI**
 
 Run: `make htrcli-build`
 Expected: builds `htrcli/bin/htrcli` with no errors; `htrcli/bin/htrcli network --help` lists `read`, `watch`, `wait`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add htrcli/internal/commands/network.go htrcli/internal/commands/network_test.go
@@ -1467,23 +1467,23 @@ git commit -m "feat(htrcli): add network read/watch/wait CLI commands"
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: Chrome capture window**
+- [x] **Step 1: Chrome capture window**
 
 Run `htrcli serve`, load the unpacked Chrome build (`bun run build`), open a test page with a `fetch` on a button. In one terminal run `htrcli network watch --timeout 8000`; while it runs, click the button to trigger the fetch. Confirm the watch prints a line with the request's status, method, URL, and a duration. Then run `htrcli network read --json` and confirm the same entry is in the buffer with a `body` field for a text/JSON response.
 
-- [ ] **Step 2: Chrome `network wait`**
+- [x] **Step 2: Chrome `network wait`**
 
 Run `htrcli network wait --url "*/api/*" --status 200 --timeout 8000`, then trigger a matching request. Confirm the command exits 0 and prints the matched entry. Repeat with a `--url` that never matches and confirm it exits non-zero with the "no request matching …" error after the timeout.
 
-- [ ] **Step 3: Chrome no-attach-leak check**
+- [x] **Step 3: Chrome no-attach-leak check**
 
 After a `watch`/`wait` window ends, confirm Chrome's "This tab is being debugged" banner disappears (the debugger detached). Run `htrcli network read` with no preceding `watch` and confirm it returns nothing new — documenting the Chrome behavior that `read` only surfaces traffic captured during an armed window.
 
-- [ ] **Step 4: Firefox always-on capture**
+- [x] **Step 4: Firefox always-on capture**
 
 Load the Firefox build (`bun run firefox:build`, then `about:debugging`). Without any `watch`, trigger a fetch on the page, then run `htrcli network read`. Confirm the entry appears (Firefox capture is always-on, metadata-only — no `body` field). This is the documented Chrome/Firefox asymmetry.
 
-- [ ] **Step 5: Record the deferred/limitation items in TODO.md**
+- [x] **Step 5: Record the deferred/limitation items in TODO.md**
 
 Add to `TODO.md` in the project root:
 

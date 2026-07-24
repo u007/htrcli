@@ -24,6 +24,10 @@ export interface BufferedEvent {
 interface BufferedBucket {
 	nextSeq: number;
 	entries: BufferedEvent[];
+	/** Highest seq that has been successfully flushed to the daemon.
+	 *  On daemon restart (generation change) this is reset to 0 so all
+	 *  buffered entries are replayed through the ingest endpoint. */
+	flushedUpToSeq: number;
 }
 
 interface BufferedState {
@@ -86,7 +90,7 @@ function getOrCreateBucket(
 	const key = bucketKey(tabId, kind);
 	let bucket = currentState.buckets[key];
 	if (!bucket) {
-		bucket = { nextSeq: 1, entries: [] };
+		bucket = { nextSeq: 1, entries: [], flushedUpToSeq: 0 };
 		currentState.buckets[key] = bucket;
 	}
 	return bucket;
@@ -118,11 +122,15 @@ export async function getGeneration(): Promise<number | null> {
 	return currentState.generation;
 }
 
-// Clear any resync bookkeeping. The current implementation keeps only pending
-// entries, so a daemon restart just means the next flush will resend whatever
-// is still buffered.
+// Prepare for a daemon restart (generation change). Reset flushedUpToSeq to 0
+// for every bucket so the next flushPending call replays ALL buffered entries
+// through the ingest endpoint, repopulating the daemon's fresh in-memory store.
 export async function resetForResync(): Promise<void> {
-	await loadState();
+	const currentState = await loadState();
+	for (const key of Object.keys(currentState.buckets)) {
+		currentState.buckets[key].flushedUpToSeq = 0;
+	}
+	await saveState();
 }
 
 // Record one captured event of any kind in durable session storage.
@@ -186,12 +194,22 @@ async function flushPendingOnce(
 		const tabID = Number.parseInt(tabIDText, 10);
 		if (!Number.isFinite(tabID) || tabID <= 0) continue;
 
-		const snapshot = bucket.entries.map((entry) => ({ ...entry }));
+		// Only send entries not yet flushed (seq > flushedUpToSeq).
+		const flushedUpTo = bucket.flushedUpToSeq ?? 0;
+		const unflushed = bucket.entries.filter((entry) => entry.seq > flushedUpTo);
+		if (unflushed.length === 0) continue;
+
+		const snapshot = unflushed.map((entry) => ({ ...entry }));
 		const sent = await postEventsToDaemon(tabID, kind, snapshot);
 		if (!sent) continue;
 
+		// Advance the watermark instead of deleting entries. Entries remain in
+		// the buffer so they can be replayed if the daemon restarts (generation
+		// change resets flushedUpToSeq back to 0). The 500-entry cap and
+		// eviction (oldest first) still apply, so flushed entries never
+		// accumulate forever.
 		const lastSeq = snapshot[snapshot.length - 1]?.seq ?? 0;
-		bucket.entries = bucket.entries.filter((entry) => entry.seq > lastSeq);
+		bucket.flushedUpToSeq = Math.max(flushedUpTo, lastSeq);
 
 		// Persist after each successful bucket POST so a service-worker death
 		// mid-flush doesn't replay already-sent entries on restart.

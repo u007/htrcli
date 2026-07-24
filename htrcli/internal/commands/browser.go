@@ -23,7 +23,11 @@ var browserStartCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		st, err := cdp.StartBrowser(chrome, GetCDPPort(), browserHeadless)
+		if err := ensureContextResolved(); err != nil {
+			return err
+		}
+		port := GetCDPPort()
+		st, err := cdp.StartBrowser(chrome, port, browserHeadless)
 		if err != nil {
 			return err
 		}
@@ -56,6 +60,9 @@ var browserStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show CDP browser status (probes the port, not the PID file)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := ensureContextResolved(); err != nil {
+			return err
+		}
 		port := GetCDPPort()
 		alive := cdp.PortAlive(port)
 		st, err := cdp.ReadState()
@@ -93,6 +100,9 @@ var browserHideCmd = &cobra.Command{
 	Use:   "hide",
 	Short: "Minimize the CDP browser window (not applicable to headless)",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := ensureContextResolved(); err != nil {
+			return err
+		}
 		if err := cdp.SetWindowState(GetCDPPort(), GetTabTarget(), "minimized"); err != nil {
 			return err
 		}
@@ -105,6 +115,9 @@ var browserShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Restore the CDP browser window",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := ensureContextResolved(); err != nil {
+			return err
+		}
 		if err := cdp.SetWindowState(GetCDPPort(), GetTabTarget(), "normal"); err != nil {
 			return err
 		}

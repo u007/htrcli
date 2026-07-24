@@ -26,10 +26,12 @@ type TargetSelector struct {
 
 // ScreenshotOptions controls htrcli screenshot capture. Annotate is a list of
 // selectors whose matched elements get numbered overlay boxes drawn before
-// capture. Empty options = plain viewport screenshot (unchanged behavior).
+// capture. TabID scopes extension screenshots to a specific connected tab when
+// provided. Empty options = plain viewport screenshot (unchanged behavior).
 type ScreenshotOptions struct {
 	FullPage bool             `json:"fullPage,omitempty"`
 	Annotate []TargetSelector `json:"annotate,omitempty"`
+	TabID    *int             `json:"tabId,omitempty"`
 }
 
 // Command represents a remote control command to execute on a browser tab.

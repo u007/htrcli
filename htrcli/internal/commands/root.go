@@ -9,19 +9,22 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"github.com/u007/htrcli/internal/api"
+	"github.com/u007/htrcli/internal/cdp"
 	"github.com/u007/htrcli/internal/output"
 )
 
 var (
-	cfgFile       string
-	serverURL     string
-	token         string
-	jsonOutput    bool
-	tabTarget     string
-	transportFlag string
-	cdpFlag       bool
-	timeout       int
-	client        *api.Client
+	cfgFile          string
+	serverURL        string
+	token            string
+	jsonOutput       bool
+	tabTarget        string
+	transportFlag    string
+	cdpFlag          bool
+	contextName      string
+	timeout          int
+	client           *api.Client
+	resolveContextFn = resolveContext
 )
 
 var rootCmd = &cobra.Command{
@@ -32,9 +35,10 @@ remote control API. Requires the HTR NControl Chrome extension and
 server running.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		output.JSONOutput = jsonOutput
 		initClient()
+		return nil
 	},
 }
 
@@ -48,6 +52,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&tabTarget, "tab", "", "target tab: numeric ID (extension) or CDP target ID (--cdp)")
 	rootCmd.PersistentFlags().StringVar(&transportFlag, "transport", "", "transport: ext (extension, default) or cdp")
 	rootCmd.PersistentFlags().BoolVar(&cdpFlag, "cdp", false, "shorthand for --transport cdp")
+	rootCmd.PersistentFlags().StringVar(&contextName, "context", "", "named browser context (isolated profile)")
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 30000, "command timeout in ms")
 }
 
@@ -120,6 +125,10 @@ func GetTabTarget() string {
 	return tabTarget
 }
 
+// contextCDPPort caches the resolved context port so GetCDPPort returns the
+// same port for the duration of a single command invocation.
+var contextCDPPort int
+
 // UseCDP resolves the transport: flags > config/env > default ext.
 func UseCDP() bool {
 	if transportFlag != "" {
@@ -131,17 +140,48 @@ func UseCDP() bool {
 	return viper.GetString("transport") == "cdp"
 }
 
-// GetCDPPort returns the CDP debugging port (flags none; env/config; default 9222).
+// GetCDPPort returns the CDP debugging port.
+//   - When --context is set, returns the resolved context port (cached after resolveContext).
+//   - When cdp-port is configured, returns that value.
+//   - Default: 9222.
 func GetCDPPort() int {
+	if contextCDPPort > 0 {
+		return contextCDPPort
+	}
 	if p := viper.GetInt("cdp-port"); p > 0 {
 		return p
 	}
 	return 9222
 }
 
+// ensureContextResolved resolves a named context lazily the first time a CDP
+// command actually needs the port. Non-CDP commands never call this helper, so
+// `--context` stays inert for extension/HTTP-only verbs.
+func ensureContextResolved() error {
+	if contextName == "" || contextCDPPort > 0 {
+		return nil
+	}
+	return resolveContextFn()
+}
+
 // GetChromePath returns the configured Chrome binary path ("" = autodetect).
 func GetChromePath() string {
 	return viper.GetString("chrome-path")
+}
+
+// resolveContext ensures the named context's Chrome process is running and
+// caches its debugging port. Called from PersistentPreRunE when --context is set.
+func resolveContext() error {
+	chrome, err := cdp.FindChrome(GetChromePath())
+	if err != nil {
+		return fmt.Errorf("--context %s: %w", contextName, err)
+	}
+	port, err := cdp.EnsureContext(contextName, chrome, false)
+	if err != nil {
+		return fmt.Errorf("--context %s: %w", contextName, err)
+	}
+	contextCDPPort = port
+	return nil
 }
 
 // Execute runs the root command.

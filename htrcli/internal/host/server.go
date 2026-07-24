@@ -304,6 +304,15 @@ const (
 // over HTTP, not the relay, to avoid the 1 MB native-messaging frame limit.
 func handleScreenshotGet(w http.ResponseWriter, r *http.Request, d *Daemon, port int, bearerToken string) {
 	tabID, ok := d.FirstTabID()
+	if raw := strings.TrimSpace(r.URL.Query().Get("tab")); raw != "" {
+		parsed := parseTabID(raw)
+		if parsed <= 0 {
+			apiError(w, 400, "invalid tab id")
+			return
+		}
+		tabID = parsed
+		ok = true
+	}
 	if !ok {
 		apiError(w, 404, "no tabs connected")
 		return

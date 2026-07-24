@@ -127,6 +127,48 @@ func TestTriggerScreenshotIncludesOptions(t *testing.T) {
 	}
 }
 
+func TestScreenshotEndpointUsesRequestedTab(t *testing.T) {
+	d := host.NewDaemon()
+	messages := make(chan host.NativeMessage, 1)
+	rc := d.AddConn(func(msg []byte) error {
+		var nm host.NativeMessage
+		if err := json.Unmarshal(msg, &nm); err != nil {
+			return err
+		}
+		messages <- nm
+		return nil
+	})
+	d.RegisterTab(rc, 1, host.TabInfo{ID: 1, URL: "https://a.com", Title: "A", Active: true})
+	d.RegisterTab(rc, 2, host.TabInfo{ID: 2, URL: "https://b.com", Title: "B", Active: true})
+	srv := host.NewHTTPServer(d, 0, "", nil)
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	go func() {
+		nm := <-messages
+		if nm.TabID != 2 {
+			t.Errorf("native message tab = %d, want 2", nm.TabID)
+		}
+		d.ResolveScreenshot(nm.CommandID, "QUJD", "")
+	}()
+
+	resp, err := http.Get(ts.URL + "/api/screenshot?tab=2")
+	if err != nil {
+		t.Fatalf("GET /api/screenshot?tab=2: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode screenshot body: %v", err)
+	}
+	if body["data"] != "QUJD" {
+		t.Fatalf("body.data = %v, want QUJD", body["data"])
+	}
+}
+
 func TestEventsIngestAndRead(t *testing.T) {
 	d := host.NewDaemon()
 	// Give the daemon a tab so /api/events defaults cleanly if needed.

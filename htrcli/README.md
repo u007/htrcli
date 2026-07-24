@@ -58,7 +58,7 @@ over HTTP, so they are not limited by the 1 MB native-messaging frame size.
 
 ### Captured console output
 
-The daemon now keeps a cursor-based event buffer for page `console.*` output.
+The daemon keeps a cursor-based event buffer for page `console.*` output.
 Use it to read what happened after a specific sequence number or block until a
 new log line arrives:
 
@@ -68,6 +68,78 @@ htrcli console watch --since 100 --timeout 10000
 ```
 
 `console read` prints a warning when the buffer evicted older entries.
+
+### Captured network requests
+
+The daemon captures page network requests (URL, method, status, duration) into
+the same cursor-based event buffer:
+
+```bash
+# Read buffered network entries after cursor 0
+htrcli network read --since 0
+
+# Arm capture and stream new entries until timeout (default 10s)
+htrcli network watch --since 100 --timeout 15000
+
+# Arm capture and block until a matching request completes
+htrcli network wait --since 0 --timeout 10000 --url "*/api/users*" --status 200
+```
+
+`network read` and `network watch` print a warning when the buffer evicted older
+entries. `network wait` accepts a glob `--url` pattern (path.Match semantics,
+where `*` spans any character including `/`) and an optional `--status` filter.
+It prints the first matching entry, or exits with a timeout error.
+
+### Mocking and blocking network requests
+
+Intercept requests before they reach the server. Rules are per-tab and apply to
+subsequent requests in that tab:
+
+```bash
+# Mock a GET /api/user response with status 200 and a body file
+htrcli network mock --url-pattern "*/api/user" --method GET --status 200 --body-file ./mock-user.json
+
+# Block (fail) matching requests
+htrcli network block --url-pattern "*/api/analytics*"
+
+# Remove a specific rule by its url pattern
+htrcli network unmock --url-pattern "*/api/user"
+
+# Remove all rules
+htrcli network unmock --all
+```
+
+`network mock` flags:
+- `--url-pattern` (required) — glob to match request URLs
+- `--method` — restrict to an HTTP method (GET, POST, PUT, DELETE, ...)
+- `--status` — mock response status code (default 200)
+- `--body-file` — path to a file whose contents become the response body
+
+`network block` accepts `--url-pattern` and `--method` (no body or status — the
+request fails immediately).
+
+### Captured dialogs (alert / confirm / prompt)
+
+The daemon can auto-handle JavaScript dialogs and record their results. Arm a
+policy for the next dialog(s), then list what was handled:
+
+```bash
+# Accept the next dialog (default)
+htrcli dialog handle --action accept
+
+# Dismiss the next dialog
+htrcli dialog handle --action dismiss
+
+# Respond with text to a prompt dialog
+htrcli dialog handle --action respond --text "my answer"
+
+# List handled dialogs since cursor 0
+htrcli dialog list --since 0
+```
+
+Supported `--action` values: `accept`, `dismiss`, `respond`. With `respond`,
+pass `--text` with the prompt answer. `dialog list` prints a warning when the
+buffer evicted older entries.
 
 The daemon pings each relay every 15s (`{"type":"ping"}`); the extension
 replies with `{"type":"heartbeat"}`. Any relay silent for 45s is force-closed
@@ -323,6 +395,7 @@ htrcli click "xpath=//button[1]"           # By XPath
 --token <token>                           # Bearer token
 --json                                    # JSON output
 --tab <id>                                # Target specific tab
+--context <name>                          # Named browser context (isolated profile)
 --timeout <ms>                            # Command timeout
 ```
 
@@ -344,6 +417,44 @@ Priority: flags > env vars (`HTRCLI_SERVER`, `HTRCLI_TOKEN`) > config file > def
 - [HTR NControl](https://github.com/u007/htrncontrol) extension installed (Chrome or Firefox)
 - The native-messaging daemon on :3845 (`htrcli serve`)
 - Go 1.22+ (for building from source)
+- **ffmpeg ≥ 6** on `PATH` for video recording (`htrcli record`; `brew install ffmpeg`). Missing ffmpeg produces an explicit error at both `record start` and `record stop` — never a hang.
+
+## Named Browser Contexts
+
+`--context <name>` lazily launches or reuses an isolated Chrome profile when a
+CDP command needs its debugging port, tracked in `~/.htrcli/contexts.json`.
+Each context has its own `--user-data-dir` for true cookie/storage isolation.
+
+```bash
+# Launch or reuse a named context:
+htrcli --context work --cdp open https://example.com
+htrcli --context work --cdp click "#login"
+
+# List registered contexts:
+htrcli context list
+```
+
+## Video Recording (--cdp, Chrome only)
+
+Record a page screencast to MP4 over CDP. `record start` spawns a detached
+recorder process; `record stop` signals it and encodes via ffmpeg.
+
+```bash
+htrcli --cdp record start              # Begin recording
+htrcli --cdp record stop output.mp4    # Stop and encode to MP4
+```
+
+The extension/Firefox transport returns an explicit "not supported" error.
+
+## Debug Trace Export
+
+Export console + network events, a screenshot, and page info as a zip:
+
+```bash
+htrcli trace export trace-dump.zip
+```
+
+Network events are best-effort (logged on error, non-fatal).
 
 ## License
 

@@ -5,6 +5,7 @@ import {
 	recordConsoleEntry,
 	recordDialogEntry,
 	recordNetworkEntry,
+	resetForResync,
 } from "./eventStore";
 
 function installStorageMock() {
@@ -164,5 +165,55 @@ describe("eventStore console capture", () => {
 		});
 		expect(byKind.console).toEqual([1]);
 		expect(byKind.network).toEqual([1]);
+	});
+
+	it("re-flushes all entries after resetForResync (daemon restart durability)", async () => {
+		// Record 3 events and flush successfully.
+		await recordConsoleEntry(1, { level: "log", args: ["a"] });
+		await recordConsoleEntry(1, { level: "log", args: ["b"] });
+		await recordConsoleEntry(1, { level: "log", args: ["c"] });
+		let firstFlush: number[] = [];
+		await flushPending(async (_tabId, _kind, entries) => {
+			firstFlush = (entries as { seq: number }[]).map((e) => e.seq);
+			return true;
+		});
+		expect(firstFlush).toEqual([1, 2, 3]);
+
+		// After flush, entries stay in the buffer (watermark advances).
+		// A second flush should send nothing new.
+		let secondFlush: number[] = [];
+		await flushPending(async (_tabId, _kind, entries) => {
+			secondFlush = (entries as { seq: number }[]).map((e) => e.seq);
+			return true;
+		});
+		expect(secondFlush).toEqual([]);
+
+		// Simulate daemon restart: resetForResync resets the watermark.
+		await resetForResync();
+
+		// Now flush replays ALL entries, not just new ones.
+		let restartFlush: number[] = [];
+		await flushPending(async (_tabId, _kind, entries) => {
+			restartFlush = (entries as { seq: number }[]).map((e) => e.seq);
+			return true;
+		});
+		expect(restartFlush).toEqual([1, 2, 3]);
+	});
+
+	it("only flushes entries beyond flushedUpToSeq after partial flush", async () => {
+		// Record entries 1, 2 and flush them.
+		await recordConsoleEntry(1, { level: "log", args: ["x"] });
+		await recordConsoleEntry(1, { level: "log", args: ["y"] });
+		await flushPending(async () => true);
+
+		// Record entries 3, 4 -- only these should flush next time.
+		await recordConsoleEntry(1, { level: "log", args: ["z"] });
+		await recordConsoleEntry(1, { level: "log", args: ["w"] });
+		let incrementalFlush: number[] = [];
+		await flushPending(async (_tabId, _kind, entries) => {
+			incrementalFlush = (entries as { seq: number }[]).map((e) => e.seq);
+			return true;
+		});
+		expect(incrementalFlush).toEqual([3, 4]);
 	});
 });

@@ -257,9 +257,14 @@ var screenshotCmd = &cobra.Command{
 		}
 
 		c := GetClient()
+		tabID, err := GetTabID()
+		if err != nil {
+			return err
+		}
 		data, err := c.GetScreenshotOpts(api.ScreenshotOptions{
 			FullPage: screenshotFullPage,
 			Annotate: annotate,
+			TabID:    tabID,
 		})
 		if err != nil {
 			return err
@@ -814,4 +819,3 @@ func init() {
 	downloadReceiptsCmd.Flags().String("out", os.ExpandEnv("$HOME/personal/2025tax/receipts/aia"), "Output directory for PDFs")
 	rootCmd.AddCommand(downloadReceiptsCmd)
 }
-

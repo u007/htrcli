@@ -98,12 +98,16 @@ func errUnsupportedCDP(name string) error {
 // cdpSession opens the target page session for the current --tab/--cdp-port.
 func cdpSession() (*cdp.Session, string, error) {
 	targetID := GetTabTarget()
-	s, err := cdp.PageSession(GetCDPPort(), targetID)
+	if err := ensureContextResolved(); err != nil {
+		return nil, "", err
+	}
+	port := GetCDPPort()
+	s, err := cdp.PageSession(port, targetID)
 	if err != nil {
 		return nil, "", err
 	}
 	if targetID == "" {
-		targets, err := cdp.ListTargets(GetCDPPort())
+		targets, err := cdp.ListTargets(port)
 		if err == nil && len(targets) > 0 {
 			targetID = targets[0].ID
 		}
@@ -254,6 +258,9 @@ func runOpenCDP(url string) error {
 // runTabsListCDP lists CDP page targets (no Active column — CDP has no
 // reliable notion of "active").
 func runTabsListCDP() error {
+	if err := ensureContextResolved(); err != nil {
+		return err
+	}
 	targets, err := cdp.ListTargets(GetCDPPort())
 	if err != nil {
 		return err

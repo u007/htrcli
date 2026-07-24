@@ -327,6 +327,9 @@ func (c *Client) GetScreenshotOpts(opts ScreenshotOptions) (string, error) {
 		}
 		q.Set("annotate", string(raw))
 	}
+	if opts.TabID != nil {
+		q.Set("tab", strconv.Itoa(*opts.TabID))
+	}
 
 	path := "/api/screenshot"
 	if enc := q.Encode(); enc != "" {
