@@ -20,12 +20,13 @@ import type {
 import { AIA_API_KEY } from "../utils/aiaConfig";
 import { resolveKey } from "../utils/keyMap";
 import {
+	findAllElements,
 	findElement,
-	findElementInfo,
 	getElementInfo,
 	waitForActionableElement,
 	waitForElement,
 } from "./elementFinder";
+import { assignRef } from "./refRegistry";
 import { generateXPath } from "./xpathGenerator";
 
 /**
@@ -184,9 +185,9 @@ async function executeAction(command: Command): Promise<unknown> {
 	switch (action) {
 		// ─── Finding / Inspection ─────────────────────────────────────
 		case "find":
-			return handleFind(requireTarget(target, action));
+			return handleFind(requireTarget(target, action), options);
 		case "findAll":
-			return handleFindAll(requireTarget(target, action));
+			return handleFindAll(requireTarget(target, action), options);
 		case "wait":
 			return handleWait(
 				requireTarget(target, action),
@@ -394,14 +395,27 @@ async function executeAction(command: Command): Promise<unknown> {
 
 // ─── Find / Inspection Handlers ────────────────────────────────────
 
-function handleFind(target: TargetSelector): RemoteElementInfo | null {
+function handleFind(
+	target: TargetSelector,
+	options?: Command["options"],
+): RemoteElementInfo | null {
 	const element = findElement(target);
 	if (!element) return null;
-	return getElementInfo(element);
+	const info = getElementInfo(element);
+	if (options?.assignRef) info.ref = assignRef(element);
+	return info;
 }
 
-function handleFindAll(target: TargetSelector): RemoteElementInfo[] {
-	return findElementInfo(target);
+function handleFindAll(
+	target: TargetSelector,
+	options?: Command["options"],
+): RemoteElementInfo[] {
+	const elements = findAllElements(target);
+	return elements.map((el) => {
+		const info = getElementInfo(el);
+		if (options?.assignRef) info.ref = assignRef(el);
+		return info;
+	});
 }
 
 async function handleWait(

@@ -9,6 +9,7 @@ import type {
 	TargetSelector,
 	TextMatchMode,
 } from "../types/commands";
+import { resolveRef } from "./refRegistry";
 import { generateXPath } from "./xpathGenerator";
 
 // ─── Main Find Functions ──────────────────────────────────────────
@@ -113,6 +114,12 @@ export function waitForElement(
 function findAllElementsRaw(target: TargetSelector): Element[] {
 	// Try strategies in priority order
 	let elements: Element[] = [];
+
+	// 0. Element ref (@eN) — highest priority, resolved from in-page registry
+	if (target.ref) {
+		const el = resolveRef(target.ref);
+		return el ? [el] : [];
+	}
 
 	// 1. CSS selector
 	if (target.selector) {
