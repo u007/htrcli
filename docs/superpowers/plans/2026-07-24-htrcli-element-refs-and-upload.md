@@ -1649,19 +1649,19 @@ git commit -m "feat(htrcli): upload on extension transport (Chrome), unsupported
 
 **Files:** none (verification only)
 
-- [x] **Step 1: findAll end-to-end**
+- [ ] **Step 1: findAll end-to-end**
 
 With `htrcli serve` running and the extension loaded in Chrome, on a page with several buttons run `htrcli findAll button --json` and confirm an array of element infos is printed.
 
-- [x] **Step 2: Extension refs round-trip**
+- [ ] **Step 2: Extension refs round-trip**
 
 Run `htrcli find "#some-button" --ref` → confirm it prints `@e1`. Then `htrcli click @e1` → confirm the button is clicked (the ref resolved). Navigate the page (full reload), then `htrcli click @e1` again → confirm an explicit `stale ref` error, not a wrong-element click or silent success.
 
-- [x] **Step 3: CDP refs round-trip**
+- [ ] **Step 3: CDP refs round-trip**
 
 With Chrome started for CDP (`--cdp`, port 9222), run `htrcli --cdp find "#some-button" --ref` → prints `@e1`, and `~/.htrcli/refs.json` now contains it. Then `htrcli --cdp upload "#file-input" ./a.png` and `htrcli --cdp upload @e2 ./a.png` (after minting `@e2` on the file input) → confirm the input's files are set (`htrcli --cdp eval "document.querySelector('#file-input').files.length"` returns 1). Navigate the page, then reuse the ref → confirm `DOM.setFileInputFiles` fails (stale), surfaced as a non-zero exit.
 
-- [x] **Step 4: Upload on the extension transport (Chrome) + Firefox**
+- [ ] **Step 4: Upload on the extension transport (Chrome) + Firefox**
 
 On Chrome (default transport): `htrcli upload "#file-input" ./a.png,./b.png` → confirm two files set, no OS picker. On Firefox (extension loaded via `about:debugging`): `htrcli upload "#file-input" ./a.png` → confirm it exits non-zero with the explicit "not supported on Firefox" message (never a silent no-op).
 
