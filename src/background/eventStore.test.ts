@@ -3,6 +3,7 @@ import {
 	__resetEventStoreForTests,
 	flushPending,
 	recordConsoleEntry,
+	recordDialogEntry,
 	recordNetworkEntry,
 } from "./eventStore";
 
@@ -124,6 +125,28 @@ describe("eventStore console capture", () => {
 		expect(networkBatch?.entries[0].data.url).toBe(
 			"https://example.com/api/users",
 		);
+	});
+
+	it("records dialog entries in their own bucket", async () => {
+		await recordDialogEntry(1, {
+			dialogType: "confirm",
+			message: "Delete this item?",
+			resolvedAction: "accept",
+		});
+
+		const posted: { kind: string; entries: { data: { message: string } }[] }[] =
+			[];
+		await flushPending(async (_tabId, kind, entries) => {
+			posted.push({
+				kind,
+				entries: entries as { data: { message: string } }[],
+			});
+			return true;
+		});
+
+		const dialogBatch = posted.find((p) => p.kind === "dialog");
+		expect(dialogBatch).toBeDefined();
+		expect(dialogBatch?.entries[0].data.message).toBe("Delete this item?");
 	});
 
 	it("keeps console and network seq counters independent per tab", async () => {

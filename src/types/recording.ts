@@ -88,6 +88,14 @@ export interface NetworkEntry {
 	durationMs?: number;
 }
 
+// Structured dialog payload captured via CDP (Chrome) or window.* override (Firefox).
+export interface DialogEntry {
+	dialogType: "alert" | "confirm" | "prompt" | "beforeunload";
+	message: string;
+	resolvedAction: "accept" | "dismiss";
+	respondedText?: string;
+}
+
 // Message types for communication between components
 export type MessageType =
 	| "START_RECORDING"

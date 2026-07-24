@@ -1,10 +1,18 @@
-import type { ConsoleEntry, NetworkEntry } from "../types/recording";
+import type {
+	ConsoleEntry,
+	DialogEntry,
+	NetworkEntry,
+} from "../types/recording";
 
 export type ConsoleEntryData = ConsoleEntry;
 export type NetworkEntryData = NetworkEntry;
-export type BufferedEventData = ConsoleEntryData | NetworkEntryData;
+export type DialogEntryData = DialogEntry;
+export type BufferedEventData =
+	| ConsoleEntryData
+	| NetworkEntryData
+	| DialogEntryData;
 
-export type EventKind = "console" | "network";
+export type EventKind = "console" | "network" | "dialog";
 
 export interface BufferedEvent {
 	seq: number;
@@ -155,6 +163,14 @@ export async function recordNetworkEntry(
 	entry: NetworkEntryData,
 ): Promise<void> {
 	await recordEvent(tabId, "network", entry);
+}
+
+// Record a dialog entry in durable session storage.
+export async function recordDialogEntry(
+	tabId: number,
+	entry: DialogEntryData,
+): Promise<void> {
+	await recordEvent(tabId, "dialog", entry);
 }
 
 async function flushPendingOnce(
