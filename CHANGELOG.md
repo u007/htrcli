@@ -4,6 +4,9 @@
 
 ### Added
 
+- **Accessibility snapshot tree**: New `snapshot` command that builds a best-effort accessibility-style tree from the DOM with ARIA role mapping, accessible names, states, and refs. Works on both extension and CDP transports. (`src/contentScript/snapshot.ts`, `src/types/commands.ts`, `src/contentScript/commandExecutor.ts`, `htrcli/internal/cdp/bundle/htrcli-dom.js`, `htrcli/internal/commands/inspect.go`, `htrcli/internal/commands/cdp_exec.go`, `htrcli/internal/commands/snapshot_test.go`, `src/contentScript/commandExecutor.test.ts`)
+- **htrcli SKILL.md overhaul**: Reorganized and expanded the skill doc with sections on CDP transport, snapshot, video recording, network capture/mock, dialog handling, console events, browser contexts, AMO publishing, trace export, and file upload (`skills/htrcli/SKILL.md`)
+
 - **Console event buffer**: `htrcli console read` and `htrcli console watch` now expose a durable cursor-based buffer for page `console.*` output. The extension captures console calls in the page's MAIN world, buffers them in `chrome.storage.session`, and flushes them to `htrcli serve` so logs survive service-worker restarts.
 - **Network mock/block/unmock**: `htrcli network mock --url-pattern <glob> --status <code> --body-file <path>` and `htrcli network block --url-pattern <glob>` for declarative request interception. Chrome uses `Fetch.enable` via the debugger; Firefox uses `browser.webRequest` blocking listeners (`src/background/networkMock.ts`, `src/background/networkMockMatch.ts`, `src/background/networkMockFirefox.ts`, `internal/commands/network_mock.go`)
 - **Event buffer API on daemon**: new `POST /api/events/ingest` and `GET /api/events?since=N&kind=<type>&tab=<id>` endpoints on `htrcli serve` for cursor-based event polling, shared by console, network, and dialog capture (`internal/host/server.go`, `internal/host/events.go`, `internal/api/client.go`)

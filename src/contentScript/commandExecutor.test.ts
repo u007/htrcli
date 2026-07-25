@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import "../test/domSetup";
-import type { Command, CommandAction } from "../types/commands";
+import type { Command, CommandAction, SnapshotNode } from "../types/commands";
 import { executeCommand } from "./commandExecutor";
 
 // Test command validation logic (extracted from commandExecutor)
@@ -159,6 +159,7 @@ describe("Command Validation", () => {
 	describe("actions without target or value", () => {
 		const freeActions: CommandAction[] = [
 			"getPageInfo",
+			"snapshot",
 			"reload",
 			"goBack",
 			"goForward",
@@ -402,6 +403,67 @@ describe("scrollTo action (DOM)", () => {
 		expect(result.success).toBe(true);
 		// The settle wait must terminate well within the timeout/hard cap.
 		expect(Date.now() - start).toBeLessThan(2000);
+	});
+});
+
+describe("snapshot action (DOM)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+		document.title = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+		document.title = "";
+	});
+
+	it("builds a tree with accessible names, states, and refs", async () => {
+		document.title = "Snapshot page";
+		document.body.innerHTML = `
+			<main>
+				<h1>Dashboard</h1>
+				<button id="save" aria-pressed="true">Save</button>
+				<label for="name">Name</label>
+				<input id="name" type="text" value="Ada" />
+				<section aria-label="Overview">
+					<p>Summary text</p>
+				</section>
+			</main>
+		`;
+
+		const result = await executeCommand({
+			id: "snap1",
+			action: "snapshot",
+		});
+
+		expect(result.success).toBe(true);
+		const snapshot = result.data as SnapshotNode;
+		expect(snapshot.role).toBe("document");
+		expect(snapshot.name).toBe("Snapshot page");
+
+		const main = snapshot.children?.find((node) => node.role === "main");
+		expect(main).toBeTruthy();
+		const mainNode = main as SnapshotNode;
+
+		const button = mainNode.children?.find((node) => node.role === "button");
+		expect(button).toBeTruthy();
+		const buttonNode = button as SnapshotNode;
+		expect(buttonNode.name).toBe("Save");
+		expect(buttonNode.ref).toMatch(/^@e\d+$/);
+		expect(buttonNode.state?.pressed).toBe(true);
+
+		const input = mainNode.children?.find((node) => node.role === "textbox");
+		expect(input).toBeTruthy();
+		const inputNode = input as SnapshotNode;
+		expect(inputNode.name).toBe("Name");
+		expect(inputNode.value).toBe("Ada");
+		expect(inputNode.ref).toMatch(/^@e\d+$/);
+
+		const region = mainNode.children?.find((node) => node.role === "region");
+		expect(region).toBeTruthy();
+		const regionNode = region as SnapshotNode;
+		expect(regionNode.name).toBe("Overview");
+		expect(regionNode.ref).toMatch(/^@e\d+$/);
 	});
 });
 

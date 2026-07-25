@@ -27,6 +27,7 @@ import {
 	waitForElement,
 } from "./elementFinder";
 import { assignRef } from "./refRegistry";
+import { getSnapshot } from "./snapshot";
 import { generateXPath } from "./xpathGenerator";
 
 /**
@@ -222,6 +223,8 @@ async function executeAction(command: Command): Promise<unknown> {
 			);
 		case "getPageInfo":
 			return getPageInfo();
+		case "snapshot":
+			return getSnapshot();
 		case "xpath":
 			return handleXPath(requireTarget(target, action));
 

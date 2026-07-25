@@ -117,6 +117,7 @@ export type CommandAction =
 	| "getBoundingBox"
 	| "getComputedStyle"
 	| "getPageInfo"
+	| "snapshot"
 	| "xpath"
 	// ─── Interaction ────────────────────────────────────────────────
 	| "click"
@@ -214,6 +215,26 @@ export interface CommandResult {
 	duration?: number;
 	/** Page info after command */
 	pageInfo?: PageInfo;
+}
+
+export interface SnapshotNodeState {
+	disabled?: boolean;
+	expanded?: boolean;
+	checked?: boolean | "mixed";
+	selected?: boolean;
+	pressed?: boolean | "mixed";
+	focused?: boolean;
+	readonly?: boolean;
+}
+
+export interface SnapshotNode {
+	role: string;
+	name?: string;
+	ref?: string;
+	value?: string;
+	description?: string;
+	state?: SnapshotNodeState;
+	children?: SnapshotNode[];
 }
 
 // ─── Page Info ──────────────────────────────────────────────────────

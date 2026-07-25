@@ -210,35 +210,143 @@ var getHTMLCmd = &cobra.Command{
 
 var snapshotCmd = &cobra.Command{
 	Use:   "snapshot",
-	Short: "Get page accessibility tree with refs",
+	Short: "Get accessibility snapshot tree with refs",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
-			return runInspectCDP("getPageInfo", "", "")
+			return runSnapshotCDP()
 		}
-		c := GetClient()
-		tabID, err := GetTabID()
-		if err != nil {
-			return err
-		}
-		result, err := c.ExecuteCommand(tabID, api.Command{
-			ID:     "1",
-			Action: "getPageInfo",
-		})
-		if err != nil {
-			return err
-		}
-
-		if output.JSONOutput {
-			output.PrintJSON(result)
-			return nil
-		}
-
-		// For now, output page info as a placeholder for the full snapshot.
-		// Full snapshot implementation requires extension changes (axe-core).
-		fmt.Println("Snapshot requires extension update (Phase 4)")
-		fmt.Println("Use 'page' command for current page info.")
-		return nil
+		return runSnapshotExt()
 	},
+}
+
+func runSnapshotExt() error {
+	c := GetClient()
+	tabID, err := GetTabID()
+	if err != nil {
+		return err
+	}
+	result, err := c.ExecuteCommand(tabID, api.Command{
+		ID:     "1",
+		Action: "snapshot",
+	})
+	if err != nil {
+		return err
+	}
+
+	if output.JSONOutput {
+		output.PrintJSON(result)
+		return nil
+	}
+	return printSnapshotResult(result)
+}
+
+func printSnapshotResult(result *api.CommandResult) error {
+	if result.Data == nil {
+		fmt.Println("Snapshot returned no data.")
+		return nil
+	}
+
+	root, ok := result.Data.(map[string]any)
+	if !ok {
+		return fmt.Errorf("snapshot: unexpected data type %T", result.Data)
+	}
+
+	if result.PageInfo != nil {
+		fmt.Printf("URL:   %s\n", result.PageInfo.URL)
+		if result.PageInfo.Title != "" {
+			fmt.Printf("Title: %s\n", result.PageInfo.Title)
+		}
+		fmt.Println()
+	}
+
+	printSnapshotNode(root, 0)
+	return nil
+}
+
+func printSnapshotNode(node map[string]any, depth int) {
+	if node == nil {
+		return
+	}
+	line := formatSnapshotNode(node)
+	if line == "" {
+		line = "<unnamed node>"
+	}
+	fmt.Printf("%s%s\n",
+		strings.Repeat("  ", depth), line)
+
+	children := snapshotChildrenFromData(node["children"])
+	for _, child := range children {
+		printSnapshotNode(child, depth+1)
+	}
+}
+
+func snapshotChildrenFromData(data any) []map[string]any {
+	raw, ok := data.([]any)
+	if !ok {
+		return nil
+	}
+	children := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		child, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		children = append(children, child)
+	}
+	return children
+}
+
+func formatSnapshotNode(node map[string]any) string {
+	parts := make([]string, 0, 5)
+	if role, _ := node["role"].(string); role != "" {
+		parts = append(parts, role)
+	}
+	if name, _ := node["name"].(string); name != "" {
+		parts = append(parts, fmt.Sprintf("%q", name))
+	}
+	if value, _ := node["value"].(string); value != "" {
+		parts = append(parts, fmt.Sprintf("value=%q", value))
+	}
+	if ref, _ := node["ref"].(string); ref != "" {
+		parts = append(parts, ref)
+	}
+	if state := formatSnapshotState(node["state"]); state != "" {
+		parts = append(parts, state)
+	}
+	if desc, _ := node["description"].(string); desc != "" {
+		parts = append(parts, fmt.Sprintf("desc=%q", desc))
+	}
+	return strings.Join(parts, " ")
+}
+
+func formatSnapshotState(data any) string {
+	state, ok := data.(map[string]any)
+	if !ok || len(state) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(state))
+	for _, key := range []string{"disabled", "expanded", "checked", "selected", "pressed", "focused", "readonly"} {
+		value, ok := state[key]
+		if !ok {
+			continue
+		}
+		switch v := value.(type) {
+		case bool:
+			if v {
+				parts = append(parts, key)
+			}
+		case string:
+			if v != "" {
+				parts = append(parts, fmt.Sprintf("%s=%s", key, v))
+			}
+		default:
+			parts = append(parts, fmt.Sprintf("%s=%v", key, v))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 var screenshotCmd = &cobra.Command{

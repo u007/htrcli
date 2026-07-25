@@ -179,6 +179,30 @@ func runInspectCDP(action, selector, attr string) error {
 	return nil
 }
 
+// runSnapshotCDP captures an accessibility snapshot through the embedded DOM
+// bundle and renders it with the same pretty printer used by the extension
+// transport.
+func runSnapshotCDP() error {
+	s, _, err := cdpSession()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	result, err := cdp.ExecDOM(s, api.Command{ID: "1", Action: "snapshot"})
+	if err != nil {
+		return err
+	}
+	if !result.Success {
+		return fmt.Errorf("snapshot failed: %s", result.Error)
+	}
+	if output.JSONOutput {
+		output.PrintJSON(result)
+		return nil
+	}
+	return printSnapshotResult(result)
+}
+
 // runEvalCDP runs a user script via CDP Runtime.evaluate.
 func runEvalCDP(expression string) error {
 	s, _, err := cdpSession()
