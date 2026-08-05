@@ -1,8 +1,14 @@
 # CHANGELOG
 
-## [Unreleased]
+## 0.4.6 [2026.08.05]
 
 ### Added
+
+- **Firefox file upload support**: `htrcli upload` now works on the Firefox extension transport. `htrcli` embeds the file bytes as base64 (`options.filesData`), and the content script sets `input.files` via `File` + `DataTransfer` (Firefox has no `chrome.debugger`, which the Chrome path relies on). `htrcli publish` gained `--upload-source-code <zip>` to submit human-readable source as the AMO source submission (2nd upload). (`htrcli/internal/commands/upload.go`, `src/background/nativeHost.ts`, `src/contentScript/commandExecutor.ts`, `htrcli/internal/commands/publish.go`)
+
+- **Event buffer hardening**: buffered console/dialog events now flush through a serialized pass queue with versioned session-storage saves, so overlapping flushes can't post the same entries twice to the daemon; closing a tab now drains and discards its buckets (`drainTabBuckets`), preventing per-tab buckets from accumulating for the rest of the browser session (`src/background/eventStore.ts`, `src/background/index.ts`)
+- **Browser capability on registered tabs**: `TabInfo.browser` (`"chrome" | "firefox"`) is now reported by the extension so htrcli can build transport-appropriate upload payloads; legacy/unknown metadata safely uses the Chrome-compatible path (`src/types/commands.ts`, `src/background/nativeHost.ts`, `htrcli/internal/api/types.go`, `htrcli/internal/host/daemon.go`)
+- **Leak fixes**: webRequest start-time tracking is capped at 1000 in-flight requests, and `waitForElement` stops its 50ms polling interval on timeout (also in the bundled `htrcli-dom.js`) (`src/background/networkWebRequest.ts`, `src/contentScript/elementFinder.ts`)
 
 - **Accessibility snapshot tree**: New `snapshot` command that builds a best-effort accessibility-style tree from the DOM with ARIA role mapping, accessible names, states, and refs. Works on both extension and CDP transports. (`src/contentScript/snapshot.ts`, `src/types/commands.ts`, `src/contentScript/commandExecutor.ts`, `htrcli/internal/cdp/bundle/htrcli-dom.js`, `htrcli/internal/commands/inspect.go`, `htrcli/internal/commands/cdp_exec.go`, `htrcli/internal/commands/snapshot_test.go`, `src/contentScript/commandExecutor.test.ts`)
 - **htrcli SKILL.md overhaul**: Reorganized and expanded the skill doc with sections on CDP transport, snapshot, video recording, network capture/mock, dialog handling, console events, browser contexts, AMO publishing, trace export, and file upload (`skills/htrcli/SKILL.md`)

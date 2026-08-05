@@ -29,6 +29,24 @@ func TestSendCommandTimeoutClearsPending(t *testing.T) {
 	}
 }
 
+func TestRegisterTabPreservesBrowserCapability(t *testing.T) {
+	d := NewDaemon()
+	rc := d.AddConn(func(_ []byte) error { return nil })
+	d.RegisterTab(rc, 7, TabInfo{
+		ID:      7,
+		URL:     "https://example.com",
+		Browser: "firefox",
+	})
+
+	tabs := d.Tabs()
+	if len(tabs) != 1 {
+		t.Fatalf("expected one registered tab, got %d", len(tabs))
+	}
+	if tabs[0].Browser != "firefox" {
+		t.Fatalf("browser = %q, want firefox", tabs[0].Browser)
+	}
+}
+
 func TestGreetingIncludesGenerationAndConnectionInfo(t *testing.T) {
 	d := NewDaemon()
 	server, client := net.Pipe()

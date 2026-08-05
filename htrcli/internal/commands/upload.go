@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"encoding/base64"
 	"fmt"
+	"mime"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -109,6 +112,71 @@ func runUploadCDP(target string, files []string) error {
 	return nil
 }
 
+// buildFilesData reads each file and returns base64 payload entries so the
+// extension can set them from a content script (Firefox has no
+// chrome.debugger, so the background cannot call DOM.setFileInputFiles).
+func buildFilesData(files []string) ([]any, error) {
+	fileData := make([]any, 0, len(files))
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return nil, fmt.Errorf("reading file %s: %w", f, err)
+		}
+		fileData = append(fileData, map[string]any{
+			"name":     filepath.Base(f),
+			"mimeType": mime.TypeByExtension(filepath.Ext(f)),
+			"base64":   base64.StdEncoding.EncodeToString(data),
+		})
+	}
+	return fileData, nil
+}
+
+// buildUploadOptions keeps the native-messaging payload transport-specific.
+// Chrome's debugger path needs host file paths, while Firefox's content-script
+// path needs the file bytes. An empty/unknown browser value deliberately uses
+// the Chrome-compatible path for legacy tab registrations.
+func buildUploadOptions(files []string, browser string) (map[string]any, error) {
+	fileList := make([]any, len(files))
+	for i, f := range files {
+		fileList[i] = f
+	}
+
+	options := map[string]any{"files": fileList}
+	if browser != "firefox" {
+		return options, nil
+	}
+
+	fileData, err := buildFilesData(files)
+	if err != nil {
+		return nil, err
+	}
+	options["filesData"] = fileData
+	return options, nil
+}
+
+// resolveUploadTab resolves the same default target as the server, then
+// returns its metadata so the command can choose the correct upload payload
+// before it crosses the native-messaging boundary.
+func resolveUploadTab(c *api.Client, requestedTabID *int) (*api.TabInfo, error) {
+	if requestedTabID != nil {
+		return c.GetTab(*requestedTabID)
+	}
+
+	tabs, err := c.ListTabs()
+	if err != nil {
+		return nil, err
+	}
+	if len(tabs) == 0 {
+		return nil, fmt.Errorf("no tabs connected")
+	}
+	for i := range tabs {
+		if tabs[i].Active {
+			return &tabs[i], nil
+		}
+	}
+	return &tabs[0], nil
+}
+
 // runUploadExt sends an uploadFiles command via the extension daemon, which
 // handles the chrome.debugger attach -> DOM.* resolve -> DOM.setFileInputFiles
 // flow. @eN refs are not supported on the extension transport (CDP only).
@@ -121,20 +189,23 @@ func runUploadExt(target string, files []string) error {
 		return fmt.Errorf("upload on the extension transport supports CSS selectors only (got %q)", target)
 	}
 	c := GetClient()
-	tabID, err := GetTabID()
+	requestedTabID, err := GetTabID()
 	if err != nil {
 		return err
 	}
-	// Build []any so the JSON body carries a plain string array under files.
-	fileList := make([]any, len(files))
-	for i, f := range files {
-		fileList[i] = f
+	tab, err := resolveUploadTab(c, requestedTabID)
+	if err != nil {
+		return err
 	}
-	result, err := c.ExecuteCommand(tabID, api.Command{
+	options, err := buildUploadOptions(files, tab.Browser)
+	if err != nil {
+		return err
+	}
+	result, err := c.ExecuteCommand(&tab.ID, api.Command{
 		ID:      "1",
 		Action:  "uploadFiles",
 		Target:  sel,
-		Options: map[string]any{"files": fileList},
+		Options: options,
 	})
 	if err != nil {
 		return err

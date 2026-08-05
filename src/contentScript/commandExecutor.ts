@@ -305,6 +305,16 @@ async function executeAction(command: Command): Promise<unknown> {
 				requireTarget(target, action),
 				waitTimeout(options),
 			);
+		case "uploadFiles":
+			// Background-handled on Chrome (chrome.debugger DOM.setFileInputFiles).
+			// On Firefox the background forwards the command here with the file
+			// bytes embedded (options.filesData) — set input.files via File +
+			// DataTransfer since chrome.debugger is unavailable.
+			return handleUploadFiles(
+				requireTarget(target, action),
+				options,
+				waitTimeout(options),
+			);
 
 		// ─── Internal CDP preparation (invoked by the background) ─────
 		// These never run on the user-facing path. The background's trusted
@@ -1018,6 +1028,97 @@ async function handleSelectText(
 			selection.addRange(range);
 		}
 	}
+}
+
+// ─── Upload handler (Firefox path) ──────────────────────────────────
+// On Chrome this action is handled entirely in the background via
+// chrome.debugger DOM.setFileInputFiles. On Firefox (no chrome.debugger) the
+// background forwards the command here with the file bytes embedded as base64
+// in options.filesData; we rebuild File objects and assign them to the
+// <input type=file> via DataTransfer, then dispatch change so framework
+// handlers (dropzone/upload widgets) pick the files up.
+
+interface UploadFileData {
+	name: string;
+	mimeType?: string;
+	base64: string;
+}
+
+/** Decode a base64 string into a Uint8Array (exported for tests). */
+export function decodeBase64(data: string): Uint8Array {
+	if (typeof atob !== "undefined") {
+		const bin = atob(data);
+		const bytes = new Uint8Array(bin.length);
+		for (let i = 0; i < bin.length; i++) {
+			bytes[i] = bin.charCodeAt(i);
+		}
+		return bytes;
+	}
+	// Node/Bun without a global atob.
+	return Uint8Array.from(Buffer.from(data, "base64"));
+}
+
+async function handleUploadFiles(
+	target: TargetSelector,
+	options: Command["options"],
+	timeoutMs = 5000,
+): Promise<{ files: string[]; engine: string }> {
+	const filesData = options?.filesData as UploadFileData[] | undefined;
+	if (!filesData || filesData.length === 0) {
+		throw new Error(
+			"uploadFiles requires options.filesData (base64 file bytes). On Chrome this action is background-handled via chrome.debugger; this content-script path is used on Firefox.",
+		);
+	}
+
+	// File inputs are often visually hidden (dropzone widgets), so wait for
+	// presence only — actionability/visibility checks would reject them.
+	let element = findElement(target);
+	if (!element) {
+		element = await waitForElement(target, timeoutMs, { force: true });
+	}
+	if (!element) {
+		throw new Error(
+			`uploadFiles: element ${target.selector ?? target.name ?? "?"} not found within ${timeoutMs}ms`,
+		);
+	}
+	if (!(element instanceof HTMLInputElement) || element.type !== "file") {
+		throw new Error(
+			"uploadFiles target is not an <input type=file> (got " +
+				`${element instanceof HTMLInputElement ? element.type : element.tagName})`,
+		);
+	}
+
+	if (typeof DataTransfer === "undefined" || typeof File === "undefined") {
+		throw new Error(
+			"uploadFiles unsupported in this browser (no File/DataTransfer)",
+		);
+	}
+
+	const dt = new DataTransfer();
+	for (const f of filesData) {
+		const bytes = decodeBase64(f.base64);
+		// Copy the exact byte range into a fresh ArrayBuffer (BlobPart requires
+		// ArrayBuffer-backed views, and the TS lib types Uint8Array.buffer as
+		// ArrayBufferLike).
+		const buffer = bytes.buffer.slice(
+			bytes.byteOffset,
+			bytes.byteOffset + bytes.byteLength,
+		) as ArrayBuffer;
+		dt.items.add(
+			new File([buffer], f.name, {
+				type: f.mimeType || "application/octet-stream",
+			}),
+		);
+	}
+	element.files = dt.files;
+	// Notify framework upload widgets (React dropzones etc.).
+	element.dispatchEvent(new Event("input", { bubbles: true }));
+	element.dispatchEvent(new Event("change", { bubbles: true }));
+
+	return {
+		files: filesData.map((f) => f.name),
+		engine: "DataTransfer",
+	};
 }
 
 // ─── Navigation Handlers ───────────────────────────────────────────

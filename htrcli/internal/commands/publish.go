@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	publishSourceDir   string
-	publishChannel     string
+	publishSourceDir    string
+	publishSourceCode   string
+	publishChannel      string
 	publishAPIKey      string
 	publishAPISecret   string
 	publishBuild       bool
@@ -154,6 +155,12 @@ Get credentials at:
 		if publishSignTimeout > 0 {
 			signArgs = append(signArgs, "--timeout", fmt.Sprintf("%d", publishSignTimeout))
 		}
+		if publishSourceCode != "" {
+			if _, err := os.Stat(publishSourceCode); err != nil {
+				return fmt.Errorf("source code archive %q not found: %w", publishSourceCode, err)
+			}
+			signArgs = append(signArgs, "--upload-source-code", publishSourceCode)
+		}
 
 		if publishDryRun {
 			fmt.Printf("%s %s\n", weCmd, strings.Join(signArgs, " "))
@@ -178,6 +185,8 @@ Get credentials at:
 func init() {
 	publishCmd.Flags().StringVar(&publishSourceDir, "source-dir", "firefox/build",
 		"path to the built (unpacked) add-on directory")
+	publishCmd.Flags().StringVar(&publishSourceCode, "upload-source-code", "",
+		"path to a zip archive of human-readable source code, uploaded as the AMO source submission (2nd upload)")
 	publishCmd.Flags().StringVar(&publishChannel, "channel", "listed",
 		"AMO channel: 'listed' (public) or 'unlisted' (own use / self-distributed)")
 	publishCmd.Flags().StringVar(&publishAPIKey, "api-key", "", "AMO API key")

@@ -24,6 +24,9 @@ type TabInfo struct {
 	URL    string `json:"url"`
 	Title  string `json:"title"`
 	Active bool   `json:"active"`
+	// Browser is "chrome" or "firefox" for current registrations. It is
+	// optional on the wire so tabs registered by older extensions remain valid.
+	Browser string `json:"browser,omitempty"`
 }
 
 // Command is a browser action to execute.

@@ -3,7 +3,12 @@
  * Manages the connection to the htrcli native host via Chrome Native Messaging.
  */
 
-import type { Command, CommandResult, TabInfo } from "../types/commands";
+import type {
+	BrowserType,
+	Command,
+	CommandResult,
+	TabInfo,
+} from "../types/commands";
 import type { ConnectionMode, NetworkEntry } from "../types/recording";
 import { AIA_API_KEY } from "../utils/aiaConfig";
 import { cdpEvaluate } from "./cdpEval";
@@ -328,6 +333,7 @@ function syncRegisteredTabs(): void {
 				title: tab.title || "",
 				active: tab.active || false,
 				favIconUrl: tab.favIconUrl,
+				browser: getBrowserType(),
 			});
 		}
 	});
@@ -677,11 +683,64 @@ async function handleUploadFiles(
 	payload: Command,
 ): Promise<void> {
 	if (typeof chrome.debugger === "undefined") {
-		replyError(
-			tabId,
-			payload.id,
-			"upload is not supported on Firefox (chrome.debugger API unavailable). Use the --cdp transport against Chrome instead.",
-		);
+		// Firefox: no chrome.debugger, so the background cannot call
+		// DOM.setFileInputFiles. `htrcli upload` embeds the file bytes as
+		// base64 (options.filesData); forward the command to the content
+		// script, which sets input.files via File + DataTransfer.
+		const filesData = payload.options?.filesData as
+			| { name: string; mimeType: string; base64: string }[]
+			| undefined;
+		if (!filesData || filesData.length === 0) {
+			replyError(
+				tabId,
+				payload.id,
+				"upload on Firefox requires file data, which `htrcli upload` embeds automatically. Run `htrcli upload <selector> <file>` — chrome.debugger (used on Chrome) is unavailable on Firefox.",
+			);
+			return;
+		}
+		try {
+			const result: CommandResult | null = await new Promise((resolve) => {
+				chrome.tabs.sendMessage(
+					tabId,
+					{ type: "EXECUTE_COMMAND", command: payload },
+					(resultMsg: CommandResult) => {
+						if (chrome.runtime.lastError) {
+							resolve(null);
+							return;
+						}
+						resolve(resultMsg);
+					},
+				);
+			});
+			if (!result) {
+				replyError(
+					tabId,
+					payload.id,
+					"upload failed: content script did not respond (is the tab loaded and does the extension have host permission for it?)",
+				);
+				return;
+			}
+			if (!result.success) {
+				replyError(
+					tabId,
+					payload.id,
+					result.error ?? "upload failed in content script",
+				);
+				return;
+			}
+			sendToNative({
+				type: "command_result",
+				tabId,
+				// The content script's result.data already carries { files, engine }.
+				payload: result,
+			});
+		} catch (error) {
+			replyError(
+				tabId,
+				payload.id,
+				error instanceof Error ? error.message : String(error),
+			);
+		}
 		return;
 	}
 	const selector = payload.target?.selector;
@@ -1731,4 +1790,14 @@ export function registerTab(tabId: number, info: TabInfo): void {
 		tabId,
 		payload: info,
 	});
+}
+
+/**
+ * Returns the browser capability needed by commands that have different
+ * implementations across the shared Chrome/Firefox extension build.
+ * Firefox does not expose chrome.debugger; unknown or legacy tab metadata is
+ * handled safely by consumers as Chrome-compatible.
+ */
+export function getBrowserType(): BrowserType {
+	return typeof chrome.debugger === "undefined" ? "firefox" : "chrome";
 }

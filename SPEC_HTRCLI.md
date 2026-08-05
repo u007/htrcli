@@ -1155,12 +1155,12 @@ htrcli upload <selector> <file-path>[,<file-path>...]
 - **Chrome:** CDP `DOM.setFileInputFiles` (first real `DOM.*` usage on the
   Go side) given a `backendNodeId` (reuses feature 4's ref plumbing, or a
   fresh selector resolve) and a list of local file paths — no OS
-  file-picker dialog appears.
-- **Firefox:** genuine limitation, not equivalent parity. Firefox has no
-  remote-debugging primitive to fabricate a real `File` object with
-  content. Document this explicitly as unsupported/degraded on Firefox
-  (OS-level file-picker automation is out of extension scope) — do not
-  claim false parity.
+  file-picker dialog appears. Extension-transport uploads use the same
+  debugger flow and omit file bytes from the native-messaging payload.
+- **Firefox:** the extension transport uses `File` + `DataTransfer` in the
+  content script because Firefox has no `chrome.debugger`. The CLI includes
+  `options.filesData` only for a tab registered by Firefox; Chrome and
+  legacy/unknown tab metadata remain path-only.
 
 New: `internal/cdp/upload.go`. Modified: `internal/commands/interact.go`.
 

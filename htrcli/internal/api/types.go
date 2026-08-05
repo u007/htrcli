@@ -61,6 +61,9 @@ type TabInfo struct {
 	Title      string `json:"title"`
 	Active     bool   `json:"active"`
 	FavIconURL string `json:"favIconUrl,omitempty"`
+	// Browser is "chrome" or "firefox". Empty means legacy/unknown metadata;
+	// callers must use the Chrome-compatible path in that case.
+	Browser string `json:"browser,omitempty"`
 }
 
 // PageInfo contains information about the current page state.

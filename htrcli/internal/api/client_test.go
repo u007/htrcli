@@ -57,7 +57,7 @@ func TestListTabs(t *testing.T) {
 		json.NewEncoder(w).Encode(ApiResponse{
 			OK: true,
 			Data: []TabInfo{
-				{ID: 1, URL: "https://example.com", Title: "Example", Active: true},
+				{ID: 1, URL: "https://example.com", Title: "Example", Active: true, Browser: "chrome"},
 				{ID: 2, URL: "https://google.com", Title: "Google", Active: false},
 			},
 		})
@@ -74,6 +74,12 @@ func TestListTabs(t *testing.T) {
 	}
 	if tabs[0].URL != "https://example.com" {
 		t.Errorf("expected first tab URL https://example.com, got %s", tabs[0].URL)
+	}
+	if tabs[0].Browser != "chrome" {
+		t.Errorf("expected first tab browser chrome, got %q", tabs[0].Browser)
+	}
+	if tabs[1].Browser != "" {
+		t.Errorf("expected legacy tab browser to be empty, got %q", tabs[1].Browser)
 	}
 }
 

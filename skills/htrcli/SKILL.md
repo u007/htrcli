@@ -434,7 +434,11 @@ htrcli upload @e3 /path/to/photo.jpg,/path/to/doc.pdf       # ref, multiple file
 ```
 
 Sets files on a file input without triggering an OS file-picker dialog.
-Works on both extension and CDP transports.
+Works on both extension and CDP transports. On the **extension transport**
+Chrome uses `chrome.debugger` (`DOM.setFileInputFiles`); **Firefox** (no
+`chrome.debugger`) gets the file bytes embedded as base64 and the content
+script assigns them via `File` + `DataTransfer` — no browser difference from
+the caller's perspective. `@eN` refs are CDP-only.
 
 ## Console events
 
@@ -545,6 +549,9 @@ htrcli --context personal open https://other.com
 htrcli publish --build                     # build + sign + submit (public)
 htrcli publish --channel unlisted          # self-distributed
 htrcli publish --dry-run --source-dir firefox/build  # dry-run
+# Submit source code as the AMO source submission (2nd upload). AMO requires
+# human-readable source when the built add-on is bundled/minified:
+htrcli publish --upload-source-code htrncontrol-src-0.4.6.zip
 ```
 
 Channels: `listed` (default, public on addons.mozilla.org), `unlisted`

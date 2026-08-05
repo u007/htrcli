@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
 	__resetEventStoreForTests,
+	drainTabBuckets,
 	flushPending,
 	recordConsoleEntry,
 	recordDialogEntry,
@@ -8,7 +9,7 @@ import {
 	resetForResync,
 } from "./eventStore";
 
-function installStorageMock() {
+function installStorageMock(beforeSet?: () => Promise<void> | void) {
 	const store: Record<string, unknown> = {};
 	const scope = globalThis as typeof globalThis & { chrome?: unknown };
 	scope.chrome = {
@@ -34,10 +35,13 @@ function installStorageMock() {
 					}
 					return Promise.resolve(result);
 				}) as typeof chrome.storage.session.get,
-				set: ((values: Record<string, unknown>, callback?: () => void) => {
+				set: (async (
+					values: Record<string, unknown>,
+					callback?: () => void,
+				) => {
 					Object.assign(store, values);
 					callback?.();
-					return Promise.resolve();
+					await beforeSet?.();
 				}) as typeof chrome.storage.session.set,
 			},
 		},
@@ -46,10 +50,20 @@ function installStorageMock() {
 }
 
 describe("eventStore console capture", () => {
+	let store: Record<string, unknown>;
+
 	beforeEach(() => {
-		installStorageMock();
+		store = installStorageMock();
 		__resetEventStoreForTests();
 	});
+
+	function bucketKeys(): string[] {
+		const persisted = store["htrncontrol:event-store"] as
+			| { buckets: Record<string, unknown> }
+			| undefined;
+		if (!persisted) throw new Error("event store was never persisted");
+		return Object.keys(persisted.buckets).sort();
+	}
 
 	it("assigns increasing seq numbers per tab", async () => {
 		await recordConsoleEntry(1, { level: "log", args: ["a"] });
@@ -61,6 +75,63 @@ describe("eventStore console capture", () => {
 		});
 		const call = posted[0] as { entries: { seq: number }[] };
 		expect(call.entries.map((entry) => entry.seq)).toEqual([1, 2]);
+	});
+
+	it("does not resolve until the accepted event is persisted", async () => {
+		let setCalled = false;
+		let releaseSave!: () => void;
+		const saveGate = new Promise<void>((resolve) => {
+			releaseSave = resolve;
+		});
+		store = installStorageMock(async () => {
+			setCalled = true;
+			await saveGate;
+		});
+		__resetEventStoreForTests();
+
+		let recordResolved = false;
+		const recordPromise = recordConsoleEntry(1, {
+			level: "log",
+			args: ["durable"],
+		});
+		recordPromise.then(() => {
+			recordResolved = true;
+		});
+
+		await Promise.resolve();
+		await Promise.resolve();
+		const resolvedBeforeSave = recordResolved;
+		releaseSave();
+		await recordPromise;
+
+		expect(setCalled).toBe(true);
+		expect(resolvedBeforeSave).toBe(false);
+		expect(
+			(
+				(
+					store["htrncontrol:event-store"] as {
+						buckets: Record<string, unknown>;
+					}
+				).buckets["1:console"] as { entries: unknown[] }
+			).entries,
+		).toHaveLength(1);
+	});
+
+	it("persists concurrent records with contiguous sequence numbers", async () => {
+		await Promise.all(
+			Array.from({ length: 20 }, (_, index) =>
+				recordConsoleEntry(1, { level: "log", args: [String(index)] }),
+			),
+		);
+
+		const bucket = (
+			store["htrncontrol:event-store"] as { buckets: Record<string, unknown> }
+		).buckets["1:console"] as {
+			entries: { seq: number }[];
+		};
+		expect(bucket.entries.map((entry) => entry.seq)).toEqual(
+			Array.from({ length: 20 }, (_, index) => index + 1),
+		);
 	});
 
 	it("caps at 500 entries per bucket", async () => {
@@ -198,6 +269,89 @@ describe("eventStore console capture", () => {
 			return true;
 		});
 		expect(restartFlush).toEqual([1, 2, 3]);
+	});
+
+	it("drains a closed tab's buckets without touching other tabs", async () => {
+		await recordConsoleEntry(1, { level: "log", args: ["tab-1"] });
+		await recordNetworkEntry(1, {
+			requestId: "req-1",
+			url: "https://example.com/x",
+			method: "GET",
+		});
+		await recordConsoleEntry(2, { level: "log", args: ["tab-2"] });
+
+		const drained: { tabId: number; kind: string }[] = [];
+		await drainTabBuckets(1, async (tabId, kind) => {
+			drained.push({ tabId, kind });
+			return true;
+		});
+		expect(drained).toEqual([
+			{ tabId: 1, kind: "console" },
+			{ tabId: 1, kind: "network" },
+		]);
+
+		// Tab 1's buckets are gone; tab 2's survive untouched.
+		expect(bucketKeys()).toEqual(["2:console"]);
+		const posted: { tabId: number; kind: string }[] = [];
+		await flushPending(async (tabId, kind) => {
+			posted.push({ tabId, kind });
+			return true;
+		});
+		expect(posted).toEqual([{ tabId: 2, kind: "console" }]);
+	});
+
+	it("keeps a closed tab's entries when the drain POST fails", async () => {
+		await recordConsoleEntry(1, { level: "log", args: ["tail"] });
+
+		await drainTabBuckets(1, async () => false);
+
+		// Bucket survived, so a later flush can still deliver the tail.
+		let retried: number[] = [];
+		await flushPending(async (_tabId, _kind, entries) => {
+			retried = (entries as { seq: number }[]).map((e) => e.seq);
+			return true;
+		});
+		expect(retried).toEqual([1]);
+
+		// Once delivered, the closed tab's bucket is reaped rather than lingering
+		// in session storage for the rest of the browser session.
+		expect(bucketKeys()).toEqual([]);
+	});
+
+	it("does not discard entries recorded during an in-flight flush", async () => {
+		await recordConsoleEntry(1, { level: "log", args: ["first"] });
+
+		// Hold a global flush open, record a tail entry, then close the tab. The
+		// drain must post the tail rather than joining the stale flush snapshot.
+		let releaseFlush: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			releaseFlush = resolve;
+		});
+		let signalPosting: () => void = () => {};
+		const posting = new Promise<void>((resolve) => {
+			signalPosting = resolve;
+		});
+		const slowFlush = flushPending(async () => {
+			signalPosting();
+			await gate;
+			return true;
+		});
+
+		// Only record the tail once the flush has taken its snapshot, so the
+		// entry provably post-dates the in-flight pass.
+		await posting;
+		await recordConsoleEntry(1, { level: "log", args: ["tail"] });
+		const drainedSeqs: number[] = [];
+		const drain = drainTabBuckets(1, async (_tabId, _kind, entries) => {
+			drainedSeqs.push(...(entries as { seq: number }[]).map((e) => e.seq));
+			return true;
+		});
+
+		releaseFlush();
+		await slowFlush;
+		await drain;
+
+		expect(drainedSeqs).toEqual([2]);
 	});
 
 	it("only flushes entries beyond flushedUpToSeq after partial flush", async () => {

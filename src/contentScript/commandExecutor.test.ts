@@ -708,3 +708,86 @@ describe("synthetic input upgrade (Firefox / fallback path)", () => {
 		expect(keydownCode).toBe("KeyA");
 	});
 });
+
+describe("uploadFiles action (Firefox content-script path)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("sets files on an <input type=file> via DataTransfer and dispatches change", async () => {
+		const input = document.createElement("input");
+		input.type = "file";
+		input.id = "file-input";
+		document.body.appendChild(input);
+
+		let changed = 0;
+		input.addEventListener("change", () => {
+			changed++;
+		});
+
+		const result = await executeCommand({
+			id: "up1",
+			action: "uploadFiles",
+			target: { selector: "#file-input" },
+			options: {
+				filesData: [
+					{
+						name: "addon.xpi",
+						mimeType: "application/x-xpinstall",
+						base64: btoa("hello world"),
+					},
+					{
+						name: "src.zip",
+						mimeType: "application/zip",
+						base64: btoa("zip-bytes"),
+					},
+				],
+			},
+		});
+
+		expect(result.success).toBe(true);
+		expect(changed).toBe(1);
+		const files = (result.data as { files: string[] }).files;
+		expect(files).toEqual(["addon.xpi", "src.zip"]);
+		expect(input.files?.length).toBe(2);
+		expect(input.files?.[0]?.name).toBe("addon.xpi");
+		expect(input.files?.[1]?.name).toBe("src.zip");
+	});
+
+	it("fails when the target is not a file input", async () => {
+		const text = document.createElement("input");
+		text.type = "text";
+		text.id = "text-input";
+		document.body.appendChild(text);
+
+		const result = await executeCommand({
+			id: "up2",
+			action: "uploadFiles",
+			target: { selector: "#text-input" },
+			options: {
+				filesData: [{ name: "a.xpi", base64: btoa("x") }],
+			},
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("not an <input type=file>");
+	});
+
+	it("fails when filesData is missing (Chrome handles this action in the background)", async () => {
+		const input = document.createElement("input");
+		input.type = "file";
+		input.id = "file-input-2";
+		document.body.appendChild(input);
+
+		const result = await executeCommand({
+			id: "up3",
+			action: "uploadFiles",
+			target: { selector: "#file-input-2" },
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("filesData");
+	});
+});

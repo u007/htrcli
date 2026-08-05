@@ -63,6 +63,11 @@ export function waitForElement(
 		let resolved = false;
 		const timer = setTimeout(() => {
 			if (!resolved) {
+				// Mark settled and tear down BOTH the observer and the backup
+				// poll: leaving the interval running keeps scanning the DOM
+				// every 50ms for the lifetime of the page.
+				resolved = true;
+				clearInterval(poll);
 				obs.disconnect();
 				if (throwOnTimeout) {
 					reject(

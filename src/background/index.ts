@@ -29,12 +29,14 @@ import type {
 import { cdpEvaluate } from "./cdpEval";
 import { dispatchCdpInput } from "./cdpInput";
 import {
+	drainTabBuckets,
 	flushPending,
 	recordConsoleEntry,
 	recordDialogEntry,
 	resetForResync,
 } from "./eventStore";
 import {
+	getBrowserType,
 	getDaemonConnectionInfo,
 	registerTab,
 	retryConnect,
@@ -84,6 +86,7 @@ async function registerNativeTab(
 		title: resolvedTab.title || "",
 		active: resolvedTab.active || false,
 		favIconUrl: resolvedTab.favIconUrl,
+		browser: getBrowserType(),
 	});
 }
 
@@ -662,6 +665,7 @@ async function getReadyTabsInfo(): Promise<
 		title: string;
 		active: boolean;
 		favIconUrl?: string;
+		browser: ReturnType<typeof getBrowserType>;
 	}>
 > {
 	const tabs = await Promise.all(
@@ -676,6 +680,7 @@ async function getReadyTabsInfo(): Promise<
 					title: tab.title || "",
 					active: tab.active || false,
 					favIconUrl: tab.favIconUrl,
+					browser: getBrowserType(),
 				};
 			} catch {
 				return null;
@@ -1579,6 +1584,16 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 	// Tear down any active network capture window (Chrome CDP) on the closing tab.
 	void stopNetworkCapture(tabId);
 	void stopDialogCapture(tabId);
+
+	// Push whatever the tab buffered to the daemon and discard the buckets that
+	// landed. Without this the per-tab buckets live on in session storage for the
+	// whole browser session, and every later save re-serializes them.
+	void drainTabBuckets(tabId, postEventsToDaemon).catch((error) => {
+		console.warn(
+			`[HTR NControl] failed to drain event buckets for closed tab ${tabId}:`,
+			error,
+		);
+	});
 
 	if (currentSession?.isRecording) {
 		const index = currentSession.trackedTabIds.indexOf(tabId);

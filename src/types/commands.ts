@@ -259,12 +259,15 @@ export interface PageInfo {
 
 // ─── Tab Info ───────────────────────────────────────────────────────
 
+export type BrowserType = "chrome" | "firefox";
+
 export interface TabInfo {
 	id: number;
 	url: string;
 	title: string;
 	active: boolean;
 	favIconUrl?: string;
+	browser: BrowserType;
 }
 
 // ─── Server Protocol Messages ───────────────────────────────────────

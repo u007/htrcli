@@ -211,6 +211,8 @@
       let resolved = false;
       const timer = setTimeout(() => {
         if (!resolved) {
+          resolved = true;
+          clearInterval(poll);
           obs.disconnect();
           if (throwOnTimeout) {
             reject(
@@ -922,7 +924,6 @@
       if (relayed) return relayed;
     }
     switch (action) {
-      // ─── Finding / Inspection ─────────────────────────────────────
       case "find":
         return handleFind(requireTarget(target, action), options);
       case "findAll":
@@ -965,7 +966,6 @@
         return getSnapshot();
       case "xpath":
         return handleXPath(requireTarget(target, action));
-      // ─── Interaction ──────────────────────────────────────────────
       case "click":
         return handleClick(
           requireTarget(target, action),
@@ -1041,11 +1041,12 @@
           requireTarget(target, action),
           waitTimeout(options)
         );
-      // ─── Internal CDP preparation (invoked by the background) ─────
-      // These never run on the user-facing path. The background's trusted
-      // (CDP) click/key/type dispatchers call them to wait for the element,
-      // scroll it into view, and (for keys) focus it — then report the
-      // geometry / focus state the CDP dispatch needs.
+      case "uploadFiles":
+        return handleUploadFiles(
+          requireTarget(target, action),
+          options,
+          waitTimeout(options)
+        );
       case "prepareClick":
         return handlePrepareClick(
           requireTarget(target, action),
@@ -1053,7 +1054,6 @@
         );
       case "prepareKeys":
         return handlePrepareKeys(target, waitTimeout(options));
-      // ─── Navigation ───────────────────────────────────────────────
       case "navigate":
         return handleNavigate(requireValue(value, action));
       case "reload":
@@ -1062,21 +1062,14 @@
         return handleGoBack();
       case "goForward":
         return handleGoForward();
-      // ─── Screenshot ───────────────────────────────────────────────
       case "screenshot":
         return handleScreenshot();
-      // ─── Script Execution ─────────────────────────────────────────
-      // SECURITY: This action executes arbitrary JavaScript in the page context.
-      // It is intended for browser automation use cases where the caller is trusted.
-      // The server enforces authentication (IP whitelist + bearer token) before
-      // forwarding commands to the extension.
       case "evaluate":
         return handleEvaluate(requireValue(value, action));
       case "fetch":
         return handleFetchViaBackground(requireValue(value, action), options);
       case "printToPDF":
         return handlePrintToPDF(options == null ? void 0 : options.tabId);
-      // ─── Highlight ────────────────────────────────────────────────
       case "highlight":
         return handleHighlight(
           requireTarget(target, action),
@@ -1084,7 +1077,6 @@
         );
       case "unhighlight":
         return handleUnhighlight();
-      // ─── Tab Management ──────────────────────────────────────────
       case "listTabs":
         return handleListTabs();
       case "getTabInfo":
@@ -1537,6 +1529,64 @@
         selection.addRange(range);
       }
     }
+  }
+  function decodeBase64(data) {
+    if (typeof atob !== "undefined") {
+      const bin = atob(data);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) {
+        bytes[i] = bin.charCodeAt(i);
+      }
+      return bytes;
+    }
+    return Uint8Array.from(Buffer.from(data, "base64"));
+  }
+  async function handleUploadFiles(target, options, timeoutMs = 5e3) {
+    const filesData = options == null ? void 0 : options.filesData;
+    if (!filesData || filesData.length === 0) {
+      throw new Error(
+        "uploadFiles requires options.filesData (base64 file bytes). On Chrome this action is background-handled via chrome.debugger; this content-script path is used on Firefox."
+      );
+    }
+    let element = findElement(target);
+    if (!element) {
+      element = await waitForElement(target, timeoutMs, { force: true });
+    }
+    if (!element) {
+      throw new Error(
+        `uploadFiles: element ${target.selector ?? target.name ?? "?"} not found within ${timeoutMs}ms`
+      );
+    }
+    if (!(element instanceof HTMLInputElement) || element.type !== "file") {
+      throw new Error(
+        `uploadFiles target is not an <input type=file> (got ${element instanceof HTMLInputElement ? element.type : element.tagName})`
+      );
+    }
+    if (typeof DataTransfer === "undefined" || typeof File === "undefined") {
+      throw new Error(
+        "uploadFiles unsupported in this browser (no File/DataTransfer)"
+      );
+    }
+    const dt = new DataTransfer();
+    for (const f of filesData) {
+      const bytes = decodeBase64(f.base64);
+      const buffer = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength
+      );
+      dt.items.add(
+        new File([buffer], f.name, {
+          type: f.mimeType || "application/octet-stream"
+        })
+      );
+    }
+    element.files = dt.files;
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    return {
+      files: filesData.map((f) => f.name),
+      engine: "DataTransfer"
+    };
   }
   function handleNavigate(url) {
     if (!url) throw new Error("URL is required");

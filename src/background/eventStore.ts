@@ -28,6 +28,10 @@ interface BufferedBucket {
 	 *  On daemon restart (generation change) this is reset to 0 so all
 	 *  buffered entries are replayed through the ingest endpoint. */
 	flushedUpToSeq: number;
+	/** Set when the owning tab closed while entries were still undelivered.
+	 *  The bucket is reaped by the next flush that lands its tail, so a
+	 *  closed tab can't leak buckets for the rest of the browser session. */
+	tabClosed?: true;
 }
 
 interface BufferedState {
@@ -47,12 +51,32 @@ const MAX_BUFFERED_EVENTS = 500;
 let state: BufferedState | null = null;
 let stateLoadPromise: Promise<BufferedState> | null = null;
 let flushInFlight: Promise<void> | null = null;
+// Serializes every pass over the buckets. The daemon's Ingest re-numbers and
+// appends blindly, so two overlapping passes would post the same entries twice
+// and duplicate them in the daemon's store.
+let opChain: Promise<void> = Promise.resolve();
+// At most one storage write is active at a time. Concurrent recorders share
+// the in-flight write and start one follow-up write only when their mutation
+// happened after that write's snapshot.
+let stateVersion = 0;
+let persistedStateVersion = 0;
+let saveInFlight: Promise<void> | null = null;
+
+function serializeBucketPass(work: () => Promise<void>): Promise<void> {
+	const run = opChain.then(work, work);
+	opChain = run.catch(() => {});
+	return run;
+}
 
 // Test seam: reset the cached session snapshot so each test starts clean.
 export function __resetEventStoreForTests(): void {
 	state = null;
 	stateLoadPromise = null;
 	flushInFlight = null;
+	opChain = Promise.resolve();
+	stateVersion = 0;
+	persistedStateVersion = 0;
+	saveInFlight = null;
 }
 
 function bucketKey(tabId: number, kind: EventKind): string {
@@ -78,8 +102,27 @@ async function loadState(): Promise<BufferedState> {
 }
 
 async function saveState(): Promise<void> {
-	if (!state) return;
-	await chrome.storage.session.set({ [STORAGE_KEY]: state });
+	while (state && persistedStateVersion < stateVersion) {
+		if (!saveInFlight) {
+			const version = stateVersion;
+			const snapshot = structuredClone(state);
+			saveInFlight = chrome.storage.session
+				.set({ [STORAGE_KEY]: snapshot })
+				.then(() => {
+					persistedStateVersion = Math.max(persistedStateVersion, version);
+				})
+				.finally(() => {
+					saveInFlight = null;
+				});
+		}
+		const save = saveInFlight;
+		if (!save) continue;
+		await save;
+	}
+}
+
+function markStateDirty(): void {
+	stateVersion += 1;
 }
 
 function getOrCreateBucket(
@@ -113,6 +156,7 @@ export async function setLastKnownGeneration(
 ): Promise<void> {
 	const currentState = await loadState();
 	currentState.generation = generation;
+	markStateDirty();
 	await saveState();
 }
 
@@ -130,6 +174,7 @@ export async function resetForResync(): Promise<void> {
 	for (const key of Object.keys(currentState.buckets)) {
 		currentState.buckets[key].flushedUpToSeq = 0;
 	}
+	markStateDirty();
 	await saveState();
 }
 
@@ -150,7 +195,51 @@ export async function recordEvent(
 	});
 	bucket.nextSeq += 1;
 	trimBucket(bucket);
+	markStateDirty();
 	await saveState();
+}
+
+// Flush a closing tab's buckets and discard the ones fully delivered. Buckets
+// are keyed by tab ID and a closed tab's ID is never reused, so without the
+// discard they accumulate in session storage for the lifetime of the browser
+// session and every later save re-serializes them.
+export async function drainTabBuckets(
+	tabId: number,
+	postEventsToDaemon: FlushPoster,
+): Promise<void> {
+	// Own pass rather than delegating to flushPending: that call coalesces onto
+	// an in-flight flush whose snapshot predates the tab's tail entries, which
+	// the discard below would then delete unsent.
+	await serializeBucketPass(async () => {
+		const currentState = await loadState();
+		const prefix = `${tabId}:`;
+		const keys = Object.keys(currentState.buckets).filter((key) =>
+			key.startsWith(prefix),
+		);
+		if (keys.length === 0) return;
+
+		await flushBuckets(keys, postEventsToDaemon);
+
+		let dirty = false;
+		for (const key of keys) {
+			const bucket = currentState.buckets[key];
+			if (!bucket) continue;
+			const lastSeq = bucket.entries[bucket.entries.length - 1]?.seq ?? 0;
+			if (bucket.flushedUpToSeq < lastSeq) {
+				// Tail never reached the daemon (POST returned false, or the daemon
+				// is down). Keep it for a later flush and mark the bucket so that
+				// flush reaps it once delivered.
+				bucket.tabClosed = true;
+			} else {
+				delete currentState.buckets[key];
+			}
+			dirty = true;
+		}
+		if (dirty) {
+			markStateDirty();
+			await saveState();
+		}
+	});
 }
 
 // Record a console entry in durable session storage.
@@ -181,11 +270,12 @@ export async function recordDialogEntry(
 	await recordEvent(tabId, "dialog", entry);
 }
 
-async function flushPendingOnce(
+// Post the unflushed tail of each named bucket and advance its watermark.
+async function flushBuckets(
+	bucketKeys: string[],
 	postEventsToDaemon: FlushPoster,
 ): Promise<void> {
 	const currentState = await loadState();
-	const bucketKeys = Object.keys(currentState.buckets);
 	for (const key of bucketKeys) {
 		const bucket = currentState.buckets[key];
 		if (!bucket || bucket.entries.length === 0) continue;
@@ -210,6 +300,15 @@ async function flushPendingOnce(
 		// accumulate forever.
 		const lastSeq = snapshot[snapshot.length - 1]?.seq ?? 0;
 		bucket.flushedUpToSeq = Math.max(flushedUpTo, lastSeq);
+		markStateDirty();
+
+		// The owning tab is gone and everything buffered is now delivered, so the
+		// bucket has no further use — drop it instead of re-serializing it on
+		// every subsequent save.
+		const tailSeq = bucket.entries[bucket.entries.length - 1]?.seq ?? 0;
+		if (bucket.tabClosed && bucket.flushedUpToSeq >= tailSeq) {
+			delete currentState.buckets[key];
+		}
 
 		// Persist after each successful bucket POST so a service-worker death
 		// mid-flush doesn't replay already-sent entries on restart.
@@ -227,9 +326,14 @@ export async function flushPending(
 		return flushInFlight;
 	}
 
-	flushInFlight = flushPendingOnce(postEventsToDaemon).finally(() => {
+	const run = serializeBucketPass(async () => {
+		const currentState = await loadState();
+		await flushBuckets(Object.keys(currentState.buckets), postEventsToDaemon);
+	});
+
+	flushInFlight = run.finally(() => {
 		flushInFlight = null;
 	});
 
-	return flushInFlight;
+	await flushInFlight;
 }

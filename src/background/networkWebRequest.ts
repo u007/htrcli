@@ -40,10 +40,19 @@ export function startWebRequestCapture(): void {
 	if (typeof chrome === "undefined" || !chrome.webRequest) return;
 
 	const startTimes = new Map<string, number>();
+	// Requests that never reach onCompleted/onErrorOccurred (tab torn down
+	// mid-flight, some aborts) would otherwise sit here for the lifetime of the
+	// background script. Evict oldest-first; Map preserves insertion order.
+	const MAX_TRACKED_REQUESTS = 1000;
 
 	chrome.webRequest.onBeforeRequest.addListener(
 		(details: { requestId: string; timeStamp: number }) => {
 			startTimes.set(details.requestId, details.timeStamp);
+			while (startTimes.size > MAX_TRACKED_REQUESTS) {
+				const oldest = startTimes.keys().next();
+				if (oldest.done) break;
+				startTimes.delete(oldest.value);
+			}
 		},
 		{ urls: ["http://*/*", "https://*/*"] },
 	);
