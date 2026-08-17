@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Unreleased
+
+### Added
+
+- **Copy tab ID button** on the Options page and the side panel ConnectedTabs list — copies the numeric tab ID to the clipboard with a "Copied!" confirmation (`src/options/Options.tsx`, `src/sidepanel/components/ConnectedTabs.tsx`)
+
 ## 0.4.6 [2026.08.05]
 
 ### Added

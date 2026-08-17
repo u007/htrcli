@@ -25,6 +25,7 @@ export function ConnectedTabs() {
 	// sidebar console is invisible to most users and the failure reasons
 	// (gesture requirement, <all_urls> not requestable, API absent) differ.
 	const [grantResult, setGrantResult] = useState<string | null>(null);
+	const [copiedTabId, setCopiedTabId] = useState<number | null>(null);
 
 	const refresh = useCallback(async (): Promise<void> => {
 		try {
@@ -54,6 +55,16 @@ export function ConnectedTabs() {
 		} catch (err) {
 			console.warn("[HTR NControl] permissions.contains failed:", err);
 			setHasAccess(true);
+		}
+	}, []);
+
+	const copyTabId = useCallback(async (tabId: number): Promise<void> => {
+		try {
+			await navigator.clipboard.writeText(String(tabId));
+			setCopiedTabId(tabId);
+			setTimeout(() => setCopiedTabId(null), 1500);
+		} catch (err) {
+			console.warn("[HTR NControl] copy tab ID failed:", err);
 		}
 	}, []);
 
@@ -191,7 +202,7 @@ export function ConnectedTabs() {
 						</li>
 					) : (
 						tabs.map((tab) => (
-							<li key={tab.id}>
+							<li key={tab.id} className="ct-item-wrap">
 								<button
 									type="button"
 									className={`ct-item${tab.active ? " ct-active" : ""}`}
@@ -208,6 +219,17 @@ export function ConnectedTabs() {
 										<span className="ct-id">ID: {tab.id}</span>
 									</div>
 									{tab.active && <span className="ct-badge">active</span>}
+								</button>
+								<button
+									type="button"
+									className="ct-copy-id"
+									title="Copy tab ID"
+									onClick={(e) => {
+										e.stopPropagation();
+										void copyTabId(tab.id);
+									}}
+								>
+									{copiedTabId === tab.id ? "Copied!" : "Copy"}
 								</button>
 							</li>
 						))

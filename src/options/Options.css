@@ -198,6 +198,21 @@ button:disabled {
 	text-overflow: ellipsis;
 }
 
+.btn-copy-id {
+	font-size: 0.65rem;
+	padding: 0.05rem 0.35rem;
+	border-radius: 4px;
+	border: 1px solid #374151;
+	background: #1f2937;
+	color: #9ca3af;
+	cursor: pointer;
+}
+
+.btn-copy-id:hover {
+	color: #f9fafb;
+	border-color: #4b5563;
+}
+
 .tab-badge {
 	font-size: 0.65rem;
 	background: #1d4ed8;

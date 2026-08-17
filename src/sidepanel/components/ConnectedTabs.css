@@ -94,7 +94,7 @@
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	padding: 5px 8px;
+	padding: 5px 42px 5px 8px;
 	border-radius: 6px;
 	border: 1px solid var(--border-color);
 	background: var(--bg-secondary);
@@ -148,6 +148,28 @@
 	color: var(--text-tertiary);
 	font-size: 0.65rem;
 	font-family: monospace;
+}
+
+.ct-item-wrap {
+	position: relative;
+}
+
+.ct-copy-id {
+	position: absolute;
+	right: 6px;
+	bottom: 5px;
+	font-size: 0.62rem;
+	padding: 1px 5px;
+	border-radius: 3px;
+	border: 1px solid var(--border-color);
+	background: var(--bg-secondary);
+	color: var(--text-tertiary);
+	cursor: pointer;
+}
+
+.ct-copy-id:hover {
+	color: var(--text-primary);
+	background: var(--bg-hover);
 }
 
 .ct-badge {

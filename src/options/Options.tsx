@@ -11,6 +11,17 @@ interface TabInfo {
 
 export const Options = (): JSX.Element => {
 	const [tabs, setTabs] = useState<TabInfo[]>([]);
+	const [copiedTabId, setCopiedTabId] = useState<number | null>(null);
+
+	const copyTabId = useCallback(async (tabId: number): Promise<void> => {
+		try {
+			await navigator.clipboard.writeText(String(tabId));
+			setCopiedTabId(tabId);
+			setTimeout(() => setCopiedTabId(null), 1500);
+		} catch (error) {
+			console.warn("[HTR NControl] Failed to copy tab ID:", error);
+		}
+	}, []);
 
 	const refreshTabs = useCallback(async (): Promise<void> => {
 		try {
@@ -59,7 +70,16 @@ export const Options = (): JSX.Element => {
 								<div className="tab-info">
 									<span className="tab-title">{tab.title || "(no title)"}</span>
 									<span className="tab-meta">
-										ID: {tab.id} &middot;{" "}
+										ID: {tab.id}{" "}
+										<button
+											type="button"
+											className="btn-copy-id"
+											onClick={() => void copyTabId(tab.id)}
+											title="Copy tab ID"
+										>
+											{copiedTabId === tab.id ? "Copied!" : "Copy"}
+										</button>{" "}
+										&middot;{" "}
 										{tab.url.length > 50 ? `${tab.url.slice(0, 50)}…` : tab.url}
 									</span>
 								</div>
