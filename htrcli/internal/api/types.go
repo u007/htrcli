@@ -5,23 +5,25 @@ import "encoding/json"
 // TargetSelector defines how to find an element on the page.
 // Multiple strategies can be combined; they are tried in priority order.
 type TargetSelector struct {
-	Selector      string `json:"selector,omitempty"`
-	XPath         string `json:"xpath,omitempty"`
-	ID            string `json:"id,omitempty"`
-	Name          string `json:"name,omitempty"`
-	Role          string `json:"role,omitempty"`
-	Label         string `json:"label,omitempty"`
-	Placeholder   string `json:"placeholder,omitempty"`
-	Text          string `json:"text,omitempty"`
-	TextMatch     string `json:"textMatch,omitempty"`
-	CaseSensitive *bool  `json:"caseSensitive,omitempty"`
-	Tag           string `json:"tag,omitempty"`
-	Type          string `json:"type,omitempty"`
-	Index         *int   `json:"index,omitempty"`
-	All           *bool  `json:"all,omitempty"`
-	Visible       *bool  `json:"visible,omitempty"`
-	Enabled       *bool  `json:"enabled,omitempty"`
-	Ref           string `json:"ref,omitempty"`
+	Selector      string   `json:"selector,omitempty"`
+	XPath         string   `json:"xpath,omitempty"`
+	ID            string   `json:"id,omitempty"`
+	Name          string   `json:"name,omitempty"`
+	Role          string   `json:"role,omitempty"`
+	Label         string   `json:"label,omitempty"`
+	Placeholder   string   `json:"placeholder,omitempty"`
+	Text          string   `json:"text,omitempty"`
+	TextMatch     string   `json:"textMatch,omitempty"`
+	CaseSensitive *bool    `json:"caseSensitive,omitempty"`
+	Tag           string   `json:"tag,omitempty"`
+	Type          string   `json:"type,omitempty"`
+	Index         *int     `json:"index,omitempty"`
+	All           *bool    `json:"all,omitempty"`
+	Visible       *bool    `json:"visible,omitempty"`
+	Enabled       *bool    `json:"enabled,omitempty"`
+	Ref           string   `json:"ref,omitempty"`
+	X             *float64 `json:"x,omitempty"`
+	Y             *float64 `json:"y,omitempty"`
 }
 
 // ScreenshotOptions controls htrcli screenshot capture. Annotate is a list of

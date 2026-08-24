@@ -5,6 +5,15 @@
 ### Added
 
 - **Copy tab ID button** on the Options page and the side panel ConnectedTabs list — copies the numeric tab ID to the clipboard with a "Copied!" confirmation (`src/options/Options.tsx`, `src/sidepanel/components/ConnectedTabs.tsx`)
+- **Low-level input primitives**: new `htrcli keydown` / `keyup` (hold-release, stateless per-command), `mousedown` / `mouseup` / `mousemove`, and `drag` (interpolated pointer/mouse moves with `--steps 1..100` and `--delay 0..2000ms`) — each endpoint accepts a selector or `xy=100,200` viewport coordinates; `@eN` refs resolve to backend nodes via `DOM.getBoxModel` + `Page.getLayoutMetrics` (`htrcli/internal/commands/interact.go`, `htrcli/internal/cdp/input.go`, `htrcli/internal/commands/cdp_exec.go`, `htrcli/internal/cdp/elementref.go`, `src/background/cdpInput.ts`, `src/contentScript/commandExecutor.ts`, `src/types/commands.ts`, `htrcli/internal/api/types.go`, `htrcli/internal/cdp/bundle/htrcli-dom.js`)
+- **Firefox coordinate hit-testing**: synthetic viewport-coordinate mouse/drag input now resolves the target via `document.elementFromPoint(x, y)` and dispatches on the hit element, with explicit error when no element is hit (`src/contentScript/commandExecutor.ts`)
+- **CDP coordinate narrowing**: CDP input preparation callers narrow optional `x`/`y` with `typeof === "number"` before assigning to required coordinate types (`src/background/cdpInput.ts`)
+
+### Changed
+
+- **Navigation steps**: `htrcli back [steps]` / `forward [steps]` now loop single-step navigations sequentially and report partial progress when history runs out (`htrcli/README.md`)
+- **Trusted input coverage**: Chrome trusted-input dispatch expanded to `keydown`/`keyup`/`mousedown`/`mouseup`/`mousemove`/`drag` via CDP; Firefox synthetic path documented as pointer/mouse-only (no native HTML5 `DataTransfer` DnD) (`htrcli/README.md`, `skills/htrcli/SKILL.md`)
+- **Version bump** to `0.4.8` (`package.json`)
 
 ## 0.4.6 [2026.08.05]
 

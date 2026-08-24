@@ -132,6 +132,26 @@ func runInteractCDP(action, selector, value string) error {
 		if err := cdp.Press(s, targetID, value); err != nil {
 			return err
 		}
+	case "keyDown":
+		if err := cdp.KeyDown(s, targetID, value); err != nil {
+			return err
+		}
+	case "keyUp":
+		if err := cdp.KeyUp(s, targetID, value); err != nil {
+			return err
+		}
+	case "mouseDown":
+		if err := cdp.MouseDown(s, targetID, parseSelector(selector)); err != nil {
+			return err
+		}
+	case "mouseUp":
+		if err := cdp.MouseUp(s, targetID, parseSelector(selector)); err != nil {
+			return err
+		}
+	case "mouseMove":
+		if err := cdp.MouseMove(s, targetID, parseSelector(selector)); err != nil {
+			return err
+		}
 	default: // fill, select, check, uncheck, clear, type — DOM verbs
 		result, err := cdp.ExecDOM(s, api.Command{
 			ID: "1", Action: action, Target: parseSelector(selector), Value: value,
@@ -149,6 +169,51 @@ func runInteractCDP(action, selector, value string) error {
 	}
 	fmt.Printf("%s %s (cdp)\n", strings.Title(action), selector)
 	return nil
+}
+
+func runDragCDP(s *cdp.Session, targetID, src, dst string, steps, delay int) error {
+	srcSel := parseSelector(src)
+	dstSel := parseSelector(dst)
+	var refs *RefStore
+	if srcSel.Ref != "" || dstSel.Ref != "" {
+		var err error
+		refs, err = LoadRefStore()
+		if err != nil {
+			return err
+		}
+	}
+
+	var err error
+	srcSel, err = resolveDragTargetCDP(s, refs, srcSel)
+	if err != nil {
+		return fmt.Errorf("resolve drag source: %w", err)
+	}
+	dstSel, err = resolveDragTargetCDP(s, refs, dstSel)
+	if err != nil {
+		return fmt.Errorf("resolve drag destination: %w", err)
+	}
+	return cdp.Drag(s, targetID, srcSel, dstSel, steps, delay)
+}
+
+// resolveDragTargetCDP translates a persistent @eN ref in the command layer.
+// RefStore belongs to commands, while the cdp package only owns the protocol
+// operation that turns the stored backend node into viewport coordinates.
+func resolveDragTargetCDP(s *cdp.Session, refs *RefStore, sel *api.TargetSelector) (*api.TargetSelector, error) {
+	if sel == nil || sel.Ref == "" {
+		return sel, nil
+	}
+	if refs == nil {
+		return nil, fmt.Errorf("stale ref %q: CDP ref store was not loaded", sel.Ref)
+	}
+	backendNodeID, ok := refs.Lookup(sel.Ref)
+	if !ok {
+		return nil, fmt.Errorf("stale ref %q: not found in the CDP ref store", sel.Ref)
+	}
+	x, y, err := cdp.ResolveBackendNodeCoordinates(s, backendNodeID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s (backendNodeId %d): %w", sel.Ref, backendNodeID, err)
+	}
+	return &api.TargetSelector{X: &x, Y: &y}, nil
 }
 
 // runInspectCDP routes inspect verbs (find, getValue, getText, getHTML,

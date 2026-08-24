@@ -379,6 +379,138 @@ describe("wait action (DOM)", () => {
 	});
 });
 
+describe("low-level synthetic input", () => {
+	let originalElementFromPoint: typeof document.elementFromPoint;
+
+	beforeEach(() => {
+		document.body.innerHTML = "";
+		originalElementFromPoint = document.elementFromPoint;
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+		document.elementFromPoint = originalElementFromPoint;
+	});
+
+	it("dispatches keyDown and keyUp with the resolved key payload", async () => {
+		const input = document.createElement("input");
+		input.id = "key-target";
+		document.body.appendChild(input);
+		const events: KeyboardEvent[] = [];
+		input.addEventListener("keydown", (event) => events.push(event));
+		input.addEventListener("keyup", (event) => events.push(event));
+
+		const down = await executeCommand({
+			id: "key-down",
+			action: "keyDown",
+			target: { selector: "#key-target" },
+			value: "Enter",
+		});
+		const up = await executeCommand({
+			id: "key-up",
+			action: "keyUp",
+			target: { selector: "#key-target" },
+			value: "Enter",
+		});
+
+		expect(down.success).toBe(true);
+		expect(up.success).toBe(true);
+		expect(events.map((event) => event.type)).toEqual(["keydown", "keyup"]);
+		expect(events[0].key).toBe("Enter");
+		expect(events[0].code).toBe("Enter");
+		expect(events[0].keyCode).toBe(13);
+		expect(events[1].keyCode).toBe(13);
+	});
+
+	it("routes coordinate mouseDown, mouseUp, and mouseMove through hit-testing", async () => {
+		const target = document.createElement("button");
+		target.id = "coordinate-target";
+		document.body.appendChild(target);
+		document.elementFromPoint = ((x: number, y: number) => {
+			expect(x).toBe(25);
+			expect(y).toBe(35);
+			return target;
+		}) as typeof document.elementFromPoint;
+		const events: MouseEvent[] = [];
+		target.addEventListener("mousedown", (event) => events.push(event));
+		target.addEventListener("mouseup", (event) => events.push(event));
+		target.addEventListener("mousemove", (event) => events.push(event));
+
+		for (const action of ["mouseDown", "mouseUp", "mouseMove"] as const) {
+			const result = await executeCommand({
+				id: action,
+				action,
+				target: { x: 25, y: 35 },
+			});
+			expect(result.success).toBe(true);
+		}
+
+		expect(events.map((event) => event.type)).toEqual([
+			"mousedown",
+			"mouseup",
+			"mousemove",
+		]);
+		// The listeners are installed on `target`; receiving all three events here
+		// proves coordinate hit-testing routed them to that element rather than body.
+		expect(
+			events.every((event) => event.clientX === 25 && event.clientY === 35),
+		).toBe(true);
+	});
+
+	it("routes drag source, intermediate, and destination events to hit-tested elements", async () => {
+		const source = document.createElement("div");
+		source.id = "drag-source";
+		const destination = document.createElement("div");
+		destination.id = "drag-destination";
+		document.body.append(source, destination);
+		document.elementFromPoint = ((x: number) =>
+			x < 50 ? source : destination) as typeof document.elementFromPoint;
+		const events: string[] = [];
+		for (const element of [source, destination]) {
+			for (const type of ["mousedown", "mousemove", "mouseup"] as const) {
+				element.addEventListener(type, (event) =>
+					events.push(`${event.type}:${element.id}:${event.clientX}`),
+				);
+			}
+		}
+
+		const result = await executeCommand({
+			id: "drag",
+			action: "drag",
+			target: { x: 10, y: 10 },
+			options: { endTarget: { x: 90, y: 90 }, steps: 2 },
+		});
+
+		expect(result.success).toBe(true);
+		expect(events).toEqual([
+			"mousedown:drag-source:10",
+			"mousemove:drag-destination:50",
+			"mousemove:drag-destination:90",
+			"mouseup:drag-destination:90",
+		]);
+	});
+
+	it("returns explicit errors for missing coordinate hit targets and destinations", async () => {
+		document.elementFromPoint = (() =>
+			null) as typeof document.elementFromPoint;
+		const noHit = await executeCommand({
+			id: "no-hit",
+			action: "mouseDown",
+			target: { x: 1, y: 2 },
+		});
+		expect(noHit.success).toBe(false);
+		expect(noHit.error).toMatch(/no element exists/i);
+
+		const missingDestination = await executeCommand({
+			id: "missing-destination",
+			action: "drag",
+			target: { selector: "#source" },
+		});
+		expect(missingDestination.success).toBe(false);
+		expect(missingDestination.error).toMatch(/destination selector/i);
+	});
+});
+
 describe("scrollTo action (DOM)", () => {
 	beforeEach(() => {
 		document.body.innerHTML = "";

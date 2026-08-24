@@ -50,6 +50,12 @@ const CDP_INPUT_RELAY_ACTIONS = new Set<CommandAction>([
 	"dblclick",
 	"rightclick",
 	"pressKey",
+	"keyDown",
+	"keyUp",
+	"mouseDown",
+	"mouseUp",
+	"mouseMove",
+	"drag",
 	"type",
 ]);
 
@@ -300,6 +306,53 @@ async function executeAction(command: Command): Promise<unknown> {
 				requireValue(value, action),
 				waitTimeout(options),
 			);
+		case "keyDown":
+			return handleKeyDown(
+				target,
+				requireValue(value, action),
+				waitTimeout(options),
+			);
+		case "keyUp":
+			return handleKeyUp(
+				target,
+				requireValue(value, action),
+				waitTimeout(options),
+			);
+		case "mouseDown":
+			return handleMouseDown(
+				requireTarget(target, action),
+				waitTimeout(options),
+			);
+		case "mouseUp":
+			return handleMouseUp(requireTarget(target, action), waitTimeout(options));
+		case "mouseMove":
+			return handleMouseMove(
+				requireTarget(target, action),
+				waitTimeout(options),
+			);
+		case "drag": {
+			const endTarget =
+				(options?.endTarget as TargetSelector) ??
+				(options?.target as TargetSelector);
+			// Backward compat: value may carry dest selector as plain CSS string
+			const endSel: TargetSelector | undefined = endTarget
+				? endTarget
+				: value
+					? { selector: value }
+					: undefined;
+			if (!endSel) {
+				throw new Error(
+					`Action "drag" requires a destination selector (value or options.endTarget)`,
+				);
+			}
+			return handleDrag(
+				requireTarget(target, action),
+				endSel,
+				waitTimeout(options),
+				(options?.steps as number) ?? 5,
+				(options?.delay as number) ?? 0,
+			);
+		}
 		case "selectText":
 			return handleSelectText(
 				requireTarget(target, action),
@@ -948,6 +1001,422 @@ async function handlePressKey(
 
 	element.dispatchEvent(keyDownEvent);
 	element.dispatchEvent(keyUpEvent);
+}
+
+async function handleKeyDown(
+	target: TargetSelector | undefined,
+	key: string,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = target
+		? ((await waitForActionableElement(target, {
+				timeoutMs,
+				requireEnabled: true,
+			})) as HTMLElement)
+		: ((document.activeElement as HTMLElement | null) ?? document.body);
+	element.focus();
+	const descriptor = resolveKey(key);
+	element.dispatchEvent(
+		new KeyboardEvent("keydown", {
+			bubbles: true,
+			key: descriptor.key,
+			code: descriptor.code,
+			keyCode: descriptor.windowsVirtualKeyCode,
+			which: descriptor.windowsVirtualKeyCode,
+		}),
+	);
+}
+
+async function handleKeyUp(
+	target: TargetSelector | undefined,
+	key: string,
+	timeoutMs = 5000,
+): Promise<void> {
+	const element = target
+		? ((await waitForActionableElement(target, {
+				timeoutMs,
+				requireEnabled: true,
+			})) as HTMLElement)
+		: ((document.activeElement as HTMLElement | null) ?? document.body);
+	element.focus();
+	const descriptor = resolveKey(key);
+	element.dispatchEvent(
+		new KeyboardEvent("keyup", {
+			bubbles: true,
+			key: descriptor.key,
+			code: descriptor.code,
+			keyCode: descriptor.windowsVirtualKeyCode,
+			which: descriptor.windowsVirtualKeyCode,
+		}),
+	);
+}
+
+/**
+ * Resolve viewport coordinates to the element that synthetic events should
+ * reach. Synthetic DOM events do not perform browser hit-testing from their
+ * client coordinates, so dispatching them on `document.body` would bypass the
+ * page control under the requested point.
+ */
+function resolveSyntheticCoordinateTarget(x: number, y: number): Element {
+	if (typeof document.elementFromPoint !== "function") {
+		throw new Error(
+			`Cannot dispatch coordinate input at (${x}, ${y}): document.elementFromPoint is unavailable`,
+		);
+	}
+	const element = document.elementFromPoint(x, y);
+	if (!element) {
+		throw new Error(
+			`Cannot dispatch coordinate input at (${x}, ${y}): no element exists at the requested viewport coordinates`,
+		);
+	}
+	return element;
+}
+
+async function handleMouseDown(
+	target: TargetSelector,
+	timeoutMs = 5000,
+): Promise<void> {
+	if (typeof target.x === "number" && typeof target.y === "number") {
+		const x = target.x;
+		const y = target.y;
+		const mouseInit: MouseEventInit = {
+			bubbles: true,
+			cancelable: true,
+			view: window,
+			button: 0,
+			clientX: x,
+			clientY: y,
+		};
+		const pointerInit: PointerEventInit = {
+			bubbles: true,
+			cancelable: true,
+			view: window,
+			pointerId: 1,
+			pointerType: "mouse",
+			button: 0,
+			buttons: 1,
+			clientX: x,
+			clientY: y,
+		};
+		const targetElement = resolveSyntheticCoordinateTarget(x, y);
+		targetElement.dispatchEvent(
+			typeof PointerEvent !== "undefined"
+				? new PointerEvent("pointerdown", pointerInit)
+				: new MouseEvent("pointerdown", mouseInit),
+		);
+		targetElement.dispatchEvent(new MouseEvent("mousedown", mouseInit));
+		return;
+	}
+	const element = await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: true,
+	});
+	element.scrollIntoView({ behavior: "auto", block: "center" });
+	const rect = element.getBoundingClientRect();
+	const x = rect.left + rect.width / 2;
+	const y = rect.top + rect.height / 2;
+	const mouseInit: MouseEventInit = {
+		bubbles: true,
+		cancelable: true,
+		view: window,
+		button: 0,
+		clientX: x,
+		clientY: y,
+	};
+	const pointerInit: PointerEventInit = {
+		bubbles: true,
+		cancelable: true,
+		view: window,
+		pointerId: 1,
+		pointerType: "mouse",
+		button: 0,
+		buttons: 1,
+		clientX: x,
+		clientY: y,
+	};
+	const el = element as HTMLElement;
+	el.dispatchEvent(
+		typeof PointerEvent !== "undefined"
+			? new PointerEvent("pointerdown", pointerInit)
+			: new MouseEvent("pointerdown", mouseInit),
+	);
+	el.dispatchEvent(new MouseEvent("mousedown", mouseInit));
+}
+
+async function handleMouseUp(
+	target: TargetSelector,
+	timeoutMs = 5000,
+): Promise<void> {
+	if (typeof target.x === "number" && typeof target.y === "number") {
+		const x = target.x;
+		const y = target.y;
+		const mouseInit: MouseEventInit = {
+			bubbles: true,
+			cancelable: true,
+			view: window,
+			button: 0,
+			clientX: x,
+			clientY: y,
+		};
+		const pointerInit: PointerEventInit = {
+			bubbles: true,
+			cancelable: true,
+			view: window,
+			pointerId: 1,
+			pointerType: "mouse",
+			button: 0,
+			buttons: 0,
+			clientX: x,
+			clientY: y,
+		};
+		const targetElement = resolveSyntheticCoordinateTarget(x, y);
+		targetElement.dispatchEvent(
+			typeof PointerEvent !== "undefined"
+				? new PointerEvent("pointerup", pointerInit)
+				: new MouseEvent("pointerup", mouseInit),
+		);
+		targetElement.dispatchEvent(new MouseEvent("mouseup", mouseInit));
+		return;
+	}
+	const element = await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: true,
+	});
+	element.scrollIntoView({ behavior: "auto", block: "center" });
+	const rect = element.getBoundingClientRect();
+	const x = rect.left + rect.width / 2;
+	const y = rect.top + rect.height / 2;
+	const mouseInit: MouseEventInit = {
+		bubbles: true,
+		cancelable: true,
+		view: window,
+		button: 0,
+		clientX: x,
+		clientY: y,
+	};
+	const pointerInit: PointerEventInit = {
+		bubbles: true,
+		cancelable: true,
+		view: window,
+		pointerId: 1,
+		pointerType: "mouse",
+		button: 0,
+		buttons: 0,
+		clientX: x,
+		clientY: y,
+	};
+	const el = element as HTMLElement;
+	// Primitive mouseUp does NOT synthesize a click - caller composes click from down+up if needed.
+	el.dispatchEvent(
+		typeof PointerEvent !== "undefined"
+			? new PointerEvent("pointerup", pointerInit)
+			: new MouseEvent("pointerup", mouseInit),
+	);
+	el.dispatchEvent(new MouseEvent("mouseup", mouseInit));
+}
+
+async function handleMouseMove(
+	target: TargetSelector,
+	timeoutMs = 5000,
+): Promise<void> {
+	if (typeof target.x === "number" && typeof target.y === "number") {
+		const x = target.x;
+		const y = target.y;
+		const mouseInit: MouseEventInit = {
+			bubbles: true,
+			cancelable: true,
+			view: window,
+			clientX: x,
+			clientY: y,
+		};
+		const pointerInit: PointerEventInit = {
+			bubbles: true,
+			cancelable: true,
+			view: window,
+			pointerId: 1,
+			pointerType: "mouse",
+			button: 0,
+			buttons: 0,
+			clientX: x,
+			clientY: y,
+		};
+		const targetElement = resolveSyntheticCoordinateTarget(x, y);
+		targetElement.dispatchEvent(
+			typeof PointerEvent !== "undefined"
+				? new PointerEvent("pointermove", pointerInit)
+				: new MouseEvent("pointermove", mouseInit as MouseEventInit),
+		);
+		targetElement.dispatchEvent(new MouseEvent("mousemove", mouseInit));
+		return;
+	}
+	const element = await waitForActionableElement(target, {
+		timeoutMs,
+		requireEnabled: false,
+	});
+	element.scrollIntoView({ behavior: "auto", block: "center" });
+	const rect = element.getBoundingClientRect();
+	const x = rect.left + rect.width / 2;
+	const y = rect.top + rect.height / 2;
+	const mouseInit: MouseEventInit = {
+		bubbles: true,
+		cancelable: true,
+		view: window,
+		clientX: x,
+		clientY: y,
+	};
+	const pointerInit: PointerEventInit = {
+		bubbles: true,
+		cancelable: true,
+		view: window,
+		pointerId: 1,
+		pointerType: "mouse",
+		clientX: x,
+		clientY: y,
+	};
+	const el = element as HTMLElement;
+	el.dispatchEvent(
+		typeof PointerEvent !== "undefined"
+			? new PointerEvent("pointermove", pointerInit)
+			: new MouseEvent("pointermove", mouseInit as MouseEventInit),
+	);
+	el.dispatchEvent(new MouseEvent("mousemove", mouseInit));
+}
+
+async function handleDrag(
+	source: TargetSelector,
+	dest: TargetSelector,
+	timeoutMs = 5000,
+	steps = 5,
+	delayMs = 0,
+): Promise<void> {
+	async function getDragPoint(sel: TargetSelector): Promise<{
+		x: number;
+		y: number;
+		element: Element;
+	}> {
+		if (typeof sel.x === "number" && typeof sel.y === "number") {
+			return {
+				x: sel.x,
+				y: sel.y,
+				element: resolveSyntheticCoordinateTarget(sel.x, sel.y),
+			};
+		}
+		const el = await waitForActionableElement(sel, {
+			timeoutMs,
+			requireEnabled: true,
+		});
+		el.scrollIntoView({ behavior: "auto", block: "center" });
+		const rect = el.getBoundingClientRect();
+		return {
+			x: rect.left + rect.width / 2,
+			y: rect.top + rect.height / 2,
+			element: el,
+		};
+	}
+
+	const src = await getDragPoint(source);
+	const dst = await getDragPoint(dest);
+	const sx = src.x;
+	const sy = src.y;
+	const dx = dst.x;
+	const dy = dst.y;
+	const srcEl = src.element;
+	const dstEl = dst.element;
+
+	const n = Math.max(1, Math.min(100, Math.floor(steps)));
+
+	// Press at source
+	const downMouse: MouseEventInit = {
+		bubbles: true,
+		cancelable: true,
+		view: window,
+		button: 0,
+		clientX: sx,
+		clientY: sy,
+	};
+	const downPointer: PointerEventInit = {
+		bubbles: true,
+		cancelable: true,
+		view: window,
+		pointerId: 1,
+		pointerType: "mouse",
+		button: 0,
+		buttons: 1,
+		clientX: sx,
+		clientY: sy,
+	};
+	const s = srcEl;
+	s.dispatchEvent(
+		typeof PointerEvent !== "undefined"
+			? new PointerEvent("pointerdown", downPointer)
+			: new MouseEvent("pointerdown", downMouse),
+	);
+	s.dispatchEvent(new MouseEvent("mousedown", downMouse));
+
+	// Interpolated moves - dispatched on document so listeners on window/document see them
+	for (let i = 1; i <= n; i++) {
+		const t = i / n;
+		const x = sx + (dx - sx) * t;
+		const y = sy + (dy - sy) * t;
+		const moveMouse: MouseEventInit = {
+			bubbles: true,
+			cancelable: true,
+			view: window,
+			clientX: x,
+			clientY: y,
+		};
+		const movePointer: PointerEventInit = {
+			bubbles: true,
+			cancelable: true,
+			view: window,
+			pointerId: 1,
+			pointerType: "mouse",
+			buttons: 1,
+			clientX: x,
+			clientY: y,
+		};
+		// Synthetic events do not hit-test from clientX/clientY. Selector targets
+		// already have their resolved element; coordinate targets are hit-tested
+		// for every intermediate point so movement follows the page's controls.
+		const targetEl = i === n ? dstEl : resolveSyntheticCoordinateTarget(x, y);
+		targetEl.dispatchEvent(
+			typeof PointerEvent !== "undefined"
+				? new PointerEvent("pointermove", movePointer)
+				: new MouseEvent("pointermove", moveMouse),
+		);
+		targetEl.dispatchEvent(new MouseEvent("mousemove", moveMouse));
+		if (delayMs > 0) {
+			await new Promise((r) => setTimeout(r, delayMs));
+		}
+	}
+
+	// Release at dest - does not emit click
+	const upMouse: MouseEventInit = {
+		bubbles: true,
+		cancelable: true,
+		view: window,
+		button: 0,
+		clientX: dx,
+		clientY: dy,
+	};
+	const upPointer: PointerEventInit = {
+		bubbles: true,
+		cancelable: true,
+		view: window,
+		pointerId: 1,
+		pointerType: "mouse",
+		button: 0,
+		buttons: 0,
+		clientX: dx,
+		clientY: dy,
+	};
+	const d = dstEl;
+	d.dispatchEvent(
+		typeof PointerEvent !== "undefined"
+			? new PointerEvent("pointerup", upPointer)
+			: new MouseEvent("pointerup", upMouse),
+	);
+	d.dispatchEvent(new MouseEvent("mouseup", upMouse));
 }
 
 /**

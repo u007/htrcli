@@ -293,8 +293,8 @@ htrcli tabs get <id>                       # Get tab info
 
 ```bash
 htrcli open <url>                          # Navigate to URL
-htrcli back                                # Go back (errors if no history)
-htrcli forward                             # Go forward (errors if no history)
+htrcli back [steps]                        # Go back 1 step, or N steps (e.g. back 3)
+htrcli forward [steps]                     # Go forward 1 step, or N steps (e.g. forward 2)
 htrcli reload                              # Reload page
 ```
 
@@ -302,7 +302,9 @@ All navigation commands wait for the destination page to finish loading
 (`document.readyState === "complete"`, up to 25s) before returning. `back` and
 `forward` fail with an explicit "No previous/forward page in this tab's
 history" error when the tab has no entry to navigate to, instead of silently
-succeeding.
+succeeding. `back 3` / `forward 2` loop single-step navigations sequentially;
+if history runs out partway the command stops and reports how many steps
+succeeded (e.g. `back 2/3: No previous page ... (went back 1 step(s) before error)`).
 
 ### Interaction
 
@@ -312,13 +314,28 @@ htrcli dblclick <selector>                 # Double-click
 htrcli fill <selector> <value>             # Clear and fill
 htrcli type <selector> <value>             # Append text
 htrcli hover <selector>                    # Hover
-htrcli press <key>                         # Press key
+htrcli press <key>                         # Press key (keyDown + keyUp)
+htrcli keydown <key>                       # Key down only (hold; use keyup to release)
+htrcli keyup <key>                         # Key up only
+htrcli mousedown <selector>  # or xy=100,200 for viewport coords
+htrcli mouseup <selector>    # or xy=100,200
+htrcli mousemove <selector>  # or xy=100,200
+htrcli drag <source> <target> [--steps 5] [--delay 0]  # each endpoint may be a selector or xy=100,200; e.g. htrcli drag xy=100,200 xy=300,400 or htrcli drag "#handle" xy=500,300
 htrcli select <selector> <value>           # Select dropdown
 htrcli check <selector>                    # Check checkbox
 htrcli uncheck <selector>                  # Uncheck checkbox
 htrcli scroll <direction> [pixels]         # Scroll page
 htrcli clear <selector>                    # Clear input
 ```
+
+All mouse coordinates are viewport CSS pixels (same as CDP Input.dispatchMouseEvent).
+`xy=` bypasses selector lookup and waiting, but synthetic Firefox input still uses
+`document.elementFromPoint` to route the event to the element under the point;
+the command fails explicitly when no element is hit. CDP coordinates are sent
+directly to the protocol.
+
+Drag `--steps` is clamped to `1..100` (default `5`) and `--delay` to
+`0..2000ms` (default `0`) on both transports.
 
 Interaction commands (`click`, `dblclick`, `rightrclick`, `fill`, `type`,
 `clear`, `select`, `check`, `uncheck`, `press`, and the visible-only `hover`,
@@ -331,12 +348,16 @@ the element never becomes actionable the command fails with a descriptive error
 semantics and do not wait.
 
 
-On Chrome, `click`, `press`, and `type` are dispatched as **trusted** input
+On Chrome, `click`, `press`, `keydown`/`keyup`, `mousedown`/`mouseup`/`mousemove`/`drag`, and `type` are dispatched as **trusted** input
 events via the Chrome DevTools Protocol. The page's default actions fire as if a
 real user interacted: pressing `Enter` in a field submits the form, clicks pass
 `event.isTrusted` checks, and focus/selection behave natively. On Firefox (no
 `chrome.debugger` API) the same commands use synthetic events (with pointer-event
 support) — they drive most automation but do not count as trusted.
+`drag` dispatches pointer/mouse events only; it does **not** fire native HTML5
+`dragstart`/`dragover`/`drop` with `DataTransfer`. Use `eval` with `DataTransfer` for native DnD.
+`keydown`/`keyup` are stateless per-command (no daemon-side held-key state) — the caller
+tracks hold by pairing `keydown Shift` ... `keyup Shift`.
 
 While attached, Chrome shows the **“HTR NControl is debugging this browser”
 infobar**; this is expected and also appears for `eval`/`print` on Chrome.

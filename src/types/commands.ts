@@ -62,6 +62,10 @@ export interface TargetSelector {
 	/** Persistent element ref (@e1, @e2, ...) minted by a prior find --ref */
 	ref?: string;
 
+	/** Viewport coordinates (bypasses element lookup) — use as xy=100,200 */
+	x?: number;
+	y?: number;
+
 	/** Wait for element to appear in DOM (default: false) */
 	waitForAppear?: boolean;
 	/** Timeout in ms for wait (default: 5000) */
@@ -134,6 +138,12 @@ export type CommandAction =
 	| "check"
 	| "uncheck"
 	| "pressKey"
+	| "keyDown"
+	| "keyUp"
+	| "mouseDown"
+	| "mouseUp"
+	| "mouseMove"
+	| "drag"
 	| "selectText"
 	// Internal: background asks the content script to prepare an element before a
 	// trusted (CDP) click/key/type dispatch — wait actionable, scroll into view,

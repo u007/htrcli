@@ -26,6 +26,12 @@ export const CDP_INPUT_ACTIONS = new Set<Command["action"]>([
 	"dblclick",
 	"rightclick",
 	"pressKey",
+	"keyDown",
+	"keyUp",
+	"mouseDown",
+	"mouseUp",
+	"mouseMove",
+	"drag",
 	"type",
 ]);
 
@@ -185,6 +191,242 @@ export async function dispatchCdpClick(
 	return { id: command.id, success: true, data: { x: coords.x, y: coords.y } };
 }
 
+function literalCoords(
+	target: Command["target"],
+): { x: number; y: number } | undefined {
+	if (target && typeof target.x === "number" && typeof target.y === "number") {
+		return { x: target.x, y: target.y };
+	}
+	return undefined;
+}
+
+function requirePreparedCoords(
+	coords: Awaited<ReturnType<PrepareSender>>,
+	errorMessage: string,
+): { x: number; y: number } {
+	if (typeof coords.x !== "number" || typeof coords.y !== "number") {
+		throw new Error(errorMessage);
+	}
+	return { x: coords.x, y: coords.y };
+}
+
+async function resolveCoords(
+	target: Command["target"],
+	prepare: PrepareSender,
+	command: Command,
+	errorMessage = "prepareClick did not return viewport coordinates",
+): Promise<{ x: number; y: number }> {
+	// Literal viewport coordinates via xy=100,200 bypass element lookup
+	const literal = literalCoords(target);
+	if (literal) return literal;
+
+	return requirePreparedCoords(
+		await prepare({
+			action: "prepareClick",
+			id: command.id,
+			target,
+			options: command.options,
+		}),
+		errorMessage,
+	);
+}
+
+export async function dispatchCdpMouseDown(
+	tabId: number,
+	command: Command,
+	deps: CdpDispatchDeps = {},
+): Promise<CommandResult> {
+	const prepare = deps.prepare ?? ((c) => defaultPrepare(tabId, c));
+	const coords = await resolveCoords(command.target, prepare, command);
+	await runWithDebugger(tabId, deps.send, async (send) => {
+		await send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			x: coords.x,
+			y: coords.y,
+			button: "left",
+			clickCount: 1,
+			buttons: 1,
+			modifiers: 0,
+		});
+	});
+	return { id: command.id, success: true, data: { x: coords.x, y: coords.y } };
+}
+
+export async function dispatchCdpMouseUp(
+	tabId: number,
+	command: Command,
+	deps: CdpDispatchDeps = {},
+): Promise<CommandResult> {
+	const prepare = deps.prepare ?? ((c) => defaultPrepare(tabId, c));
+	const coords = await resolveCoords(command.target, prepare, command);
+	await runWithDebugger(tabId, deps.send, async (send) => {
+		await send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			x: coords.x,
+			y: coords.y,
+			button: "left",
+			clickCount: 1,
+			buttons: 0,
+			modifiers: 0,
+		});
+	});
+	return { id: command.id, success: true, data: { x: coords.x, y: coords.y } };
+}
+
+export async function dispatchCdpMouseMove(
+	tabId: number,
+	command: Command,
+	deps: CdpDispatchDeps = {},
+): Promise<CommandResult> {
+	const prepare = deps.prepare ?? ((c) => defaultPrepare(tabId, c));
+	const coords = await resolveCoords(command.target, prepare, command);
+	await runWithDebugger(tabId, deps.send, async (send) => {
+		await send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: coords.x,
+			y: coords.y,
+			button: "none",
+			clickCount: 0,
+			buttons: 0,
+			modifiers: 0,
+		});
+	});
+	return { id: command.id, success: true, data: { x: coords.x, y: coords.y } };
+}
+
+export async function dispatchCdpDrag(
+	tabId: number,
+	command: Command,
+	deps: CdpDispatchDeps = {},
+): Promise<CommandResult> {
+	const prepare = deps.prepare ?? ((c) => defaultPrepare(tabId, c));
+	const src = await resolveCoords(command.target, prepare, command);
+	const destination = command.options?.endTarget ?? command.options?.target;
+	let destTarget: Command["target"];
+	if (destination && typeof destination === "object") {
+		destTarget = destination as Command["target"];
+	} else if (typeof command.value === "string" && command.value.length > 0) {
+		destTarget = { selector: command.value };
+	} else {
+		throw new Error(
+			"drag requires a destination selector (value or options.endTarget)",
+		);
+	}
+	const dest = await resolveCoords(
+		destTarget,
+		prepare,
+		{ ...command, action: "prepareClick", target: destTarget },
+		"prepareClick did not return viewport coordinates for drag destination",
+	);
+	const steps = Math.max(
+		1,
+		Math.min(100, Math.floor((command.options?.steps as number) ?? 5)),
+	);
+	const delay = Math.max(
+		0,
+		Math.min(2000, Math.floor((command.options?.delay as number) ?? 0)),
+	);
+	await runWithDebugger(tabId, deps.send, async (send) => {
+		await send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			x: src.x,
+			y: src.y,
+			button: "left",
+			clickCount: 1,
+			buttons: 1,
+			modifiers: 0,
+		});
+		for (let i = 1; i <= steps; i++) {
+			const t = i / steps;
+			const x = src.x + (dest.x - src.x) * t;
+			const y = src.y + (dest.y - src.y) * t;
+			await send("Input.dispatchMouseEvent", {
+				type: "mouseMoved",
+				x,
+				y,
+				button: "left",
+				clickCount: 0,
+				buttons: 1,
+				modifiers: 0,
+			});
+			if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+		}
+		await send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			x: dest.x,
+			y: dest.y,
+			button: "left",
+			clickCount: 1,
+			buttons: 0,
+			modifiers: 0,
+		});
+	});
+	return { id: command.id, success: true, data: { from: src, to: dest } };
+}
+
+export async function dispatchCdpKeyDown(
+	tabId: number,
+	command: Command,
+	deps: CdpDispatchDeps = {},
+): Promise<CommandResult> {
+	const value = command.value;
+	if (typeof value !== "string" || value.length === 0) {
+		throw new Error("keyDown requires a non-empty key value");
+	}
+	const descriptor = resolveKey(value);
+	const prepare = deps.prepare ?? ((c) => defaultPrepare(tabId, c));
+	await prepare({
+		action: "prepareKeys",
+		id: command.id,
+		target: command.target,
+		options: command.options,
+	});
+	const base = {
+		key: descriptor.key,
+		code: descriptor.code,
+		windowsVirtualKeyCode: descriptor.windowsVirtualKeyCode,
+	};
+	await runWithDebugger(tabId, deps.send, async (send) => {
+		await send("Input.dispatchKeyEvent", {
+			type: "keyDown",
+			...base,
+			...(descriptor.text !== undefined ? { text: descriptor.text } : {}),
+		});
+	});
+	return { id: command.id, success: true };
+}
+
+export async function dispatchCdpKeyUp(
+	tabId: number,
+	command: Command,
+	deps: CdpDispatchDeps = {},
+): Promise<CommandResult> {
+	const value = command.value;
+	if (typeof value !== "string" || value.length === 0) {
+		throw new Error("keyUp requires a non-empty key value");
+	}
+	const descriptor = resolveKey(value);
+	const prepare = deps.prepare ?? ((c) => defaultPrepare(tabId, c));
+	await prepare({
+		action: "prepareKeys",
+		id: command.id,
+		target: command.target,
+		options: command.options,
+	});
+	const base = {
+		key: descriptor.key,
+		code: descriptor.code,
+		windowsVirtualKeyCode: descriptor.windowsVirtualKeyCode,
+	};
+	await runWithDebugger(tabId, deps.send, async (send) => {
+		await send("Input.dispatchKeyEvent", {
+			type: "keyUp",
+			...base,
+		});
+	});
+	return { id: command.id, success: true };
+}
+
 /**
  * Trusted key press. `prepareKeys` (element wait + focus), then attaches and
  * dispatches `keyDown` (with `text` for printable keys) + `keyUp`, built from
@@ -295,8 +537,20 @@ export async function dispatchCdpInput(
 		case "dblclick":
 		case "rightclick":
 			return dispatchCdpClick(tabId, command, deps);
+		case "mouseDown":
+			return dispatchCdpMouseDown(tabId, command, deps);
+		case "mouseUp":
+			return dispatchCdpMouseUp(tabId, command, deps);
+		case "mouseMove":
+			return dispatchCdpMouseMove(tabId, command, deps);
+		case "drag":
+			return dispatchCdpDrag(tabId, command, deps);
 		case "pressKey":
 			return dispatchCdpKey(tabId, command, deps);
+		case "keyDown":
+			return dispatchCdpKeyDown(tabId, command, deps);
+		case "keyUp":
+			return dispatchCdpKeyUp(tabId, command, deps);
 		case "type":
 			return dispatchCdpType(tabId, command, deps);
 		default:

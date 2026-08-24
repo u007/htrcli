@@ -853,6 +853,12 @@
     "dblclick",
     "rightclick",
     "pressKey",
+    "keyDown",
+    "keyUp",
+    "mouseDown",
+    "mouseUp",
+    "mouseMove",
+    "drag",
     "type"
   ]);
   function cdpInputAvailable() {
@@ -1036,6 +1042,46 @@
           requireValue(value, action),
           waitTimeout(options)
         );
+      case "keyDown":
+        return handleKeyDown(
+          target,
+          requireValue(value, action),
+          waitTimeout(options)
+        );
+      case "keyUp":
+        return handleKeyUp(
+          target,
+          requireValue(value, action),
+          waitTimeout(options)
+        );
+      case "mouseDown":
+        return handleMouseDown(
+          requireTarget(target, action),
+          waitTimeout(options)
+        );
+      case "mouseUp":
+        return handleMouseUp(requireTarget(target, action), waitTimeout(options));
+      case "mouseMove":
+        return handleMouseMove(
+          requireTarget(target, action),
+          waitTimeout(options)
+        );
+      case "drag": {
+        const endTarget = (options == null ? void 0 : options.endTarget) ?? (options == null ? void 0 : options.target);
+        const endSel = endTarget ? endTarget : value ? { selector: value } : void 0;
+        if (!endSel) {
+          throw new Error(
+            `Action "drag" requires a destination selector (value or options.endTarget)`
+          );
+        }
+        return handleDrag(
+          requireTarget(target, action),
+          endSel,
+          waitTimeout(options),
+          (options == null ? void 0 : options.steps) ?? 5,
+          (options == null ? void 0 : options.delay) ?? 0
+        );
+      }
       case "selectText":
         return handleSelectText(
           requireTarget(target, action),
@@ -1489,6 +1535,348 @@
     const keyUpEvent = new KeyboardEvent("keyup", keyInit);
     element.dispatchEvent(keyDownEvent);
     element.dispatchEvent(keyUpEvent);
+  }
+  async function handleKeyDown(target, key, timeoutMs = 5e3) {
+    const element = target ? await waitForActionableElement(target, {
+      timeoutMs,
+      requireEnabled: true
+    }) : document.activeElement ?? document.body;
+    element.focus();
+    const descriptor = resolveKey(key);
+    element.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        key: descriptor.key,
+        code: descriptor.code,
+        keyCode: descriptor.windowsVirtualKeyCode,
+        which: descriptor.windowsVirtualKeyCode
+      })
+    );
+  }
+  async function handleKeyUp(target, key, timeoutMs = 5e3) {
+    const element = target ? await waitForActionableElement(target, {
+      timeoutMs,
+      requireEnabled: true
+    }) : document.activeElement ?? document.body;
+    element.focus();
+    const descriptor = resolveKey(key);
+    element.dispatchEvent(
+      new KeyboardEvent("keyup", {
+        bubbles: true,
+        key: descriptor.key,
+        code: descriptor.code,
+        keyCode: descriptor.windowsVirtualKeyCode,
+        which: descriptor.windowsVirtualKeyCode
+      })
+    );
+  }
+  function resolveSyntheticCoordinateTarget(x, y) {
+    if (typeof document.elementFromPoint !== "function") {
+      throw new Error(
+        `Cannot dispatch coordinate input at (${x}, ${y}): document.elementFromPoint is unavailable`
+      );
+    }
+    const element = document.elementFromPoint(x, y);
+    if (!element) {
+      throw new Error(
+        `Cannot dispatch coordinate input at (${x}, ${y}): no element exists at the requested viewport coordinates`
+      );
+    }
+    return element;
+  }
+  async function handleMouseDown(target, timeoutMs = 5e3) {
+    if (typeof target.x === "number" && typeof target.y === "number") {
+      const x2 = target.x;
+      const y2 = target.y;
+      const mouseInit2 = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        button: 0,
+        clientX: x2,
+        clientY: y2
+      };
+      const pointerInit2 = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        pointerId: 1,
+        pointerType: "mouse",
+        button: 0,
+        buttons: 1,
+        clientX: x2,
+        clientY: y2
+      };
+      const targetElement = resolveSyntheticCoordinateTarget(x2, y2);
+      targetElement.dispatchEvent(
+        typeof PointerEvent !== "undefined" ? new PointerEvent("pointerdown", pointerInit2) : new MouseEvent("pointerdown", mouseInit2)
+      );
+      targetElement.dispatchEvent(new MouseEvent("mousedown", mouseInit2));
+      return;
+    }
+    const element = await waitForActionableElement(target, {
+      timeoutMs,
+      requireEnabled: true
+    });
+    element.scrollIntoView({ behavior: "auto", block: "center" });
+    const rect = element.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const mouseInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      button: 0,
+      clientX: x,
+      clientY: y
+    };
+    const pointerInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      pointerId: 1,
+      pointerType: "mouse",
+      button: 0,
+      buttons: 1,
+      clientX: x,
+      clientY: y
+    };
+    const el = element;
+    el.dispatchEvent(
+      typeof PointerEvent !== "undefined" ? new PointerEvent("pointerdown", pointerInit) : new MouseEvent("pointerdown", mouseInit)
+    );
+    el.dispatchEvent(new MouseEvent("mousedown", mouseInit));
+  }
+  async function handleMouseUp(target, timeoutMs = 5e3) {
+    if (typeof target.x === "number" && typeof target.y === "number") {
+      const x2 = target.x;
+      const y2 = target.y;
+      const mouseInit2 = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        button: 0,
+        clientX: x2,
+        clientY: y2
+      };
+      const pointerInit2 = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        pointerId: 1,
+        pointerType: "mouse",
+        button: 0,
+        buttons: 0,
+        clientX: x2,
+        clientY: y2
+      };
+      const targetElement = resolveSyntheticCoordinateTarget(x2, y2);
+      targetElement.dispatchEvent(
+        typeof PointerEvent !== "undefined" ? new PointerEvent("pointerup", pointerInit2) : new MouseEvent("pointerup", mouseInit2)
+      );
+      targetElement.dispatchEvent(new MouseEvent("mouseup", mouseInit2));
+      return;
+    }
+    const element = await waitForActionableElement(target, {
+      timeoutMs,
+      requireEnabled: true
+    });
+    element.scrollIntoView({ behavior: "auto", block: "center" });
+    const rect = element.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const mouseInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      button: 0,
+      clientX: x,
+      clientY: y
+    };
+    const pointerInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      pointerId: 1,
+      pointerType: "mouse",
+      button: 0,
+      buttons: 0,
+      clientX: x,
+      clientY: y
+    };
+    const el = element;
+    el.dispatchEvent(
+      typeof PointerEvent !== "undefined" ? new PointerEvent("pointerup", pointerInit) : new MouseEvent("pointerup", mouseInit)
+    );
+    el.dispatchEvent(new MouseEvent("mouseup", mouseInit));
+  }
+  async function handleMouseMove(target, timeoutMs = 5e3) {
+    if (typeof target.x === "number" && typeof target.y === "number") {
+      const x2 = target.x;
+      const y2 = target.y;
+      const mouseInit2 = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: x2,
+        clientY: y2
+      };
+      const pointerInit2 = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        pointerId: 1,
+        pointerType: "mouse",
+        button: 0,
+        buttons: 0,
+        clientX: x2,
+        clientY: y2
+      };
+      const targetElement = resolveSyntheticCoordinateTarget(x2, y2);
+      targetElement.dispatchEvent(
+        typeof PointerEvent !== "undefined" ? new PointerEvent("pointermove", pointerInit2) : new MouseEvent("pointermove", mouseInit2)
+      );
+      targetElement.dispatchEvent(new MouseEvent("mousemove", mouseInit2));
+      return;
+    }
+    const element = await waitForActionableElement(target, {
+      timeoutMs,
+      requireEnabled: false
+    });
+    element.scrollIntoView({ behavior: "auto", block: "center" });
+    const rect = element.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const mouseInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: x,
+      clientY: y
+    };
+    const pointerInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      pointerId: 1,
+      pointerType: "mouse",
+      clientX: x,
+      clientY: y
+    };
+    const el = element;
+    el.dispatchEvent(
+      typeof PointerEvent !== "undefined" ? new PointerEvent("pointermove", pointerInit) : new MouseEvent("pointermove", mouseInit)
+    );
+    el.dispatchEvent(new MouseEvent("mousemove", mouseInit));
+  }
+  async function handleDrag(source, dest, timeoutMs = 5e3, steps = 5, delayMs = 0) {
+    async function getDragPoint(sel) {
+      if (typeof sel.x === "number" && typeof sel.y === "number") {
+        return {
+          x: sel.x,
+          y: sel.y,
+          element: resolveSyntheticCoordinateTarget(sel.x, sel.y)
+        };
+      }
+      const el = await waitForActionableElement(sel, {
+        timeoutMs,
+        requireEnabled: true
+      });
+      el.scrollIntoView({ behavior: "auto", block: "center" });
+      const rect = el.getBoundingClientRect();
+      return {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+        element: el
+      };
+    }
+    const src = await getDragPoint(source);
+    const dst = await getDragPoint(dest);
+    const sx = src.x;
+    const sy = src.y;
+    const dx = dst.x;
+    const dy = dst.y;
+    const srcEl = src.element;
+    const dstEl = dst.element;
+    const n = Math.max(1, Math.min(100, Math.floor(steps)));
+    const downMouse = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      button: 0,
+      clientX: sx,
+      clientY: sy
+    };
+    const downPointer = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      pointerId: 1,
+      pointerType: "mouse",
+      button: 0,
+      buttons: 1,
+      clientX: sx,
+      clientY: sy
+    };
+    const s = srcEl;
+    s.dispatchEvent(
+      typeof PointerEvent !== "undefined" ? new PointerEvent("pointerdown", downPointer) : new MouseEvent("pointerdown", downMouse)
+    );
+    s.dispatchEvent(new MouseEvent("mousedown", downMouse));
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      const x = sx + (dx - sx) * t;
+      const y = sy + (dy - sy) * t;
+      const moveMouse = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: x,
+        clientY: y
+      };
+      const movePointer = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        pointerId: 1,
+        pointerType: "mouse",
+        buttons: 1,
+        clientX: x,
+        clientY: y
+      };
+      const targetEl = i === n ? dstEl : resolveSyntheticCoordinateTarget(x, y);
+      targetEl.dispatchEvent(
+        typeof PointerEvent !== "undefined" ? new PointerEvent("pointermove", movePointer) : new MouseEvent("pointermove", moveMouse)
+      );
+      targetEl.dispatchEvent(new MouseEvent("mousemove", moveMouse));
+      if (delayMs > 0) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+    const upMouse = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      button: 0,
+      clientX: dx,
+      clientY: dy
+    };
+    const upPointer = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      pointerId: 1,
+      pointerType: "mouse",
+      button: 0,
+      buttons: 0,
+      clientX: dx,
+      clientY: dy
+    };
+    const d = dstEl;
+    d.dispatchEvent(
+      typeof PointerEvent !== "undefined" ? new PointerEvent("pointerup", upPointer) : new MouseEvent("pointerup", upMouse)
+    );
+    d.dispatchEvent(new MouseEvent("mouseup", upMouse));
   }
   async function handlePrepareClick(target, timeoutMs = 5e3) {
     const element = await waitForActionableElement(target, {

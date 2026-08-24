@@ -1,6 +1,6 @@
 ---
 name: htrcli
-description: HTR NControl CLI (htrcli) usage guide. Read this before running any htrcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select, press), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, recording video, network capture/mocking, console watching, dialog handling, and more. Use when the user asks to control a browser, interact with a website, fill a form, click something, extract data, take a screenshot, or automate any browser task via HTR NControl.
+description: HTR NControl CLI (htrcli) usage guide. Read this before running any htrcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select, press, keydown/keyup, mousedown/mouseup/mousemove/drag with xy= viewport coordinates and @eN refs), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, recording video, network capture/mocking, console watching, dialog handling, and more. Use when the user asks to control a browser, interact with a website, fill a form, click something, drag, press keys, extract data, take a screenshot, or automate any browser task via HTR NControl.
 allowed-tools: Bash(htrcli:*), Bash(go run ./cmd/htrcli:*), Bash(make htrcli-*)
 ---
 
@@ -214,7 +214,7 @@ Scroll:   0, 350
 
 ### Selectors and refs
 
-Every interaction command accepts CSS selectors, semantic shortcuts, or refs:
+Every interaction command accepts CSS selectors, semantic shortcuts, refs, or viewport coordinates:
 
 ```bash
 htrcli click "#submit"                   # CSS selector
@@ -225,11 +225,13 @@ htrcli click "name=email"                # by name attribute
 htrcli click "placeholder=Search"        # by placeholder
 htrcli click "xpath=//button[1]"         # by XPath
 htrcli click "id=login"                  # by ID
+htrcli click "xy=100,200"                # viewport CSS pixels (no element lookup)
 
 # Refs — persistent handles minted by `--ref` on find/findAll
 htrcli find "#my-form" --ref             # mint @e3
 htrcli click @e3                         # use the ref
 htrcli fill @e3 "value"                  # fills the form
+htrcli click @e3                         # refs also work for mousedown/drag on CDP
 ```
 
 `find --ref` saves the ref to `~/.htrcli/refs.json`. Refs survive the CLI
@@ -248,32 +250,98 @@ htrcli select "select#country" "us"
 htrcli check   "#terms"                  # Check a checkbox
 htrcli uncheck "#newsletter"             # Uncheck a checkbox
 htrcli clear   "input[name=email]"       # Clear an input
-htrcli press   Enter                     # Press a key (no selector)
+htrcli press   Enter                     # Press a key (keyDown + keyUp)
 htrcli scroll  down 300                  # Scroll direction + pixels
+
+# Low-level keyboard primitives (stateless — caller tracks hold)
+htrcli keydown Shift                     # Key down only (hold)
+htrcli keyup   Shift                     # Key up to release
+htrcli keydown "Ctrl+a"                  # Modifier + key
+
+# Low-level mouse primitives (selector, @eN ref, or xy= coordinates)
+htrcli mousedown "#handle"               # Press mouse button down
+htrcli mousedown "xy=100,200"            # At viewport coordinates
+htrcli mouseup   "#dropzone"             # Release mouse button
+htrcli mousemove "xy=150,300"            # Move mouse (no button)
+
+# Drag (pointer/mouse events only — not native HTML5 DnD)
+htrcli drag "#handle" "#dropzone"                         # Selector → selector
+htrcli drag "xy=100,200" "xy=300,400"                      # Coords → coords
+htrcli drag "#handle" "xy=500,300" --steps 10 --delay 20  # Mixed + tuning
+htrcli drag @e1 @e2                                         # Ref → ref (CDP resolves via backendNodeId)
 ```
 
 Supported key names: Enter, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown,
 ArrowLeft, ArrowRight, Home, End, PageUp, PageDown, F1–F12,
 Control+a–z, Alt+a–z, Shift+a–z, Meta+a–z.
 
+### Viewport coordinates (`xy=`)
+
+Any selector argument can be `xy=X,Y` — viewport CSS pixels (same units as CDP `Input.dispatchMouseEvent`):
+
+```bash
+htrcli mousedown "xy=100,200"
+htrcli mousemove "xy=300,400"
+htrcli drag "xy=100,200" "xy=300,400"
+```
+
+`xy=` bypasses selector lookup and actionable-wait, but the transport still needs a target element to route the event:
+
+- **CDP transport** — coordinates are sent directly to `Input.dispatchMouseEvent`.
+- **Extension transport (Firefox)** — synthetic events are hit-tested with `document.elementFromPoint(x, y)` and dispatched on the element under the point. If no element is hit, the command fails explicitly. See `docs/gotchas/firefox-coordinate-input-requires-hit-testing.md`.
+
+Coordinates are always **viewport-relative**, not document-relative. Scroll position matters.
+
+### Low-level mouse primitives
+
+`mousedown` / `mouseup` / `mousemove` are single-event primitives built on the same trusted/synthetic path as `click`/`press`:
+
+- They accept any selector form: CSS, `role=`, `text=`, `label=`, `name=`, `placeholder=`, `xpath=`, `id=`, `@eN` ref, or `xy=X,Y`.
+- Element targets auto-wait for actionability (visible + enabled, up to 5 s) and scroll into view before the event — same as `click`. `xy=` targets skip the wait.
+- On Chrome/CDP they dispatch **trusted** `Input.dispatchMouseEvent` (`mousePressed` / `mouseReleased` / `mouseMoved`); on Firefox/extension they dispatch synthetic pointer + mouse events with hit-testing.
+
+Use `mousemove` to position the cursor without pressing a button; pair `mousedown` → … → `mouseup` to hold and release manually, or use `drag` for an interpolated sequence.
+
+### Drag
+
+`htrcli drag <source> <target> [--steps 5] [--delay 0]` dispatches an interpolated drag: `mousePressed` at source → N `mouseMoved` steps → `mouseReleased` at target.
+
+- Both endpoints accept any selector form (CSS, `@eN`, or `xy=X,Y`) and can be mixed (`"#handle"` → `"xy=500,300"`). On CDP, `@eN` refs are resolved in the command layer via the persistent `RefStore` (`~/.htrcli/refs.json`) → `backendNodeId` → `DOM.getBoxModel` + `Page.getLayoutMetrics` → viewport center. Stale refs fail explicitly. See `docs/gotchas/cdp-drag-element-ref-coordinate-resolution.md`.
+- **Bounds**: `--steps` is clamped to `1..100` (default `5`; values `<1` become `5`); `--delay` is clamped to `0..2000` ms (default `0`). See `docs/gotchas/drag-input-bounds.md`.
+- On the extension transport, Firefox drag dispatches pointer/mouse events with `elementFromPoint` hit-testing at source, intermediate steps, and destination — not on `document.body`.
+- **Known limitation — native HTML5 DnD is NOT synthesized**: `drag` dispatches `pointerdown`/`mousedown` → `pointermove`/`mousemove` → `pointerup`/`mouseup` only. It does **not** fire `dragstart`/`dragover`/`drop` with `DataTransfer`. Most custom sortables/sliders listen to pointer/mouse events and work; native `draggable=true` drop zones and file-drop handlers require `eval` with a manual `DataTransfer`. See `TODO.md` and `src/contentScript/commandExecutor.ts:handleDrag`.
+
+### Low-level keyboard primitives
+
+```bash
+htrcli press Enter          # composite: keyDown + keyUp
+htrcli keydown Shift        # hold
+htrcli keydown "Ctrl+a"
+htrcli keyup Shift          # release
+```
+
+- `press` is the composite trusted key press (dispatches `keyDown` then `keyUp`).
+- `keydown` / `keyup` are **stateless per-command** — there is no daemon-side held-key state. Holding a modifier across several commands is caller-managed (`keydown Shift` → … → `keyup Shift`). Modifiers are parsed per-command (`Ctrl+Shift+a` → bitmask) and empty key specs fail explicitly. See `docs/gotchas/drag-input-bounds.md` and `htrcli/README.md`.
+- Key events target the focused element when no selector is supplied; with a selector they auto-wait and focus that element first. On Chrome/CDP they use `Input.dispatchKeyEvent` with virtual-key/code mapping; on Firefox/extension they dispatch synthetic `KeyboardEvent`s.
+
 ### Actionable-wait behavior
 
-Every interaction command (`click`, `fill`, `type`, `clear`, `select`, `check`,
-`uncheck`, `press`, `hover`) **auto-waits** for its target to exist, be visible,
-and (where relevant) be enabled before acting. Default budget: 5s; tune per
-command with `--timeout <ms>` (capped at 20s). If the element never becomes
+Every element-targeted interaction command (`click`, `fill`, `type`, `clear`, `select`, `check`,
+`uncheck`, `press`, `hover`, `keydown`, `keyup`, `mousedown`, `mouseup`, `mousemove`, `drag`) **auto-waits** for its target to exist, be visible,
+and (where relevant) be enabled before acting. Default budget: 5 s; tune per
+command with `--timeout <ms>` (capped at 20 s). If the element never becomes
 actionable the command fails with a descriptive error naming the unmet condition
-(`not found` / `not visible` / `disabled`).
+(`not found` / `not visible` / `disabled`). `xy=` coordinate targets skip the wait (no element lookup), but on Firefox/extension the command still fails explicitly when `elementFromPoint` hits nothing.
 
 Read-only inspection commands (`find`, `text`, `value`, `attr`, `html`) keep
 instant, probing semantics and do **not** wait.
 
-On the CDP transport, `click`, `press`, `type`, `fill` are dispatched as
-**trusted** input via the Chrome DevTools Protocol, so the page's default
+On the CDP transport, `click`, `dblclick`, `rightclick`, `press`, `keydown`/`keyup`, `mousedown`/`mouseup`/`mousemove`/`drag`, and `type`/`fill` are dispatched as
+**trusted** input via the Chrome DevTools Protocol (`Input.dispatchMouseEvent` / `Input.dispatchKeyEvent`), so the page's default
 actions fire as if a real user interacted: pressing `Enter` in a field submits
-the form, clicks pass `event.isTrusted` checks. On the extension transport
-(and Firefox), the same commands use synthetic events with pointer-event
-support.
+the form, clicks pass `event.isTrusted` checks, and focus/selection behave natively. On the extension transport
+and Firefox (no `chrome.debugger`), the same commands use synthetic events with pointer-event
+support — they drive most automation but do not count as trusted. `drag` pointer/mouse dispatch follows the same split (trusted on CDP, synthetic with hit-testing on Firefox). `drag` never synthesizes native HTML5 `dragstart`/`dragover`/`drop` + `DataTransfer` on either transport — use `eval` with `DataTransfer` for native DnD.
 
 While connected via CDP, Chrome shows the **"HTR NControl is debugging this
 browser" infobar**; this is expected.
@@ -373,13 +441,13 @@ htrcli --tab 123 click "input[name=q]"
 
 ```bash
 htrcli open https://example.com          # navigate to URL
-htrcli back                              # browser back (errors if no history)
-htrcli forward                           # browser forward (errors if no history)
+htrcli back [steps]                      # browser back — 1 step, or N steps (e.g. back 3)
+htrcli forward [steps]                   # browser forward — 1 step, or N steps
 htrcli reload                            # reload page
 ```
 
 All navigation commands block until the new page reaches
-`document.readyState === "complete"` (up to 25s).
+`document.readyState === "complete"` (up to 25 s). `back` and `forward` fail with an explicit "No previous/forward page in this tab's history" error when history runs out; `back 3` / `forward 2` loop single-step navigations sequentially and report partial progress (e.g. `back 2/3: No previous page … (went back 1 step(s) before error)`). See `htrcli/README.md` for the full navigation contract.
 
 ## JavaScript execution
 
@@ -706,8 +774,8 @@ after the page loads.
 | `htrcli tabs list` | List connected tabs |
 | `htrcli tabs get <id>` | Get tab info |
 | `htrcli open <url>` | Navigate to URL |
-| `htrcli back` | Browser back |
-| `htrcli forward` | Browser forward |
+| `htrcli back [steps]` | Browser back — 1 step or N steps (`back 3` loops sequentially, reports partial progress) |
+| `htrcli forward [steps]` | Browser forward — 1 step or N steps |
 | `htrcli reload` | Reload page |
 | `htrcli screenshot [path]` | Take screenshot (viewport, --full-page, --annotate) |
 | `htrcli page` | Get page info |
@@ -716,7 +784,13 @@ after the page loads.
 | `htrcli fill <sel> <val>` | Clear and fill input |
 | `htrcli type <sel> <val>` | Append text to input |
 | `htrcli hover <sel>` | Hover element |
-| `htrcli press <key>` | Press key |
+| `htrcli press <key>` | Press key (keyDown + keyUp) |
+| `htrcli keydown <key>` | Key down only (hold; `keyup` to release, stateless, `--cdp` supported) |
+| `htrcli keyup <key>` | Key up only |
+| `htrcli mousedown <sel>` | Press mouse button down (`<sel>` or `xy=X,Y` or `@eN`, `--cdp` supported) |
+| `htrcli mouseup <sel>` | Release mouse button |
+| `htrcli mousemove <sel>` | Move mouse to element/coords (no button) |
+| `htrcli drag <src> <dst>` | Drag source → target (`xy=`/`@eN`/selector, `--steps 1..100` `--delay 0..2000ms`, pointer/mouse only, no native DnD) |
 | `htrcli select <sel> <val>` | Select dropdown option |
 | `htrcli check <sel>` | Check checkbox |
 | `htrcli uncheck <sel>` | Uncheck checkbox |

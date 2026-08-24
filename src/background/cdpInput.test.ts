@@ -3,8 +3,14 @@ import {
 	CDP_INPUT_ACTIONS,
 	ContentScriptNotReadyError,
 	dispatchCdpClick,
+	dispatchCdpDrag,
 	dispatchCdpInput,
 	dispatchCdpKey,
+	dispatchCdpKeyDown,
+	dispatchCdpKeyUp,
+	dispatchCdpMouseDown,
+	dispatchCdpMouseMove,
+	dispatchCdpMouseUp,
 	dispatchCdpType,
 } from "./cdpInput";
 
@@ -139,10 +145,106 @@ describe("CDP input dispatch — event sequence construction", () => {
 		expect([...CDP_INPUT_ACTIONS].sort()).toEqual([
 			"click",
 			"dblclick",
+			"drag",
+			"keyDown",
+			"keyUp",
+			"mouseDown",
+			"mouseMove",
+			"mouseUp",
 			"pressKey",
 			"rightclick",
 			"type",
 		]);
+	});
+
+	it("dispatches low-level mouse events with exact payloads", async () => {
+		const { send, calls } = recordingSend();
+		const command = (action: "mouseDown" | "mouseUp" | "mouseMove") => ({
+			id: action,
+			action,
+			target: { x: 20, y: 30 },
+		});
+
+		await dispatchCdpMouseDown(1, command("mouseDown"), {
+			send,
+			prepare: coordsPrepare,
+		});
+		await dispatchCdpMouseUp(1, command("mouseUp"), {
+			send,
+			prepare: coordsPrepare,
+		});
+		await dispatchCdpMouseMove(1, command("mouseMove"), {
+			send,
+			prepare: coordsPrepare,
+		});
+
+		expect(calls.map((call) => call.params.type)).toEqual([
+			"mousePressed",
+			"mouseReleased",
+			"mouseMoved",
+		]);
+		expect(calls[0].params).toMatchObject({
+			x: 20,
+			y: 30,
+			button: "left",
+			buttons: 1,
+			modifiers: 0,
+		});
+		expect(calls[1].params.buttons).toBe(0);
+		expect(calls[2].params).toMatchObject({ button: "none", clickCount: 0 });
+	});
+
+	it("dispatches keyDown and keyUp with the expected CDP payloads", async () => {
+		const { send, calls } = recordingSend();
+		const command = {
+			id: "key",
+			action: "keyDown" as const,
+			target: { selector: "#input" },
+			value: "Enter",
+		};
+		await dispatchCdpKeyDown(1, command, { send, prepare: focusPrepare });
+		await dispatchCdpKeyUp(
+			1,
+			{ ...command, action: "keyUp" },
+			{ send, prepare: focusPrepare },
+		);
+		expect(calls[0].params).toMatchObject({
+			type: "keyDown",
+			key: "Enter",
+			code: "Enter",
+			windowsVirtualKeyCode: 13,
+			text: "\r",
+		});
+		expect(calls[1].params).toMatchObject({
+			type: "keyUp",
+			key: "Enter",
+			code: "Enter",
+			windowsVirtualKeyCode: 13,
+		});
+		expect(calls[1].params.text).toBeUndefined();
+	});
+
+	it("validates both drag endpoints and emits bounded interpolated moves", async () => {
+		const { send, calls } = recordingSend();
+		await dispatchCdpDrag(
+			1,
+			{
+				id: "drag",
+				action: "drag",
+				target: { x: 10, y: 20 },
+				options: { endTarget: { x: 30, y: 40 }, steps: 2, delay: 0 },
+			},
+			{ send, prepare: coordsPrepare },
+		);
+		expect(calls.map((call) => call.params.type)).toEqual([
+			"mousePressed",
+			"mouseMoved",
+			"mouseMoved",
+			"mouseReleased",
+		]);
+		expect(calls[1].params).toMatchObject({ x: 20, y: 30, buttons: 1 });
+		expect(calls[2].params).toMatchObject({ x: 30, y: 40, buttons: 1 });
+		expect(calls[3].params).toMatchObject({ x: 30, y: 40, buttons: 0 });
 	});
 });
 
@@ -163,5 +265,97 @@ describe("CDP input dispatch — error handling", () => {
 		await expect(
 			dispatchCdpClick(1, clickCmd("click"), { send, prepare: notReady }),
 		).rejects.toBeInstanceOf(ContentScriptNotReadyError);
+	});
+
+	it("narrows missing drag destination coordinates", async () => {
+		const { send } = recordingSend();
+		const missing = async () => ({ focused: true });
+		await expect(
+			dispatchCdpDrag(
+				1,
+				{
+					id: "drag-missing",
+					action: "drag",
+					target: { x: 1, y: 2 },
+					options: { endTarget: { selector: "#end" } },
+				},
+				{ send, prepare: missing },
+			),
+		).rejects.toThrow(/drag destination/i);
+	});
+
+	it("detaches after successful dispatch, sender rejection, and never after attach failure", async () => {
+		const originalChrome = (globalThis as Record<string, unknown>).chrome;
+		const detachCalls: number[] = [];
+		const debuggerMock = {
+			attach: async (_target: unknown, _version: string) => undefined,
+			detach: async ({ tabId }: { tabId: number }) => {
+				detachCalls.push(tabId);
+			},
+			sendCommand: async (
+				_target: unknown,
+				_method: string,
+				_params: Record<string, unknown>,
+			) => undefined,
+		};
+		Object.defineProperty(globalThis, "chrome", {
+			configurable: true,
+			value: {
+				debugger: debuggerMock,
+			},
+		});
+		try {
+			await dispatchCdpMouseDown(
+				7,
+				{
+					id: "success",
+					action: "mouseDown",
+					target: { x: 1, y: 2 },
+				},
+				{ prepare: coordsPrepare },
+			);
+			expect(detachCalls).toEqual([7]);
+
+			debuggerMock.sendCommand = async () => {
+				throw new Error("sender rejected");
+			};
+			await expect(
+				dispatchCdpMouseUp(
+					8,
+					{
+						id: "rejected",
+						action: "mouseUp",
+						target: { x: 1, y: 2 },
+					},
+					{ prepare: coordsPrepare },
+				),
+			).rejects.toThrow("sender rejected");
+			expect(detachCalls).toEqual([7, 8]);
+
+			debuggerMock.attach = async () => {
+				throw new Error("attach failed");
+			};
+			await expect(
+				dispatchCdpMouseMove(
+					9,
+					{
+						id: "attach-failed",
+						action: "mouseMove",
+						target: { x: 1, y: 2 },
+					},
+					{ prepare: coordsPrepare },
+				),
+			).rejects.toThrow(/attach failed/);
+			expect(detachCalls).toEqual([7, 8]);
+		} finally {
+			if (originalChrome === undefined) {
+				delete (globalThis as Record<string, unknown>).chrome;
+			} else {
+				Object.defineProperty(globalThis, "chrome", {
+					configurable: true,
+					value: originalChrome,
+				});
+			}
+		}
 	});
 });

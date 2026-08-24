@@ -127,3 +127,58 @@ func TestResolveRefTargets(t *testing.T) {
 		t.Fatalf("want selector 'button.primary', got %q", capturedSelector)
 	}
 }
+
+func TestResolveBackendNodeCoordinatesReturnsViewportCenter(t *testing.T) {
+	url := fakeCDP(t, func(m fakeMsg, conn *websocket.Conn) {
+		switch m.Method {
+		case "DOM.getBoxModel":
+			var params struct {
+				BackendNodeID int64 `json:"backendNodeId"`
+			}
+			if err := json.Unmarshal(m.Params, &params); err != nil {
+				t.Errorf("decode getBoxModel params: %v", err)
+			}
+			if params.BackendNodeID != 9007 {
+				t.Errorf("backendNodeId = %d, want 9007", params.BackendNodeID)
+			}
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"model": map[string]any{
+					"content": []float64{110, 220, 150, 220, 150, 260, 110, 260},
+				},
+			}})
+		case "Page.getLayoutMetrics":
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"visualViewport": map[string]any{"pageX": 100, "pageY": 200},
+			}})
+		default:
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		}
+	})
+	s, _ := Dial(url)
+	defer s.Close()
+
+	x, y, err := ResolveBackendNodeCoordinates(s, 9007)
+	if err != nil {
+		t.Fatalf("ResolveBackendNodeCoordinates: %v", err)
+	}
+	if x != 30 || y != 40 {
+		t.Fatalf("coordinates = (%v,%v), want (30,40)", x, y)
+	}
+}
+
+func TestResolveBackendNodeCoordinatesRejectsInvalidBox(t *testing.T) {
+	url := fakeCDP(t, func(m fakeMsg, conn *websocket.Conn) {
+		if m.Method == "DOM.getBoxModel" {
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"model": map[string]any{"content": []float64{1, 2}},
+			}})
+			return
+		}
+		conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+	})
+	s, _ := Dial(url)
+	defer s.Close()
+	if _, _, err := ResolveBackendNodeCoordinates(s, 9007); err == nil {
+		t.Fatal("want invalid box model error, got nil")
+	}
+}

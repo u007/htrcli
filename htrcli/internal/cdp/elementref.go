@@ -1,6 +1,9 @@
 package cdp
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // backendNodeID is CDP's durable per-document element handle. Unlike a
 // RemoteObjectId (which expires on GC), a backendNodeId stays valid for the
@@ -43,6 +46,71 @@ func ResolveBackendNodeID(s *Session, cssSelector string) (int64, error) {
 		return 0, fmt.Errorf("DOM.describeNode: %w", err)
 	}
 	return desc.Node.BackendNodeID, nil
+}
+
+// ResolveBackendNodeCoordinates resolves a persistent backend node to the
+// center of its visible content box in viewport CSS pixels. DOM.getBoxModel
+// reports quads in document coordinates, so the current visual viewport page
+// offset is subtracted before the coordinates are passed to Input events.
+func ResolveBackendNodeCoordinates(s *Session, backendNodeID int64) (float64, float64, error) {
+	if backendNodeID <= 0 {
+		return 0, 0, fmt.Errorf("invalid backendNodeId %d", backendNodeID)
+	}
+	if err := s.Call("DOM.enable", nil, nil); err != nil {
+		return 0, 0, fmt.Errorf("DOM.enable: %w", err)
+	}
+
+	var box struct {
+		Model struct {
+			Content []float64 `json:"content"`
+		} `json:"model"`
+	}
+	if err := s.Call("DOM.getBoxModel", map[string]any{
+		"backendNodeId": backendNodeID,
+	}, &box); err != nil {
+		return 0, 0, fmt.Errorf("DOM.getBoxModel for backendNodeId %d: %w", backendNodeID, err)
+	}
+	if len(box.Model.Content) < 8 || len(box.Model.Content)%2 != 0 {
+		return 0, 0, fmt.Errorf("DOM.getBoxModel for backendNodeId %d returned an invalid content quad", backendNodeID)
+	}
+
+	var metrics struct {
+		LayoutViewport struct {
+			PageX *float64 `json:"pageX"`
+			PageY *float64 `json:"pageY"`
+		} `json:"layoutViewport"`
+		VisualViewport struct {
+			PageX *float64 `json:"pageX"`
+			PageY *float64 `json:"pageY"`
+		} `json:"visualViewport"`
+	}
+	if err := s.Call("Page.getLayoutMetrics", nil, &metrics); err != nil {
+		return 0, 0, fmt.Errorf("Page.getLayoutMetrics: %w", err)
+	}
+	pageX, pageY := 0.0, 0.0
+	if metrics.VisualViewport.PageX != nil {
+		pageX = *metrics.VisualViewport.PageX
+	} else if metrics.LayoutViewport.PageX != nil {
+		pageX = *metrics.LayoutViewport.PageX
+	}
+	if metrics.VisualViewport.PageY != nil {
+		pageY = *metrics.VisualViewport.PageY
+	} else if metrics.LayoutViewport.PageY != nil {
+		pageY = *metrics.LayoutViewport.PageY
+	}
+
+	var centerX, centerY float64
+	for i := 0; i < len(box.Model.Content); i += 2 {
+		centerX += box.Model.Content[i]
+		centerY += box.Model.Content[i+1]
+	}
+	vertices := float64(len(box.Model.Content) / 2)
+	x := centerX/vertices - pageX
+	y := centerY/vertices - pageY
+	if math.IsNaN(x) || math.IsNaN(y) || math.IsInf(x, 0) || math.IsInf(y, 0) {
+		return 0, 0, fmt.Errorf("DOM.getBoxModel for backendNodeId %d returned non-finite coordinates", backendNodeID)
+	}
+	return x, y, nil
 }
 
 // ResolveRefTargets resolves a CSS selector to the backendNodeIds of every
