@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -23,6 +22,15 @@ type BrowserState struct {
 }
 
 const macChromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+var (
+	// launchTimeout is how long launchChrome waits for the debugging port to
+	// answer before giving up. Overridable in tests.
+	launchTimeout = 15 * time.Second
+	// listeningPIDFn resolves the pid owning a listening TCP port. Overridable
+	// in tests so they do not depend on lsof/netstat.
+	listeningPIDFn = processListeningPID
+)
 
 // StateFilePath returns ~/.htrcli/browser.json.
 func StateFilePath() (string, error) {
@@ -118,6 +126,18 @@ func PortAlive(port int) bool {
 	return err == nil
 }
 
+// adoptListenerPID resolves the pid of the process already listening on port.
+// launchChrome returns pid 0 in that case (an owner htrcli did not spawn), and
+// persisting 0 would leave the recorded browser or context impossible to stop.
+// It errors rather than returning 0 so callers never store a meaningless pid.
+func adoptListenerPID(port int) (int, error) {
+	pid, err := listeningPIDFn(port)
+	if err != nil {
+		return 0, fmt.Errorf("port %d is held by a process htrcli cannot identify: %w", port, err)
+	}
+	return pid, nil
+}
+
 // launchChrome starts Chrome detached on port with the given profile dir and
 // waits for the debugging port to answer. It does NOT persist any state file —
 // callers record the result where appropriate (browser.json vs contexts.json).
@@ -130,27 +150,99 @@ func launchChrome(chromePath string, port int, profileDir string, headless bool)
 	if err := os.MkdirAll(profileDir, 0700); err != nil {
 		return 0, fmt.Errorf("creating profile dir: %w", err)
 	}
+	if removed, err := clearStaleSingletonLock(profileDir); err != nil {
+		return 0, err
+	} else if removed {
+		fmt.Fprintf(os.Stderr, "[htrcli] removed stale Chrome singleton lock in %s (owner process is gone)\n", profileDir)
+	}
 	cmd := exec.Command(chromePath, LaunchArgs(port, profileDir, headless)...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach: survives htrcli exiting
+	configureDetachedProcess(cmd) // detach where the platform supports it
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("launching Chrome %s: %w", chromePath, err)
 	}
-	// Reap when Chrome eventually exits so a stopped browser never zombies
-	// against a still-running htrcli process.
+	// Reap exactly once so a detached Chrome that later exits never zombies
+	// against a still-running htrcli process. reaped closes when Wait returns,
+	// letting the timeout path confirm the killed child is actually gone.
+	reaped := make(chan struct{})
 	go func() {
+		defer close(reaped)
 		if err := cmd.Wait(); err != nil {
 			fmt.Fprintf(os.Stderr, "[htrcli] Chrome exited: %v\n", err)
 		}
 	}()
 
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(launchTimeout)
 	for time.Now().Before(deadline) {
 		if PortAlive(port) {
 			return cmd.Process.Pid, nil
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	return 0, fmt.Errorf("Chrome (pid %d) did not answer on port %d within 15s", cmd.Process.Pid, port)
+	// Do not leave an unreachable Chrome orphaned holding the profile lock.
+	pid := cmd.Process.Pid
+	if err := terminateProcess(pid); err != nil {
+		return 0, fmt.Errorf("Chrome (pid %d) did not answer on port %d within %s; killing it also failed: %w", pid, port, launchTimeout, err)
+	}
+	// terminateProcess polls processAlive, which on Unix still reports an
+	// exited-but-unreaped child as alive. Wait for the reaper so the child is
+	// really gone before returning instead of lingering as a zombie.
+	select {
+	case <-reaped:
+	case <-time.After(5 * time.Second):
+		fmt.Fprintf(os.Stderr, "[htrcli] Chrome (pid %d) did not reap within 5s after kill\n", pid)
+	}
+	return 0, fmt.Errorf("Chrome (pid %d) did not answer on port %d within %s (killed)", pid, port, launchTimeout)
+}
+
+// singletonLockFiles are the per-profile lock artefacts Chrome leaves behind
+// when it dies without cleaning up (crash, reboot, SIGKILL).
+var singletonLockFiles = []string{"SingletonLock", "SingletonSocket", "SingletonCookie"}
+
+// clearStaleSingletonLock removes Chrome's profile singleton lock when the
+// process it names is no longer alive on this host. Chrome itself recovers from
+// this only after its own ~20s handoff timeout, which is longer than our launch
+// wait, so a crashed previous Chrome otherwise turns every later start into a
+// hang. The lock is a symlink whose target is "<hostname>-<pid>". A live owner,
+// a lock held by another host (shared/synced profile dir), or an absent lock
+// leaves everything untouched; a malformed target is an error.
+func clearStaleSingletonLock(profileDir string) (bool, error) {
+	lock := filepath.Join(profileDir, "SingletonLock")
+	target, err := os.Readlink(lock)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil // intentionally not logged: no lock is the normal state after a clean stop
+	}
+	if err != nil {
+		return false, fmt.Errorf("reading %s: %w", lock, err)
+	}
+	i := strings.LastIndex(target, "-")
+	if i < 0 {
+		return false, fmt.Errorf("unexpected singleton lock target %q in %s", target, lock)
+	}
+	host := target[:i]
+	pid, err := strconv.Atoi(target[i+1:])
+	if err != nil {
+		return false, fmt.Errorf("unexpected singleton lock target %q in %s: %w", target, lock, err)
+	}
+	// A pid only means something within its own host's pid namespace. When the
+	// profile directory is shared or synced, another machine's lock must be
+	// left alone even if that pid is not alive locally.
+	localHost, err := os.Hostname()
+	if err != nil {
+		return false, fmt.Errorf("resolving hostname for %s: %w", lock, err)
+	}
+	if !strings.EqualFold(host, localHost) {
+		return false, nil
+	}
+	if processAlive(pid) {
+		return false, nil
+	}
+	for _, name := range singletonLockFiles {
+		path := filepath.Join(profileDir, name)
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return false, fmt.Errorf("removing stale %s: %w", path, err)
+		}
+	}
+	return true, nil
 }
 
 // terminateProcess sends SIGTERM and, if needed, SIGKILL to a process that was
@@ -159,20 +251,17 @@ func terminateProcess(pid int) error {
 	if pid <= 0 {
 		return nil
 	}
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if err := terminatePID(pid, false); err != nil {
 		return fmt.Errorf("signalling pid %d: %w", pid, err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := syscall.Kill(pid, 0); err != nil {
-			if errors.Is(err, syscall.ESRCH) {
-				return nil
-			}
+		if !processAlive(pid) {
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if err := terminatePID(pid, true); err != nil {
 		return fmt.Errorf("force-killing pid %d: %w", pid, err)
 	}
 	return nil
@@ -190,10 +279,27 @@ func StartBrowser(chromePath string, port int, headless bool) (*BrowserState, er
 		return nil, err
 	}
 	if pid == 0 {
-		// Port already answered by an existing process.
+		// Port already answered by an existing process. Only trust the recorded
+		// state if its PID is still alive; otherwise it is a leftover from a
+		// Chrome that died and must not be reported as the running instance.
 		st, err := ReadState()
-		if err != nil || st == nil {
-			st = &BrowserState{Port: port, StartedAt: time.Now()}
+		if err != nil {
+			return nil, err
+		}
+		if st != nil && processAlive(st.PID) {
+			return st, nil
+		}
+		// The recorded PID is dead (or absent) yet the port still answers: an
+		// untracked Chrome holds it. Resolve the real listener so StopBrowser
+		// can act on it — persisting PID 0 would fail the profile check and
+		// leave that Chrome unstoppable.
+		livePID, err := adoptListenerPID(port)
+		if err != nil {
+			return nil, err
+		}
+		st = &BrowserState{PID: livePID, Port: port, StartedAt: time.Now(), Headless: headless}
+		if err := writeState(st); err != nil {
+			return nil, err
 		}
 		return st, nil
 	}
@@ -214,9 +320,9 @@ func StopBrowser() error {
 	if st == nil {
 		return errors.New("no browser state file — nothing to stop")
 	}
-	out, err := exec.Command("ps", "-p", strconv.Itoa(st.PID), "-o", "command=").Output()
+	out, err := processCommandLine(st.PID)
 	if err == nil && strings.Contains(string(out), ".htrcli/chrome-profile") {
-		if err := syscall.Kill(st.PID, syscall.SIGTERM); err != nil {
+		if err := terminateProcess(st.PID); err != nil {
 			return fmt.Errorf("killing pid %d: %w", st.PID, err)
 		}
 	} else if err != nil {

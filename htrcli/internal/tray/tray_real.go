@@ -1,4 +1,4 @@
-//go:build (darwin || linux || windows) && !traytest
+//go:build (darwin || linux || (windows && htrcli_native_tray)) && !traytest
 
 package tray
 

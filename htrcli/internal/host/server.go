@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -79,7 +80,13 @@ func apiHandler(d *Daemon, port int, bearerToken string) http.Handler {
 
 		switch {
 		case path == "/api/health" && r.Method == "GET":
+			managedID := os.Getenv("HTR_MANAGED_ID")
 			apiOK(w, map[string]any{
+				"service":       "htrcli",
+				"managed":       managedID != "",
+				"identity":      managedID,
+				"port":          port,
+				"socket":        os.Getenv("HTR_SOCKET_PATH"),
 				"status":        "running",
 				"connectedTabs": len(d.Tabs()),
 				"uptime":        0,

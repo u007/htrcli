@@ -32,7 +32,7 @@ const firefoxExtensionID = "htrcontrol@mercstudio.com"
 func isNativeHostLaunch() bool {
 	if len(os.Args) > 1 {
 		arg := os.Args[1]
-		if strings.HasPrefix(arg, "chrome-extension://") || strings.HasSuffix(arg, hostManifestName) {
+		if strings.HasPrefix(arg, "chrome-extension://") || strings.HasSuffix(arg, hostManifestName) || (strings.HasSuffix(arg, ".json") && strings.Contains(arg, "NativeMessagingHosts")) {
 			return true
 		}
 	}

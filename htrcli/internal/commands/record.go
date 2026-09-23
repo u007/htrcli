@@ -55,7 +55,7 @@ func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	return syscall.Kill(pid, 0) == nil
+	return recordProcessAlive(pid)
 }
 
 // recordStartLockPath returns the best-effort lock file used to serialize
@@ -176,7 +176,7 @@ var recordStartCmd = &cobra.Command{
 			runArgs = append(runArgs, "--rec-tab", target)
 		}
 		child := exec.Command(exe, runArgs...)
-		child.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach: survives this CLI exiting
+		recordConfigureDetachedProcess(child) // detach where the platform supports it
 		if err := child.Start(); err != nil {
 			if rmErr := recordRemoveAll(framesDir); rmErr != nil {
 				fmt.Fprintf(os.Stderr, "[htrcli] cleaning frames dir %s after spawn failure: %v\n", framesDir, rmErr)
@@ -220,7 +220,7 @@ var recordRunCmd = &cobra.Command{
 			return fmt.Errorf("_run requires --frames-dir and --rec-port")
 		}
 		stop := make(chan os.Signal, 1)
-		signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+		signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 		return cdp.RunRecorder(recRunPort, recRunTab, recRunFramesDir, stop)
 	},
 }
@@ -233,12 +233,12 @@ func stopRecorder(st *cdp.RecordingState) error {
 	if !processAlive(st.PID) {
 		return nil // already gone — encode whatever frames exist
 	}
-	out, err := exec.Command("ps", "-p", strconv.Itoa(st.PID), "-o", "command=").Output()
+	out, err := recordProcessCommandLine(st.PID)
 	if err == nil && !strings.Contains(string(out), st.FramesDir) {
 		fmt.Fprintf(os.Stderr, "[htrcli] pid %d does not look like the htrcli recorder (%s) — not signalling; encoding captured frames\n", st.PID, string(out))
 		return nil
 	}
-	if err := syscall.Kill(st.PID, syscall.SIGTERM); err != nil {
+	if err := recordTerminateProcess(st.PID, false); err != nil {
 		return fmt.Errorf("signalling recorder pid %d: %w", st.PID, err)
 	}
 	deadline := time.Now().Add(10 * time.Second)
@@ -249,7 +249,7 @@ func stopRecorder(st *cdp.RecordingState) error {
 		time.Sleep(100 * time.Millisecond)
 	}
 	fmt.Fprintf(os.Stderr, "[htrcli] recorder pid %d did not exit in 10s — sending SIGKILL\n", st.PID)
-	if err := syscall.Kill(st.PID, syscall.SIGKILL); err != nil {
+	if err := recordTerminateProcess(st.PID, true); err != nil {
 		return fmt.Errorf("force-killing recorder pid %d: %w", st.PID, err)
 	}
 	return nil

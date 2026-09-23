@@ -1,5 +1,5 @@
 .PHONY: build install serve close \
-		htrcli-build htrcli-build-all htrcli-install htrcli-clean \
+		htrcli-build htrcli-build-all htrcli-build-linux htrcli-install htrcli-clean \
 		ext-build ext-dev ext-zip firefox-build firefox-install firefox-zip
 
 -include .env
@@ -13,15 +13,25 @@ HTRCLI_DIR := htrcli
 htrcli-build:
 	cd $(HTRCLI_DIR) && go build -o bin/htrcli ./cmd/htrcli
 
-# Cross-compile htrcli for all supported OS/arch combinations.
+# Cross-compile htrcli for the targets that build from any host.
 # Binaries are placed in htrcli/bin/ with platform-specific names.
+#
+# Targets requiring a native toolchain are built on their own OS:
+#   - darwin  : needs the macOS SDK (build on a macOS host)
+#   - linux   : needs libappindicator dev headers; use `make htrcli-build-linux`
+# Windows cross-compiles via the default stub tray backend
+# (internal/tray/tray_real_windows.go); pass `-tags htrcli_native_tray` to
+# build it with the real getlantern/systray backend instead.
 htrcli-build-all:
 	cd $(HTRCLI_DIR) && \
-	GOOS=darwin  GOARCH=amd64 go build -o bin/htrcli-darwin-amd64   ./cmd/htrcli && \
 	GOOS=darwin  GOARCH=arm64 go build -o bin/htrcli-darwin-arm64   ./cmd/htrcli && \
-	GOOS=linux   GOARCH=amd64 go build -o bin/htrcli-linux-amd64    ./cmd/htrcli && \
-	GOOS=linux   GOARCH=arm64 go build -o bin/htrcli-linux-arm64    ./cmd/htrcli && \
 	GOOS=windows GOARCH=amd64 go build -o bin/htrcli-windows-amd64.exe ./cmd/htrcli
+
+# Native Linux build (CGO + libappindicator dev headers required, e.g.
+# `apt-get install libayatana-appindicator3-dev`). Built for the host
+# architecture; pass GOARCH with a matching cross C toolchain for others.
+htrcli-build-linux:
+	cd $(HTRCLI_DIR) && go build -o bin/htrcli-linux-$$(go env GOARCH) ./cmd/htrcli
 
 htrcli-install:
 	cd $(HTRCLI_DIR) && go install ./cmd/htrcli

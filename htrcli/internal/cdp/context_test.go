@@ -1,6 +1,7 @@
 package cdp
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -165,5 +166,87 @@ func TestEnsureContextCleansUpWhenRegistryWriteFails(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("expected cleanup to terminate the newly launched process")
+	}
+}
+
+// stubEnsureContextSeams swaps the launch/listen seams for one test and
+// restores them on cleanup.
+func stubEnsureContextSeams(t *testing.T, launch func(string, int, string, bool) (int, error), listen func(int) (int, error)) {
+	t.Helper()
+	origLaunch := launchChromeFn
+	origListening := listeningPIDFn
+	t.Cleanup(func() {
+		launchChromeFn = origLaunch
+		listeningPIDFn = origListening
+	})
+	launchChromeFn = launch
+	listeningPIDFn = listen
+}
+
+func TestEnsureContextAdoptsLiveListenerPID(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// launchChrome reports the port as already answered (pid 0): the registry
+	// must record the real listener instead of 0.
+	stubEnsureContextSeams(t,
+		func(string, int, string, bool) (int, error) { return 0, nil },
+		func(int) (int, error) { return 4242, nil },
+	)
+
+	if _, err := EnsureContext("work", "/tmp/chrome", false); err != nil {
+		t.Fatalf("EnsureContext: %v", err)
+	}
+	entry, err := FindContext("work")
+	if err != nil || entry == nil {
+		t.Fatalf("FindContext: %+v %v", entry, err)
+	}
+	if entry.PID != 4242 {
+		t.Fatalf("want adopted pid 4242, got %d", entry.PID)
+	}
+}
+
+func TestEnsureContextRefusesUnidentifiableListener(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	stubEnsureContextSeams(t,
+		func(string, int, string, bool) (int, error) { return 0, nil },
+		func(int) (int, error) { return 0, errors.New("no listener") },
+	)
+
+	if _, err := EnsureContext("work", "/tmp/chrome", false); err == nil {
+		t.Fatal("expected an error when the listener pid cannot be resolved")
+	}
+	entries, err := ReadContexts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("must not register a context with a bogus PID: %+v", entries)
+	}
+}
+
+func TestEnsureContextDoesNotKillAdoptedListenerOnRegistryFailure(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	stubEnsureContextSeams(t,
+		func(string, int, string, bool) (int, error) { return 0, nil },
+		func(int) (int, error) { return 4242, nil },
+	)
+
+	origUpsert := upsertContextFn
+	origTerminate := terminateProcessFn
+	t.Cleanup(func() {
+		upsertContextFn = origUpsert
+		terminateProcessFn = origTerminate
+	})
+	upsertContextFn = func(ContextEntry) error { return errors.New("disk full") }
+	killed := false
+	terminateProcessFn = func(int) error {
+		killed = true
+		return nil
+	}
+
+	if _, err := EnsureContext("work", "/tmp/chrome", false); err == nil {
+		t.Fatal("expected failure when the registry write fails")
+	}
+	if killed {
+		t.Fatal("must not kill an adopted listener that htrcli did not launch")
 	}
 }

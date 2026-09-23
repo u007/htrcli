@@ -175,6 +175,16 @@ func EnsureContext(name, chromePath string, headless bool) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	launched := pid > 0
+	// launchChrome returns 0 when the port was already answered by a running
+	// owner (e.g. a Chrome we lost track of). Resolve the real listener so the
+	// registry never stores a meaningless PID.
+	if pid == 0 {
+		pid, err = adoptListenerPID(port)
+		if err != nil {
+			return 0, fmt.Errorf("context %s: %w", name, err)
+		}
+	}
 	createdAt := time.Now()
 	if entry != nil {
 		createdAt = entry.CreatedAt
@@ -186,7 +196,9 @@ func EnsureContext(name, chromePath string, headless bool) (int, error) {
 		PID:        pid,
 		CreatedAt:  createdAt,
 	}); err != nil {
-		if pid > 0 {
+		// Only tear down a process htrcli actually launched; an adopted
+		// listener is someone else's browser and must be left running.
+		if launched {
 			if killErr := terminateProcessFn(pid); killErr != nil {
 				return 0, fmt.Errorf("upserting context %s: %w (cleanup failed: %v)", name, err, killErr)
 			}

@@ -728,6 +728,37 @@ htrcli config show                        # show current config
 htrcli health                             # test connection
 ```
 
+### `browser start` says "Chrome (pid N) did not answer on port"
+
+Usually a leftover from a Chrome that died without cleaning up (crash, reboot).
+htrcli removes a stale `~/.htrcli/chrome-profile/SingletonLock` automatically
+when its owner pid is dead **on this host** — a lock whose `<hostname>` belongs
+to another machine (shared/synced profile dir) is left untouched — and kills
+the unreachable Chrome it just spawned.
+If it still fails, check nothing else holds the profile or the CDP port:
+
+```bash
+htrcli browser status
+readlink ~/.htrcli/chrome-profile/SingletonLock   # hostname-<pid>; is that pid alive?
+lsof -nP -iTCP:9333 -sTCP:LISTEN
+```
+
+If the port answers but `browser.json`'s recorded PID is stale, `browser start`
+adopts the real listener PID (so `browser stop` can still kill it). If it cannot
+identify the listener, it refuses to write a bogus PID and reports the error.
+
+### Self-signed https (`net::ERR_CERT_AUTHORITY_INVALID`)
+
+CDP Chrome uses its own profile with no trusted dev certs. Point htrcli at a
+wrapper that adds `--ignore-certificate-errors`:
+
+```bash
+printf '#!/bin/sh\nexec "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --ignore-certificate-errors "$@"\n' > ~/.htrcli/chrome-ignore-certs.sh
+chmod +x ~/.htrcli/chrome-ignore-certs.sh
+htrcli config set-chrome-path ~/.htrcli/chrome-ignore-certs.sh
+htrcli browser stop && htrcli browser start --headless
+```
+
 ### "Connection refused"
 
 Server not running. Start the daemon:

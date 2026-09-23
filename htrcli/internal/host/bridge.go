@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 )
 
@@ -18,6 +20,15 @@ import (
 // loop runs in a background goroutine; StartUnixSocketServer itself returns
 // as soon as the listener is bound.
 func StartUnixSocketServer(d *Daemon, socketPath string, port int, bearerToken string) (net.Listener, error) {
+	if runtime.GOOS == "windows" || strings.HasPrefix(socketPath, "tcp://") {
+		addr := strings.TrimPrefix(socketPath, "tcp://")
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return nil, fmt.Errorf("listen tcp %s: %w", addr, err)
+		}
+		go acceptRelayConnections(d, ln, port, bearerToken)
+		return ln, nil
+	}
 	if err := ensureSocketParentDir(socketPath); err != nil {
 		return nil, fmt.Errorf("create socket dir: %w", err)
 	}
@@ -36,17 +47,21 @@ func StartUnixSocketServer(d *Daemon, socketPath string, port int, bearerToken s
 	go func() {
 		// Remove the socket file when the listener is closed (shutdown).
 		defer os.Remove(socketPath)
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				// Listener closed during shutdown — exit the loop.
-				return
-			}
-			go handleRelayConn(d, conn, port, bearerToken)
-		}
+		acceptRelayConnections(d, ln, port, bearerToken)
 	}()
 
 	return ln, nil
+}
+
+func acceptRelayConnections(d *Daemon, ln net.Listener, port int, bearerToken string) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			// Listener closed during shutdown — exit the loop.
+			return
+		}
+		go handleRelayConn(d, conn, port, bearerToken)
+	}
 }
 
 func ensureSocketParentDir(socketPath string) error {

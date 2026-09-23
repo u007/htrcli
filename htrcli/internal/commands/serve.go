@@ -27,11 +27,10 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the htrcli daemon (native messaging host + HTTP :3845)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		home, err := os.UserHomeDir()
+		socketPath, err := host.SocketPath()
 		if err != nil {
 			return err
 		}
-		socketPath := home + host.DefaultSocketPath
 
 		bearerToken := resolveBearerToken()
 		port := 3845
@@ -89,7 +88,7 @@ var serveCmd = &cobra.Command{
 
 		// --- Shutdown sequencing -------------------------------------------
 		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
 		done := make(chan struct{})
 		var logCloser func() error
@@ -148,7 +147,7 @@ var serveCmd = &cobra.Command{
 			ctrl := tray.NewDaemonController(d, port, getToken, getExtID, selfPath, ln, tray.RealCommander{})
 			ctrl.SetQuitFn(func() {
 				// Reuse the signal-shutdown path.
-				sigCh <- syscall.SIGTERM
+				sigCh <- os.Interrupt
 			})
 
 			// tray.Run blocks the main goroutine (required by systray on
