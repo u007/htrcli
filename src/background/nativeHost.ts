@@ -3,14 +3,10 @@
  * Manages the connection to the htrcli native host via Chrome Native Messaging.
  */
 
-import type {
-	BrowserType,
-	Command,
-	CommandResult,
-	TabInfo,
-} from "../types/commands";
+import type { Command, CommandResult, TabInfo } from "../types/commands";
 import type { ConnectionMode, NetworkEntry } from "../types/recording";
 import { AIA_API_KEY } from "../utils/aiaConfig";
+import { getBrowserType } from "./browserType";
 import { cdpEvaluate } from "./cdpEval";
 import {
 	CDP_INPUT_ACTIONS,
@@ -34,6 +30,8 @@ import { NetworkCaptureBuffer } from "./networkCapture";
 import { addRules, removeRules } from "./networkMock";
 import { addRulesFirefox, removeRulesFirefox } from "./networkMockFirefox";
 import type { NetworkMockRule } from "./networkMockMatch";
+import type { RecordingCommandDeps } from "./recordingCommands";
+import { handleRecordingCommand, isRecordingAction } from "./recordingCommands";
 import { resolveAndSetFiles } from "./uploadFiles";
 
 const HOST_NAME = "com.htrcontrol.host";
@@ -128,6 +126,20 @@ let readyTabsProvider: ReadyTabsProvider | null = null;
 
 export function setReadyTabsProvider(fn: ReadyTabsProvider): void {
 	readyTabsProvider = fn;
+}
+
+// Provides the background's session-recording backend for the native
+// `recordingStart/Stop/Status/List/Get/Delete` actions. Registered by
+// background/index.ts (same pattern as setReadyTabsProvider) to avoid a
+// circular import and to keep this module free of recorder state.
+//
+// The deps OBJECT is stored, not a wrapping handler: `handleRecordingCommand`
+// already takes it as a parameter, so a handler closure would be a second,
+// redundant layer of indirection.
+let recordingDeps: RecordingCommandDeps | null = null;
+
+export function setRecordingDeps(deps: RecordingCommandDeps): void {
+	recordingDeps = deps;
 }
 
 export function getConnectionMode(): "native" | "disconnected" | "unavailable" {
@@ -265,6 +277,15 @@ function confirmConnected(): void {
 	reconnectDelay = RECONNECT_BASE_MS;
 	reconnectAttempts = 0;
 	console.log("[NativeHost] Connected (daemon confirmed)");
+
+	// Announce which browser this relay is. Tab-less commands (session
+	// recording) have no tab to route by, so the daemon selects a connection by
+	// this value; the CLI's --browser flag is a hint against it. Sent here, and
+	// not on port open, because a port can open while the daemon is still down,
+	// and because every reconnect creates a NEW daemon-side connection whose
+	// identity starts empty. confirmConnected is guarded by portConfirmed, which
+	// connect() resets per port, so this fires exactly once per connection.
+	sendToNative({ type: "identify", browser: getBrowserType() });
 
 	// Broadcast new status to all content scripts
 	broadcastStatus();
@@ -1148,6 +1169,43 @@ async function handleDialogPolicy(
 	await handleDialogPolicyChrome(tabId, payload, policy);
 }
 
+/**
+ * Entry point for the `recording*` commands.
+ *
+ * These are answered entirely by the background service worker, which owns the
+ * in-flight session and the IndexedDB handles. Nothing is forwarded to a
+ * content script: the recorder's state is unreachable from the page context.
+ * That also makes them browser-agnostic — no `chrome.debugger` is used, so they
+ * work identically on Chrome and Firefox.
+ */
+async function handleRecording(tabId: number, payload: Command): Promise<void> {
+	if (!recordingDeps) {
+		// Fail loudly. A silent null here would read as "no recording" to the
+		// caller, which is indistinguishable from a real idle recorder.
+		const error =
+			"[HTR NControl] recording commands are unavailable: the background " +
+			"service worker did not register its recording deps (setRecordingDeps). " +
+			"Reload the extension and retry.";
+		console.error(error);
+		replyError(tabId, payload.id, error);
+		return;
+	}
+	try {
+		const data = await handleRecordingCommand(recordingDeps, payload);
+		sendToNative({
+			type: "command_result",
+			tabId,
+			payload: { id: payload.id, success: true, data } as CommandResult,
+		});
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		// Expected rejections (already recording, unknown id) are the caller's
+		// problem, not a fault in the extension — warn, don't error.
+		console.warn(`[HTR NControl] ${payload.action} failed:`, message);
+		replyError(tabId, payload.id, message);
+	}
+}
+
 // ─── Navigation with load-wait ────────────────────────────────────
 // Navigation actions are handled here (not in the content script) because the
 // content script is destroyed by the navigation and can only reply before the
@@ -1614,6 +1672,10 @@ async function sendCommandToTab(
 		await handleDialogPolicy(tabId, payload);
 		return;
 	}
+	if (isRecordingAction(payload.action)) {
+		await handleRecording(tabId, payload);
+		return;
+	}
 	if (payload.action === "networkMock" || payload.action === "networkUnmock") {
 		await handleNetworkMock(tabId, payload);
 		return;
@@ -1792,12 +1854,9 @@ export function registerTab(tabId: number, info: TabInfo): void {
 	});
 }
 
-/**
- * Returns the browser capability needed by commands that have different
- * implementations across the shared Chrome/Firefox extension build.
- * Firefox does not expose chrome.debugger; unknown or legacy tab metadata is
- * handled safely by consumers as Chrome-compatible.
- */
-export function getBrowserType(): BrowserType {
-	return typeof chrome.debugger === "undefined" ? "firefox" : "chrome";
-}
+// The implementation moved to ./browserType so recordingCommands.ts can use it
+// without importing this module (which already imports recordingCommands.ts).
+// Re-exported here so existing importers — including src/background/index.ts —
+// keep working unchanged. A re-export alone does NOT bring the name into this
+// module's scope, and this file calls it, so it is imported as well.
+export { getBrowserType } from "./browserType";

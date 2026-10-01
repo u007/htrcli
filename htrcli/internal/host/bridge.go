@@ -68,6 +68,13 @@ func ensureSocketParentDir(socketPath string) error {
 	return os.MkdirAll(filepath.Dir(socketPath), 0700)
 }
 
+// knownBrowser reports whether v is a browser this build recognises. The values
+// match the extension's getBrowserType(); anything else is rejected so it can
+// never become a selectable connection identity.
+func knownBrowser(v string) bool {
+	return v == "chrome" || v == "firefox"
+}
+
 func handleRelayConn(d *Daemon, conn net.Conn, port int, bearerToken string) {
 	defer conn.Close()
 
@@ -113,6 +120,19 @@ func handleRelayConn(d *Daemon, conn net.Conn, port int, bearerToken string) {
 			if err := json.Unmarshal(msg.Payload, &info); err == nil {
 				d.RegisterTab(rc, msg.TabID, info)
 			}
+		case "identify":
+			// The extension reports which browser it is, so tab-less commands
+			// (session recording) have something to select on. Validate before
+			// storing: a stored value becomes selectable as a command target, so
+			// a buggy or hostile extension must not be able to invent one. An
+			// empty or unrecognised value is simply "not announced" and is
+			// ignored — it must not disconnect the relay or fail the connection.
+			var ident struct {
+				Browser string `json:"browser"`
+			}
+			if err := json.Unmarshal(msg.Payload, &ident); err == nil && knownBrowser(ident.Browser) {
+				d.SetConnBrowser(rc, ident.Browser)
+			}
 		case "command_result":
 			var result CommandResult
 			if err := json.Unmarshal(msg.Payload, &result); err == nil {
@@ -127,6 +147,30 @@ func handleRelayConn(d *Daemon, conn net.Conn, port int, bearerToken string) {
 
 // sendCommand sends a command to a tab and waits for the result.
 // timeout is in milliseconds.
+// sendBackgroundCommand is the tab-less twin of sendCommand: identical timeout
+// semantics and identical pending-entry cleanup, but the relay is selected by
+// connection identity and browser hint rather than by owning a tab.
+func sendBackgroundCommand(d *Daemon, cmd Command, browserHint string, timeoutMs int) (*CommandResult, error) {
+	if cmd.ID == "" {
+		cmd.ID = generateID()
+	}
+	ch, err := d.EnqueueBackgroundCommand(cmd, browserHint)
+	if err != nil {
+		return nil, err
+	}
+	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case result := <-ch:
+		return &result, nil
+	case <-timer.C:
+		d.mu.Lock()
+		delete(d.pending, cmd.ID)
+		d.mu.Unlock()
+		return nil, fmt.Errorf("command timed out after %dms", timeoutMs)
+	}
+}
+
 func sendCommand(d *Daemon, tabID int, cmd Command, timeoutMs int) (*CommandResult, error) {
 	ch, err := d.EnqueueCommand(tabID, cmd)
 	if err != nil {

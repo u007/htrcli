@@ -79,3 +79,54 @@ Verification performed:
 - `gofmt -l` (only pre-existing `internal/commands/publish.go`), `go build ./...`, `go vet ./...`, `go test ./...` — clean.
 - `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build` — clean (default stub).
 - `make -n htrcli-build-all` / `make -n htrcli-build-linux` — recipe resolves.
+
+## Session recordings — known limits and deferred work (2026-09-29)
+
+Deliberate limits (documented in `skills/htrcli/SKILL.md` + `htrcli/README.md`, not bugs):
+- `--with-screenshots` / `export` pre-check the step count from `list` and refuse
+  over `maxMediaSteps` (120). The real limit is BYTES: one native-messaging frame
+  capped at `host.MaxMessageSize` (64 MiB), and base64 inflates PNGs ~4/3, so ~48 MiB
+  of raw screenshots is already over. The step count is a proxy because the
+  extension cannot report a size before serialising.
+- The preflight only inspects the first `maxMediaSteps+1` sessions, so a fetch of an
+  older session is not pre-checked (it is allowed through, which is the safe
+  direction).
+
+
+
+## Tab-less background commands — deferred / closed as not-worth-doing
+
+Closed (decided against, with reasoning, so they are not re-proposed):
+
+- **Streaming base64→deflate during `export`.** Considered and rejected: the
+  saving is one `[]byte` per media blob, and the payload is already fully parsed
+  in memory by the time encoding could begin, so it would not change the peak
+  footprint on the ~48 MB case that motivated it. The single-pass decode
+  (`ExecuteCommandInto` / `ExecuteBackgroundCommandInto`) already removed the
+  extra copies that were worth removing, and is pinned by an allocation bound.
+- **Strict `--browser` selection (error instead of fallback).** Rejected in
+  favour of first-wins fallback. A hint naming a profile that is not connected
+  is a recoverable situation — `recordings list` prints `Answered by: <browser>`,
+  so the user can see which profile served the request. Hard-failing would be
+  strictly worse. If that ever needs revisiting, the change is confined to
+  `Daemon.selectConn` in `htrcli/internal/host/daemon.go`.
+
+Still open:
+
+- **No React component tests.** The repo has no component-test harness and the
+  user declined adding one, so the popup's new delete button and the side-panel
+  recording toggle are covered only by their pure logic. A regression that broke
+  rendering rather than behaviour would not be caught.
+- **`identify` is not authenticated.** It arrives over the native-messaging
+  relay, which the OS already scopes to the installed extension, so this is not
+  an exposure today. It would become one if a relay were ever exposed over a
+  socket. The daemon validates the value against the browsers it knows and
+  ignores anything else, which bounds the blast radius.
+- **Two connections announcing the same browser resolve to the earliest.** That
+  is deterministic and documented, but a caller that genuinely wants the *other*
+  chrome profile has no way to ask. Needs a profile label from the extension
+  (e.g. the profile directory) before it can be addressed.
+- **The `--browser` flag is persistent and therefore inert for tab-routed
+  commands.** `htrcli click --browser firefox` is accepted and ignored, because
+  a tab-routed command already knows its browser. Worth rejecting or scoping if
+  it starts confusing users.

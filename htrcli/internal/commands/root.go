@@ -14,12 +14,15 @@ import (
 )
 
 var (
-	cfgFile          string
-	serverURL        string
-	token            string
-	jsonOutput       bool
-	tabTarget        string
-	transportFlag    string
+	cfgFile       string
+	serverURL     string
+	token         string
+	jsonOutput    bool
+	tabTarget     string
+	transportFlag string
+	// browserFlag is the advisory --browser hint. Empty means no preference, so
+	// the daemon falls back to the earliest-connected relay.
+	browserFlag      string
 	cdpFlag          bool
 	contextName      string
 	timeout          int
@@ -36,6 +39,9 @@ server running.`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := validateBrowserHint(browserFlag); err != nil {
+			return err
+		}
 		output.JSONOutput = jsonOutput
 		initClient()
 		return nil
@@ -54,7 +60,29 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&cdpFlag, "cdp", false, "shorthand for --transport cdp")
 	rootCmd.PersistentFlags().StringVar(&contextName, "context", "", "named browser context (isolated profile)")
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 30000, "command timeout in ms")
+	rootCmd.PersistentFlags().StringVar(&browserFlag, "browser", "",
+		"advisory hint for tab-less commands: prefer this browser profile (chrome|firefox); "+
+			"falls back to the earliest connected browser if it is not connected")
 }
+
+// validateBrowserHint rejects an unrecognised --browser value. An empty value is
+// valid and means "no preference".
+//
+// The check is deliberately LOUD. The hint is advisory — the daemon falls back
+// to the earliest-connected relay when the named profile is absent — so silently
+// accepting a typo would make `--browser safri` behave exactly like a first-wins
+// call, and the user would have no way to tell their hint was ignored.
+func validateBrowserHint(v string) error {
+	switch v {
+	case "", "chrome", "firefox":
+		return nil
+	default:
+		return fmt.Errorf("invalid --browser %q: want chrome, firefox, or omitted for no preference", v)
+	}
+}
+
+// BrowserHint returns the advisory --browser value, or "" when unset.
+func BrowserHint() string { return browserFlag }
 
 func initConfig() {
 	if cfgFile != "" {

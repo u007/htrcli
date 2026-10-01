@@ -17,7 +17,9 @@ import type {
 	NewStepMessage,
 	RecordingMessage,
 	RecordingSession,
+	RecordingStartedMessage,
 	RecordingStep,
+	RecordingStoppedMessage,
 	SessionMetadata,
 } from "../../types/recording";
 
@@ -228,16 +230,20 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
 					type: "ADD_STEP",
 					payload: (message as NewStepMessage).step,
 				});
+			} else if (message.type === "RECORDING_STARTED") {
+				// Fired for every start, whoever initiated it — including a
+				// remote `htrcli recordings start`. Dispatching from the payload
+				// (instead of round-tripping GET_RECORDING_STATE) keeps the panel
+				// in step with the background on the same tick.
+				dispatch({
+					type: "START_RECORDING",
+					payload: (message as RecordingStartedMessage).session,
+				});
 			} else if (message.type === "RECORDING_STOPPED") {
-				// Refresh state from background
-				chrome.runtime.sendMessage(
-					{ type: "GET_RECORDING_STATE" },
-					(response) => {
-						if (response?.session) {
-							dispatch({ type: "STOP_RECORDING", payload: response.session });
-						}
-					},
-				);
+				dispatch({
+					type: "STOP_RECORDING",
+					payload: (message as RecordingStoppedMessage).session,
+				});
 			} else if (message.type === "CONNECTION_STATUS") {
 				dispatch({
 					type: "SET_CONNECTION_STATUS",

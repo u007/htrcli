@@ -1,0 +1,30 @@
+{
+	"$comment": [
+		"Single source of truth for the session-recording EXPORT BUNDLE format.",
+		"Two producers implement it: the extension (src/utils/exportZip.ts) and",
+		"the htrcli CLI (htrcli/internal/commands/recordings_export.go). Neither",
+		"reads this file at runtime — it is a CONTRACT, and two tests bind their",
+		"respective producer to it:",
+		"  src/utils/exportZip.contract.test.ts        (extension)",
+		"  htrcli/internal/commands/recordings_export_test.go  (CLI)",
+		"Change a producer's output and its test fails until this file is",
+		"updated too, so the two cannot drift silently."
+	],
+	"manifestFile": "recording.json",
+	"readmeFile": "README.md",
+	"bundleFiles": ["recording.json", "README.md"],
+	"directories": ["screenshots", "audio"],
+	"compression": "deflate",
+	"patterns": {
+		"stepScreenshot": "step_%d.png",
+		"stepAudio": "step_%d.webm",
+		"annotationScreenshot": "annotation_%d.png",
+		"annotationAudio": "annotation_%d.webm"
+	},
+	"paths": {
+		"stepScreenshot": "screenshots/step_%d.png",
+		"stepAudio": "audio/step_%d.webm",
+		"annotationScreenshot": "screenshots/annotation_%d.png",
+		"annotationAudio": "audio/annotation_%d.webm"
+	}
+}

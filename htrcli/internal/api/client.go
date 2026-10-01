@@ -274,6 +274,106 @@ func (c *Client) ExecuteCommand(tabID *int, cmd Command) (*CommandResult, error)
 	return &result, nil
 }
 
+// commandDataEnvelope mirrors the ApiResponse envelope, but keeps the
+// command result's `data` as a json.RawMessage.
+//
+// That is the whole point: json.RawMessage is a subslice of the response
+// bytes, so nothing is copied or re-encoded on the way to the caller's type.
+type commandDataEnvelope struct {
+	OK    bool   `json:"ok"`
+	Error string `json:"error"`
+	Data  struct {
+		ID      string          `json:"id"`
+		Success bool            `json:"success"`
+		Error   string          `json:"error"`
+		Data    json.RawMessage `json:"data"`
+	} `json:"data"`
+}
+
+// ExecuteBackgroundCommandInto runs a command in the extension's background
+// service worker with no tab involved, decoding the result's `data` directly
+// into out. It is the tab-less counterpart of ExecuteCommandInto and shares its
+// single-pass decode through commandDataEnvelope, so a large payload (a
+// recording with screenshots) is copied once rather than marshalled back to
+// bytes and re-parsed.
+//
+// browserHint is advisory: the daemon prefers a relay that announced it and
+// falls back to the earliest-connected relay when none matches, so this is never
+// a hard selector. Pass "" for no preference.
+func (c *Client) ExecuteBackgroundCommandInto(cmd Command, browserHint string, out any) error {
+	data, err := c.doRequest("POST", "/api/background/command", BackgroundCommandRequest{
+		Command: cmd,
+		Browser: browserHint,
+	})
+	if err != nil {
+		return err
+	}
+
+	var env commandDataEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+	if !env.OK {
+		return &APIError{Message: env.Error}
+	}
+	if !env.Data.Success {
+		if env.Data.Error == "" {
+			// A failed command with no message would otherwise surface as an
+			// empty error string, which reads like success at the call site.
+			return fmt.Errorf("command %q failed without an error message", cmd.Action)
+		}
+		return fmt.Errorf("%s", env.Data.Error)
+	}
+
+	if out == nil || len(env.Data.Data) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(env.Data.Data, out); err != nil {
+		return fmt.Errorf("failed to decode command result: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) ExecuteCommandInto(tabID *int, cmd Command, out any) error {
+	req := CommandRequest{Command: cmd}
+
+	var path string
+	if tabID != nil {
+		path = "/api/tabs/" + strconv.Itoa(*tabID) + "/command"
+	} else {
+		path = "/api/command"
+	}
+
+	data, err := c.doRequest("POST", path, req)
+	if err != nil {
+		return err
+	}
+
+	var env commandDataEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return fmt.Errorf("failed to parse response: %w", err)
+	}
+	if !env.OK {
+		return &APIError{Message: env.Error}
+	}
+	if !env.Data.Success {
+		if env.Data.Error == "" {
+			// A failed command with no message would otherwise surface as an
+			// empty error string, which reads like success at the call site.
+			return fmt.Errorf("command %q failed without an error message", cmd.Action)
+		}
+		return fmt.Errorf("%s", env.Data.Error)
+	}
+
+	if out == nil || len(env.Data.Data) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(env.Data.Data, out); err != nil {
+		return fmt.Errorf("failed to decode command result: %w", err)
+	}
+	return nil
+}
+
 // GetPageInfo returns information about the current page. A non-nil tabID
 // targets that tab (the --tab flag); nil falls back to the server's default.
 func (c *Client) GetPageInfo(tabID *int) (*PageInfo, error) {

@@ -31,6 +31,8 @@ htrcli serve          # run daemon: HTTP :3845 + Unix socket relay (Chrome+Firef
 
 # Video recording requires ffmpeg ≥ 6 on PATH (brew install ffmpeg)
 # Missing ffmpeg produces explicit errors at both record start and stop.
+# (Session recordings — `htrcli recordings …` — need NO ffmpeg and work on
+#  both Chrome and Firefox. They are a different feature from `htrcli record`.)
 
 # Utility
 make close           # Kill process on :3845
@@ -56,11 +58,25 @@ This is a **multi-part project** with the extension using htrcli as its sole bac
                             └────────────────────────┘
 ```
 
+Each relay connection is scoped: it announces itself with an `identify` message
+(`browser: chrome|firefox`) once the daemon's greeting confirms the link, and it
+registers only its own tabs. Two routes reach a relay:
+
+- `POST /api/tabs/<id>/command` — routed by tab, to the content script.
+- `POST /api/background/command` — **tab-less**, to the background service
+  worker, optionally with an advisory `browser` hint. Session recording needs
+  this: those actions belong to no page, so requiring an open `http/https` tab
+  would be wrong. Connections are ordered by a monotonic `seq`, so selection is
+  deterministic; a hint that matches nothing falls back to the earliest
+  connection, and `recordings list` reports which browser actually answered.
+
 ### Extension (`src/` → `build/`)
 
 Built with Vite + `@crxjs/vite-plugin` (Chrome only). Entry points defined in `src/manifest.ts`:
 
-- **`src/background/index.ts`** — Service worker. Orchestrates recording sessions, captures screenshots via `chrome.tabs.captureVisibleTab`, manages state.
+- **`src/background/index.ts`** — Service worker. Orchestrates recording sessions, captures screenshots via `chrome.tabs.captureVisibleTab`, manages state. Registers the recorder with `setRecordingDeps` so the `recording*` native commands can reach it.
+- **`src/background/recordingCommands.ts`** — Pure dispatch logic for the `recordingStart|Stop|Status|List|Get|Delete` actions (htrcli `recordings …`). Browser-agnostic: no `chrome.debugger`, so it works on Chrome and Firefox. Side effects are injected via `RecordingCommandDeps`.
+- **`src/popup/Popup.tsx`** — Toolbar popup: manual Start/Stop, optional title, audio toggle, recent recordings.
 - **`src/contentScript/index.ts`** — Injected into every `http/https` page. Submodules handle:
   - `clickHandler.ts` / `inputHandler.ts` — Track interactions
   - `commandExecutor.ts` — Execute remote control commands (click, fill, navigate, eval…)
@@ -102,3 +118,4 @@ HTR_ALLOWED_IPS="127.0.0.1,..."  # Expand whitelist
 - **Error prefix**: `console.error/warn('[HTR NControl] ...')` in extension code.
 - **Tests**: Bun's built-in runner. Test files: `*.test.ts`. Currently sparse — content script tests in `src/contentScript/commandExecutor.test.ts`.
 - **Build output**: Chrome → `build/`, Firefox → `firefox/build/`.
+- **Cross-boundary contracts** live in `shared/` as data, not code. `shared/recording-export-contract.json` pins the recording ZIP bundle layout for BOTH producers — the extension (`src/utils/exportZip.ts`) and the CLI (`htrcli/internal/commands/recordings_export.go`). Nothing reads it at runtime; each producer is bound to it by a test on its own side (`*.contract.test.ts` / `recordings_export_test.go`). If you change a producer's output, its test fails until you update the contract too — that is the intended coupling, not a nuisance.

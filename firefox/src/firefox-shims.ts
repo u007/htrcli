@@ -11,9 +11,12 @@
 // We patch `chrome.sidePanel` at startup with no-op stubs so the
 // existing calls in `src/background/index.ts` don't throw at
 // runtime. Firefox's behavior is then driven by the manifest
-// (always show the same panel) and by the existing
-// `chrome.action.onClicked` listener (which the source already
-// registers and which Firefox fires the same way as Chrome).
+// (always show the same panel).
+//
+// Note: `chrome.sidebarAction` is REAL here, not a stub — the
+// polyfill maps `browser.*` onto `chrome.*`. The popup uses it to
+// open the sidebar, since a `default_popup` on the toolbar button
+// means `action.onClicked` no longer fires.
 
 import "webextension-polyfill";
 
@@ -45,12 +48,13 @@ if (!browserApi.sidePanel) {
 		}): Promise<void> {
 			// Intentionally empty.
 		},
-		// No-op: Firefox has no `openPanelOnActionClick` runtime
-		// toggle. To make the toolbar click actually open the
-		// sidebar in Firefox, we register a one-time
-		// `sidebarAction.open()` call on the action click. We do it
-		// here so the Firefox build doesn't need to modify the
-		// shared source.
+		// No-op: Firefox has no `openPanelOnActionClick` runtime toggle.
+		// The toolbar button now declares `action.default_popup`
+		// (firefox/vite.config.ts), which SUPPRESSES `action.onClicked`
+		// entirely — so this listener is a no-op on current builds. It is
+		// kept as a fallback for a build without the popup. When the popup
+		// IS declared, the popup's "Open side panel" button calls
+		// `sidebarAction.open()` itself, so the sidebar remains reachable.
 		async setPanelBehavior(options: {
 			openPanelOnActionClick?: boolean;
 		}): Promise<void> {

@@ -128,6 +128,9 @@ func apiHandler(d *Daemon, port int, bearerToken string) http.Handler {
 		case path == "/api/command" && r.Method == "POST":
 			handleCommand(w, r, d, 0)
 
+		case path == "/api/background/command" && r.Method == "POST":
+			handleBackgroundCommand(w, r, d)
+
 		case tabCmdRe.MatchString(path) && r.Method == "POST":
 			m := tabCmdRe.FindStringSubmatch(path)
 			handleCommand(w, r, d, parseTabID(m[1]))
@@ -141,6 +144,11 @@ func apiHandler(d *Daemon, port int, bearerToken string) http.Handler {
 type commandRequest struct {
 	Command Command `json:"command"`
 	Timeout int     `json:"timeout"`
+	// Browser is an advisory hint naming the browser profile to prefer
+	// ("chrome" or "firefox"). Only meaningful on the tab-less background route,
+	// where there is no tab to route by. It is omitempty so the body of a
+	// tab-routed request is unchanged by its presence here.
+	Browser string `json:"browser,omitempty"`
 }
 
 func handleCommand(w http.ResponseWriter, r *http.Request, d *Daemon, tabID int) {
@@ -167,6 +175,35 @@ func handleCommand(w http.ResponseWriter, r *http.Request, d *Daemon, tabID int)
 	}
 
 	result, err := sendCommand(d, tabID, req.Command, timeoutMs)
+	if err != nil {
+		apiError(w, 404, err.Error())
+		return
+	}
+	apiOK(w, result)
+}
+
+// handleBackgroundCommand runs a command in the extension's background service
+// worker, with no tab involved. This is what session recording needs: the
+// recording actions are handled by the background worker and an idle or
+// non-http page may have no tab registered at all, so routing by tab would fail.
+//
+// The relay is selected by connection, using req.Browser as an advisory hint
+// (see Daemon.selectConn). Unlike handleCommand, this never calls FirstTabID.
+func handleBackgroundCommand(w http.ResponseWriter, r *http.Request, d *Daemon) {
+	var req commandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Command.Action == "" {
+		apiError(w, 400, "invalid request body")
+		return
+	}
+	if req.Command.ID == "" {
+		req.Command.ID = generateID()
+	}
+	timeoutMs := req.Timeout
+	if timeoutMs <= 0 {
+		timeoutMs = 30000
+	}
+
+	result, err := sendBackgroundCommand(d, req.Command, req.Browser, timeoutMs)
 	if err != nil {
 		apiError(w, 404, err.Error())
 		return

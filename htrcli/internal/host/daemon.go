@@ -73,6 +73,17 @@ type RelayConn struct {
 	// lastSeen is the time of the last message received from this relay.
 	// Guarded by Daemon.mu.
 	lastSeen time.Time
+	// browser is the browser this relay announced ("chrome" or "firefox"),
+	// recorded from the extension's identify message. Empty means the
+	// extension has not announced itself, which is the normal state for an
+	// older extension that predates the identify message — so empty is not
+	// an error. Guarded by Daemon.mu.
+	browser string
+	// seq is this connection's position in connect order. Assigned once in
+	// AddConn and never reused. It is the tie-breaker that makes connection
+	// selection deterministic: Go randomises map iteration order, so ranging
+	// over d.conns cannot define "first". Guarded by Daemon.mu.
+	seq uint64
 }
 
 // Daemon holds shared state: the set of relay connections (each with its own
@@ -96,6 +107,10 @@ type Daemon struct {
 	// sweeper). Initialized in NewDaemon; closing it is guarded by stopOnce.
 	stopOnce sync.Once
 	stop     chan struct{}
+	// nextConnSeq hands out RelayConn.seq values. Monotonically increasing
+	// and never reused, so "earliest connected" stays well defined for the life
+	// of the daemon even as connections come and go. Guarded by mu.
+	nextConnSeq uint64
 }
 
 // RelaysConnected returns the number of live relay connections (browsers).
@@ -141,7 +156,17 @@ func NewDaemon() *Daemon {
 func (d *Daemon) AddConn(write func(msg []byte) error) *RelayConn {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	rc := &RelayConn{write: write, tabs: make(map[int]TabInfo), lastSeen: time.Now()}
+	// Assign seq here, inside the lock, so the sequence cannot be observed out
+	// of order by a concurrent reader: AddConn is the only place a RelayConn is
+	// constructed and registered, so this is the only place a seq is handed out.
+	d.nextConnSeq++
+	rc := &RelayConn{
+		write:    write,
+		tabs:     make(map[int]TabInfo),
+		lastSeen: time.Now(),
+		seq:      d.nextConnSeq,
+		// browser stays empty until the extension announces itself via identify.
+	}
 	d.conns[rc] = struct{}{}
 	return rc
 }
@@ -314,17 +339,51 @@ func (d *Daemon) Tabs() []TabInfo {
 	return out
 }
 
-// FirstTabID returns any connected tab ID, or false if none. Used as the
-// default target for commands/screenshots that don't specify a tab.
+// FirstTabID returns a connected tab ID, or false if no connection has a tab.
+// Used as the default target for commands and screenshots that don't specify a
+// tab.
+//
+// Selection is deterministic: the tab comes from the eligible connection with
+// the lowest seq (earliest connected), and within that connection from the
+// lowest tab ID. The previous implementation returned whichever entry Go's
+// randomised map iteration happened to yield, so repeated calls could name
+// different browsers — see TestFirstTabIDIsDeterministicAcrossRepeatedCalls.
+// The old doc comment claimed "first match wins", which was never true.
 func (d *Daemon) FirstTabID() (int, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	rc := d.earliestConnWithTabs()
+	if rc == nil {
+		return 0, false
+	}
+	return lowestTabID(rc.tabs), true
+}
+
+// earliestConnWithTabs returns the connected RelayConn with the lowest seq that
+// has at least one registered tab, or nil if none does. Caller must hold d.mu.
+func (d *Daemon) earliestConnWithTabs() *RelayConn {
+	var best *RelayConn
 	for rc := range d.conns {
-		for id := range rc.tabs {
-			return id, true
+		if len(rc.tabs) == 0 {
+			continue
+		}
+		if best == nil || rc.seq < best.seq {
+			best = rc
 		}
 	}
-	return 0, false
+	return best
+}
+
+// lowestTabID returns the smallest tab ID registered on a connection. Caller
+// must hold d.mu, and must only call it for a connection with at least one tab.
+func lowestTabID(tabs map[int]TabInfo) int {
+	best, seen := 0, false
+	for id := range tabs {
+		if !seen || id < best {
+			best, seen = id, true
+		}
+	}
+	return best
 }
 
 // findOwner returns the connection that owns tabID. Caller must hold d.mu.
@@ -360,6 +419,108 @@ func (d *Daemon) EnqueueCommand(tabID int, cmd Command) (<-chan CommandResult, e
 	}
 	data, _ := json.Marshal(msg)
 	if err := rc.write(data); err != nil {
+		delete(d.pending, cmd.ID)
+		return nil, fmt.Errorf("relay write: %w", err)
+	}
+
+	return ch, nil
+}
+
+// SetConnBrowser records the browser a relay announced via its identify message.
+//
+// An empty browser is ignored rather than stored: "not announced yet" and
+// "announced as nothing" both mean unknown, and treating an empty value as a
+// real announcement would let a relay un-identify itself. Connections from
+// extensions that predate the identify message simply keep the empty value and
+// remain selectable via the no-hint path.
+func (d *Daemon) SetConnBrowser(rc *RelayConn, browser string) {
+	if browser == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rc.browser = browser
+}
+
+// ConnBrowser returns the browser a relay announced, or "" if it has not
+// announced one.
+func (d *Daemon) ConnBrowser(rc *RelayConn) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return rc.browser
+}
+
+// selectConn picks the connection that should answer a tab-less command.
+//
+// The hint is advisory. A hint that matches nothing falls back to the
+// earliest-connected connection instead of returning an error, on purpose: a
+// caller that hard-failed on a stale hint would be strictly worse off than one
+// that got an answer from the wrong profile, because `recordings list` reports
+// which browser actually answered. The same fallback covers an empty hint.
+//
+// Ties — including two connections that both announced the same browser — go to
+// the lowest seq, i.e. the earliest connected. Caller must hold d.mu.
+func (d *Daemon) selectConn(browserHint string) (*RelayConn, bool) {
+	var matched, earliest *RelayConn
+	for rc := range d.conns {
+		if earliest == nil || rc.seq < earliest.seq {
+			earliest = rc
+		}
+		if browserHint != "" && rc.browser == browserHint {
+			if matched == nil || rc.seq < matched.seq {
+				matched = rc
+			}
+		}
+	}
+	if matched != nil {
+		return matched, true
+	}
+	if earliest != nil {
+		return earliest, true
+	}
+	return nil, false
+}
+
+// EnqueueBackgroundCommand sends a command to a browser relay without naming a
+// tab, for actions the extension handles in its background service worker rather
+// than in a page (session recording being the motivating case).
+//
+// browserHint is advisory — see selectConn. The command is written with TabID
+// left at zero; result delivery keys on the command ID, exactly as
+// EnqueueCommand does, so the pending bookkeeping is identical.
+//
+// Takes the whole Command, exactly as EnqueueCommand does, so the caller owns
+// cmd.ID. That matters on the timeout path: the caller deletes d.pending[cmd.ID]
+// itself, so it has to be the same ID the entry was registered under. An empty
+// cmd.ID is filled in here for convenience.
+//
+// Returns a channel that receives the result when the extension responds, or an
+// error if no browser is connected or the relay write fails.
+func (d *Daemon) EnqueueBackgroundCommand(cmd Command, browserHint string) (<-chan CommandResult, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	rc, ok := d.selectConn(browserHint)
+	if !ok {
+		return nil, fmt.Errorf("no browser connected")
+	}
+
+	if cmd.ID == "" {
+		cmd.ID = generateID()
+	}
+
+	ch := make(chan CommandResult, 1)
+	d.pending[cmd.ID] = &pendingCommand{tabID: 0, ch: ch}
+
+	msg := NativeMessage{
+		Type:    "command",
+		TabID:   0, // tab-less: the background worker handles it, no page involved
+		Payload: mustMarshal(cmd),
+	}
+	data, _ := json.Marshal(msg)
+	if err := rc.write(data); err != nil {
+		// Mirror EnqueueCommand: drop the pending entry so a failed write
+		// cannot leak an entry nobody will ever resolve.
 		delete(d.pending, cmd.ID)
 		return nil, fmt.Errorf("relay write: %w", err)
 	}

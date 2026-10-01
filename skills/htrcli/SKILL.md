@@ -1,6 +1,6 @@
 ---
 name: htrcli
-description: HTR NControl CLI (htrcli) usage guide. Read this before running any htrcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select, press, keydown/keyup, mousedown/mouseup/mousemove/drag with xy= viewport coordinates and @eN refs), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, recording video, network capture/mocking, console watching, dialog handling, and more. Use when the user asks to control a browser, interact with a website, fill a form, click something, drag, press keys, extract data, take a screenshot, or automate any browser task via HTR NControl.
+description: HTR NControl CLI (htrcli) usage guide. Read this before running any htrcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select, press, keydown/keyup, mousedown/mouseup/mousemove/drag with xy= viewport coordinates and @eN refs), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, recording video, session recordings (start/stop/list/get/export/delete — works on Chrome and Firefox), network capture/mocking, console watching, dialog handling, and more. Use when the user asks to control a browser, interact with a website, fill a form, click something, drag, press keys, extract data, take a screenshot, or automate any browser task via HTR NControl.
 allowed-tools: Bash(htrcli:*), Bash(go run ./cmd/htrcli:*), Bash(make htrcli-*)
 ---
 
@@ -587,6 +587,115 @@ htrcli record stop              # stop and encode to MP4
 
 Requires ffmpeg ≥ 6 on PATH.
 
+## Session recordings (Chrome AND Firefox)
+
+A **session recording** is a step-by-step log of what happened in the browser
+— clicks, inputs, navigations — with a screenshot per step, plus your
+annotations. It lives in the extension's IndexedDB.
+
+This is **not** the same as `htrcli record` above. Use this section for
+"what did the user do" (reproducible step lists, bug reports, test authoring);
+use `htrcli record` for page **video**/MP4.
+
+Unlike video, session recordings need no CDP and no ffmpeg, so they work on
+**both Chrome and Firefox**. They are handled by the extension's background
+service worker, so there is no `--tab` — they always apply to the whole
+browser profile.
+
+```bash
+# Record a flow from the CLI
+htrcli recordings start --title "Checkout flow"
+htrcli click @e1
+htrcli fill @e2 "hello"
+htrcli recordings stop
+
+htrcli recordings status                  # is anything recording?
+htrcli recordings list                    # newest first, paginated
+htrcli recordings list --limit 20 --offset 20
+htrcli recordings get <id>                # steps + annotations (NO screenshots)
+htrcli recordings get <id> --with-screenshots   # include base64 screenshots
+htrcli recordings delete <id>
+```
+
+`export` always includes screenshots, and picks its format from the output
+file's extension:
+
+```bash
+htrcli recordings export <id> out.json    # raw payload, base64 screenshots inline
+htrcli recordings export <id> out.zip     # bundle: recording.json + README.md + screenshots/ + audio/
+htrcli recordings export <id> out.md      # human-readable timeline
+```
+
+The `.zip` layout is identical to the side panel's "Export ZIP", so bundles are
+interchangeable:
+
+```
+recording.json      manifest — screenshots/audio referenced by PATH, never base64
+README.md           the timeline
+screenshots/step_1.png, screenshots/annotation_1.png
+audio/step_1.webm,      audio/annotation_1.webm
+```
+
+Prefer `.zip` when you want the actual screenshot files on disk. An
+unrecognised extension falls back to JSON.
+
+### Starting a recording manually
+
+The same recorder can be driven from the extension UI, which is the fastest
+way to hand-capture a flow:
+
+- **Toolbar popup** — click the HTR NControl icon: optional title, an
+  "Record audio" checkbox, Start/Stop, and a list of recent recordings.
+- **Side panel** — the full session view (live step list, annotations, export).
+
+A recording started from the popup, the side panel, or the CLI is
+indistinguishable afterwards: all three write to the same IndexedDB store and
+sync the open side panel. So you can start from the UI and finish with
+`htrcli recordings stop`, or vice versa.
+
+### Notes
+
+- **Screenshots are stripped by default** in `get`. Every step carries a
+  full-page PNG data URL, so a session with a few dozen steps runs into the
+  tens of megabytes. `get` reports `mediaStripped: true` when it did so. Use
+  `--with-screenshots`, or `recordings export` (which always includes them),
+  when you actually need images.
+- **There is a hard 64 MiB ceiling on screenshots.** The whole hydrated
+  session has to fit in ONE native-messaging frame, and both ends cap it at
+  64 MiB (`htrcli.MaxMessageSize`). Base64 inflates PNGs by ~4/3, so ~48 MiB
+  of raw screenshot data is already over the line. An over-cap frame is
+  treated as a protocol error and **tears down the connection** — the
+  extension then loses remote control until it reconnects, so every later
+  command fails. `get --with-screenshots` and `export` therefore pre-check the
+  step count from `list` and refuse up front (over ~120 steps) with an
+  actionable message rather than risking the connection. If you hit it, use
+  `get` without screenshots, or record the flow in shorter sessions.
+- **`list` is sorted newest-first and paginated.** `total` is the count
+  *before* the window, so paging is deterministic.
+- **`--audio` is off by default** so a remote caller can never silently open
+  the microphone.
+- `recordingStart` refuses to clobber an in-flight session (it would discard
+  in-memory steps) — `recordings stop` first. The same refusal applies from
+  the popup and side panel, since they all go through the one `startRecording`.
+- `recordingDelete` refuses to delete the session that is currently
+  recording: it is not in the store yet, so deleting it would report success
+  and then have the session reappear on the next `stop`.
+- `--cdp` is rejected with a clear error: these live in the extension.
+- `--browser chrome|firefox` names the browser profile you want. It is a
+  **hint, not a selector**: the daemon prefers a relay that announced that
+  browser and otherwise falls back to the earliest-connected relay, so a hint
+  naming a profile that is not running still returns an answer rather than an
+  error. `recordings list` prints `Answered by: <browser>` so you can always
+  see which profile actually served the request. Omit the flag for plain
+  first-connected-wins.
+- No open page is required. These commands use the tab-less route
+  `POST /api/background/command`, which selects a browser **connection** rather
+  than a tab, so recording works from a `chrome://` page, a settings page, or a
+  browser on the new-tab screen. The only requirement is a connected extension
+  relay, else you get `404 no browser connected`.
+- Sensitive input values are masked by the extension before storage; steps
+  carry `isSensitive: true` so you know the value was redacted.
+
 ## Trace export
 
 Export a debug trace bundle (console logs + network entries + screenshot +
@@ -857,6 +966,13 @@ after the page loads.
 | `htrcli context list` | List named browser contexts |
 | `htrcli record start` | Start video recording (CDP only) |
 | `htrcli record stop` | Stop recording and encode to MP4 |
+| `htrcli recordings start` | Start a session recording (Chrome + Firefox) |
+| `htrcli recordings stop` | Stop the current session recording |
+| `htrcli recordings status` | Show whether a session recording is live |
+| `htrcli recordings list` | List session recordings (newest first, paginated) |
+| `htrcli recordings get <id>` | Print a session's steps + annotations as JSON |
+| `htrcli recordings export <id> <file>` | Write a session (with screenshots) as JSON, ZIP bundle, or Markdown |
+| `htrcli recordings delete <id>` | Delete a stored session recording |
 | `htrcli trace export` | Export debug trace bundle (zip) |
 | `htrcli publish` | Build + sign + submit to addons.mozilla.org |
 

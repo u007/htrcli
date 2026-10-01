@@ -191,7 +191,19 @@ export type CommandAction =
 	| "networkMock"
 	| "networkUnmock"
 	// ─── Dialog Handling (background-handled via CDP / content-script override) ──
-	| "dialogPolicy";
+	| "dialogPolicy"
+	// ─── Session Recording (background-handled; Chrome AND Firefox) ─────
+	// These drive the extension's OWN session recorder (steps + screenshots in
+	// IndexedDB), not the CDP screencast video recorder that `htrcli record`
+	// uses. They are background-handled because the recorder owns in-memory
+	// session state and IndexedDB, neither of which a content script can reach.
+	// See src/background/recordingCommands.ts for the result shapes.
+	| "recordingStart"
+	| "recordingStop"
+	| "recordingStatus"
+	| "recordingList"
+	| "recordingGet"
+	| "recordingDelete";
 
 // ─── Command ────────────────────────────────────────────────────────
 

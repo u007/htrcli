@@ -86,6 +86,13 @@ function buildFirefoxManifest(): Plugin {
 				action: {
 					default_title: packageData.displayName || packageData.name,
 					default_icon: "img/logo-48.png",
+					// Declaring a popup here means Firefox fires
+					// `action.onClicked` NO LONGER (a `default_popup`
+					// suppresses it) — which the shim relied on to call
+					// `sidebarAction.open()`. The popup's "Open side
+					// panel" button now calls `sidebarAction.open()`
+					// itself, so the sidebar stays one click away.
+					default_popup: "firefox/popup.html",
 				},
 				options_ui: {
 					page: "firefox/options.html",

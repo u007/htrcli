@@ -109,6 +109,11 @@ export type MessageType =
 	| "ADD_ANNOTATION"
 	| "UPDATE_ANNOTATION"
 	| "DELETE_ANNOTATION"
+	/** UI-initiated delete of a stored recording session. Routed through the
+	 *  background (not straight to IndexedDB) so it shares the
+	 *  `assertNotLiveSession` guard with the htrcli `recordingDelete` command. */
+	| "DELETE_SESSION"
+	| "DELETE_SESSION_RESULT"
 	| "GET_RECORDING_STATE"
 	| "RECORDING_STATE"
 	| "CAPTURE_SCREENSHOT"
@@ -154,12 +159,21 @@ export interface StopRecordingMessage extends BaseMessage {
 export interface RecordingStartedMessage extends BaseMessage {
 	type: "RECORDING_STARTED";
 	sessionId: string;
+	/**
+	 * The session that just started. Carried in the broadcast (rather than
+	 * forcing the side panel to round-trip `GET_RECORDING_STATE`) so a recording
+	 * started remotely — via htrcli `recordings start` — syncs the open panel
+	 * on the same tick.
+	 */
+	session: RecordingSession;
 }
 
 // Recording stopped response
 export interface RecordingStoppedMessage extends BaseMessage {
 	type: "RECORDING_STOPPED";
 	sessionId: string;
+	/** The finished session. See RecordingStartedMessage.session. */
+	session: RecordingSession;
 }
 
 // Click event from content script
@@ -215,6 +229,30 @@ export interface UpdateAnnotationMessage extends BaseMessage {
 export interface DeleteAnnotationMessage extends BaseMessage {
 	type: "DELETE_ANNOTATION";
 	annotationId: string;
+}
+
+/**
+ * Delete a stored recording session.
+ *
+ * Sent by the side panel / popup. It deliberately does NOT delete directly
+ * against IndexedDB from the UI: the background owns the live session, so it is
+ * the only place that can refuse to delete the recording in progress. Routing
+ * through it keeps the UI on the same `assertNotLiveSession` guard as the
+ * htrcli `recordingDelete` command.
+ */
+export interface DeleteSessionMessage extends BaseMessage {
+	type: "DELETE_SESSION";
+	sessionId: string;
+}
+
+/** Reply to a {@link DeleteSessionMessage}. */
+export interface DeleteSessionResultMessage extends BaseMessage {
+	type: "DELETE_SESSION_RESULT";
+	sessionId: string;
+	success: boolean;
+	/** True when nothing was removed because no such stored session existed. */
+	deleted: boolean;
+	error?: string;
 }
 
 // Get recording state message
@@ -305,6 +343,8 @@ export type RecordingMessage =
 	| AddAnnotationMessage
 	| UpdateAnnotationMessage
 	| DeleteAnnotationMessage
+	| DeleteSessionMessage
+	| DeleteSessionResultMessage
 	| GetRecordingStateMessage
 	| RecordingStateMessage
 	| EnableRecordingMessage

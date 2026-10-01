@@ -72,7 +72,16 @@ func (c *Client) GetTab(id int) (*TabInfo, error)
 func (c *Client) ExecuteCommand(tabID *int, cmd Command) (*CommandResult, error)
 func (c *Client) GetPageInfo() (*PageInfo, error)
 func (c *Client) GetScreenshot() (string, error)  // returns base64 PNG
+func (c *Client) ExecuteCommandInto(tabID *int, cmd Command, out any) error
+func (c *Client) ExecuteBackgroundCommandInto(cmd Command, browserHint string, out any) error
 ```
+
+`ExecuteCommandInto` and `ExecuteBackgroundCommandInto` decode the response's
+`data` straight into `out` through a single-pass envelope
+(`commandDataEnvelope`, which keeps `data` as a `json.RawMessage`). The older
+`ExecuteCommand` marshalled `ApiResponse.Data` back to bytes and re-parsed it,
+copying a multi-megabyte payload twice more for nothing — visible on a recording
+full of base64 screenshots.
 
 All methods:
 - Add `Authorization: Bearer <token>` header if token is set
@@ -366,6 +375,88 @@ htrcli command '{"action":"fill","target":{"name":"email"},"value":"test@example
 ```
 
 **Endpoint:** `POST /api/command`
+
+---
+
+### Session Recording (`recordings`)
+
+```bash
+htrcli recordings start [--title <t>] [--audio]
+htrcli recordings stop
+htrcli recordings status
+htrcli recordings list [--limit n] [--offset n] [--browser chrome|firefox]
+htrcli recordings get <id> [--with-screenshots] [--output f]
+htrcli recordings export <id> <file>
+htrcli recordings delete <id>
+```
+
+Distinct from `htrcli record`, which captures page **video** over CDP and is
+Chrome-only. These actions are handled by the extension's background service
+worker, need no `chrome.debugger` and no ffmpeg, so they work identically on
+Chrome and Firefox. `--cdp` is rejected with an explicit error.
+
+**Endpoint:** `POST /api/background/command`
+
+#### The tab-less route
+
+Recording actions cannot be routed by tab: they are answered by the background
+worker, so no page is the right target, and a recording spans the whole browser
+profile. Passing a nil tab to `POST /api/command` does not express that — the
+daemon resolves a nil tab through `FirstTabID`, which silently means "whatever
+tab happens to be first" and fails outright when no `http/https` tab has ever
+reported in.
+
+`POST /api/background/command` therefore selects a **relay connection**, not a
+tab. A request looks like the tab-routed one plus an advisory `browser`:
+
+```json
+{ "command": { "id": "1", "action": "recordingList" }, "browser": "firefox" }
+```
+
+Consequences worth knowing:
+- Recording works with **no page open** — from a `chrome://` page, a settings
+  page, or a browser sitting on the new-tab screen. Only a connected extension
+  relay is required, else `404 no browser connected`.
+- There is **no `--tab`** for these verbs; the profile is the target.
+
+#### Connection identity: the `identify` message
+
+The extension sends `{ "type": "identify", "browser": "chrome" | "firefox" }`
+to the daemon once per connection, immediately after the daemon's greeting
+confirms the relay (not on port open, because `connectNative` succeeds even
+when the daemon is down — and after every reconnect, since each reconnect is a
+new connection with no identity).
+
+The daemon stores it on the `RelayConn`, validating against the browsers it
+knows. An empty or unrecognised value is ignored: a stored value becomes
+selectable as a command target, so a buggy or hostile extension must not be able
+to invent one. An extension that predates `identify` simply keeps an empty
+identity and stays reachable through the no-hint path — this change is
+backwards compatible in both directions.
+
+#### `--browser` is a hint, not a selector
+
+Connections are ordered by a monotonic `seq` assigned in `AddConn`, so
+"earliest connected" is well defined. With a hint, the daemon picks the
+lowest-`seq` connection that announced that browser. **When nothing matches, it
+falls back to the lowest-`seq` connection overall rather than erroring** —
+deliberately, because `recordings list` prints `Answered by: <browser>`, so a
+wrong-profile answer is visible and recoverable, whereas a hard failure on a
+stale hint would be strictly worse. Ties, including two connections announcing
+the same browser, go to the earliest.
+
+An unrecognised `--browser` value is a **loud CLI error** rather than being
+silently ignored, precisely because the daemon's own handling is silent: a typo
+would otherwise look like a working first-wins call.
+
+#### Result shape
+
+`recordingList` returns `sessions`, `total`, `limit`, `offset` and `browser`
+(which profile answered). `recordingGet` strips base64 screenshots by default
+and reports `mediaStripped`; `--with-screenshots` and `export` always include
+them, and pre-check the step count (~120) because the hydrated session must fit
+in one native-messaging frame capped at 64 MiB — an over-cap frame is treated as
+a protocol error that tears the connection down.
 
 ---
 

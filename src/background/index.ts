@@ -8,6 +8,9 @@ import {
 	addAnnotation as dbAddAnnotation,
 	addStep as dbAddStep,
 	createSession as dbCreateSession,
+	deleteSession as dbDeleteSession,
+	exportSessionData,
+	getAllSessions,
 } from "../db/index";
 import type { Command, CommandResult } from "../types/commands";
 import type {
@@ -17,6 +20,7 @@ import type {
 	ConnectionMode,
 	ConsoleEntryMessage,
 	DeleteAnnotationMessage,
+	DeleteSessionMessage,
 	DialogEntryMessage,
 	InputEventMessage,
 	RecordingMessage,
@@ -42,6 +46,7 @@ import {
 	retryConnect,
 	setOnDaemonRestart,
 	setReadyTabsProvider,
+	setRecordingDeps,
 	setScreenshotCapturer,
 	setStatusListener,
 	startNativeHost,
@@ -49,6 +54,7 @@ import {
 	stopNetworkCapture,
 } from "./nativeHost";
 import { startWebRequestCapture } from "./networkWebRequest";
+import { assertNotLiveSession } from "./recordingCommands";
 import { computeStitchPlan } from "./stitch";
 
 /** Minimum ms between scroll-and-capture steps during full-page stitching. */
@@ -326,11 +332,24 @@ async function disableRecordingInTab(tabId: number): Promise<void> {
 
 /**
  * Start a new recording session
+ *
+ * Refuses when a session is already in flight. This guard lives HERE, at the
+ * single point where `currentSession` is mutated, because there are three
+ * entry points — the toolbar popup and the side panel (both via
+ * `chrome.runtime.sendMessage`) and htrcli (via the `recordingStart` native
+ * command) — and an in-flight session lives in memory only. Overwriting it
+ * would silently discard every step captured so far.
  */
 async function startRecording(
 	title: string,
 	hasAudio: boolean,
 ): Promise<RecordingSession> {
+	if (currentSession?.isRecording) {
+		throw new Error(
+			`a recording is already in progress (${currentSession.id}, "${currentSession.title}") — stop it first`,
+		);
+	}
+
 	// Get the current active tab
 	const [activeTab] = await chrome.tabs.query({
 		active: true,
@@ -377,6 +396,15 @@ async function startRecording(
 		step: initialStep,
 	});
 
+	// Sync any open side panel. A remote `htrcli recordings start` reaches this
+	// same function, and without this the panel would sit on stale "idle" state
+	// while a session records in the background.
+	broadcastToSidePanel({
+		type: "RECORDING_STARTED",
+		sessionId: currentSession.id,
+		session: currentSession,
+	});
+
 	// Save session metadata to storage
 	await saveSessionMetadata();
 
@@ -410,6 +438,16 @@ async function stopRecording(): Promise<RecordingSession | null> {
 	}
 
 	const finishedSession = currentSession;
+
+	// Sync any open side panel. Same reason as the RECORDING_STARTED broadcast
+	// in startRecording: a remote `htrcli recordings stop` must not leave the
+	// panel showing a live recording.
+	broadcastToSidePanel({
+		type: "RECORDING_STOPPED",
+		sessionId: finishedSession.id,
+		session: finishedSession,
+	});
+
 	console.log("[HTR NControl] Recording stopped:", finishedSession.id);
 
 	return finishedSession;
@@ -1067,6 +1105,58 @@ chrome.runtime.onMessage.addListener(
 					break;
 				}
 
+				case "DELETE_SESSION": {
+					const msg = message as DeleteSessionMessage;
+					try {
+						// The UI must not be able to delete the in-flight session:
+						// it is not persisted yet, so deleting it reports success,
+						// makes it vanish from every list, and stopRecording then
+						// writes it back unconditionally. Same guard as the htrcli
+						// `recordingDelete` command — one implementation, both paths.
+						assertNotLiveSession(() => currentSession, msg.sessionId);
+
+						const existing = await getAllSessions();
+						if (!existing.some((s) => s.id === msg.sessionId)) {
+							sendResponse({
+								type: "DELETE_SESSION_RESULT",
+								sessionId: msg.sessionId,
+								success: true,
+								deleted: false,
+							});
+							break;
+						}
+						await dbDeleteSession(msg.sessionId);
+
+						// Tell every open surface so the row disappears without a
+						// manual reload — the panel and popup each keep their own
+						// copy of the session list.
+						broadcastToSidePanel({
+							type: "DELETE_SESSION_RESULT",
+							sessionId: msg.sessionId,
+							success: true,
+							deleted: true,
+						});
+						sendResponse({
+							type: "DELETE_SESSION_RESULT",
+							sessionId: msg.sessionId,
+							success: true,
+							deleted: true,
+						});
+					} catch (error) {
+						const message_ =
+							error instanceof Error ? error.message : String(error);
+						console.warn("[HTR NControl] DELETE_SESSION refused:", message_);
+						sendResponse({
+							type: "DELETE_SESSION_RESULT",
+							sessionId: msg.sessionId,
+							success: false,
+							deleted: false,
+							error: message_,
+						});
+					}
+					break;
+				}
+
 				case "GET_RECORDING_STATE": {
 					const response: RecordingStateMessage = {
 						type: "RECORDING_STATE",
@@ -1606,21 +1696,11 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 				console.log(
 					"[HTR NControl] All tracked tabs closed, stopping recording",
 				);
-				stopRecording()
-					.then((session) => {
-						if (session) {
-							broadcastToSidePanel({
-								type: "RECORDING_STOPPED",
-								sessionId: session.id,
-							});
-						}
-					})
-					.catch((error) => {
-						console.error(
-							"[HTR NControl] Failed to auto-stop recording:",
-							error,
-						);
-					});
+				// stopRecording() itself broadcasts RECORDING_STOPPED, so the
+				// panel is synced for this auto-stop too — no broadcast here.
+				stopRecording().catch((error) => {
+					console.error("[HTR NControl] Failed to auto-stop recording:", error);
+				});
 			}
 		}
 	}
@@ -1648,6 +1728,30 @@ chrome.sidePanel
 // Start native host connection
 setScreenshotCapturer(captureScreenshotForUpload);
 setReadyTabsProvider(getReadyTabsInfo);
+
+// Expose the session recorder to the `recording*` native commands (htrcli
+// `recordings ...`). The recorder's live session lives in this module and its
+// history lives in IndexedDB, so it is injected here rather than imported by
+// nativeHost — that keeps nativeHost free of recorder state and avoids an
+// import cycle. None of this touches `chrome.debugger`, so the same commands
+// serve Chrome and Firefox.
+setRecordingDeps({
+	getActiveSession: () => currentSession,
+	startRecording,
+	stopRecording,
+	listSessions: () => getAllSessions(),
+	// exportSessionData (not getSession) so `--with-screenshots` actually
+	// hydrates the base64 blobs out of the blob store.
+	loadSession: (sessionId) => exportSessionData(sessionId),
+	deleteSession: async (sessionId) => {
+		// db.deleteSession is a no-op when the row is absent, so probe first to
+		// report `deleted: false` honestly instead of a bogus success.
+		const sessions = await getAllSessions();
+		if (!sessions.some((s) => s.id === sessionId)) return false;
+		await dbDeleteSession(sessionId);
+		return true;
+	},
+});
 setOnDaemonRestart(() => {
 	void (async () => {
 		await resetForResync();

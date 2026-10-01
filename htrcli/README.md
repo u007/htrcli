@@ -467,6 +467,73 @@ htrcli --cdp record stop output.mp4    # Stop and encode to MP4
 
 The extension/Firefox transport returns an explicit "not supported" error.
 
+## Session Recordings (Chrome + Firefox)
+
+A *session recording* is a step-by-step log of what happened in the browser —
+clicks, inputs, navigations — with a screenshot per step, plus annotations.
+It lives in the extension's IndexedDB.
+
+This is a different feature from `htrcli record` above: that one captures page
+**video** to MP4 and needs `--cdp` + ffmpeg; this one needs neither, so it works
+on **both Chrome and Firefox**. Use it for "what did the user do" (reproducible
+step lists, bug reports, test authoring).
+
+```bash
+htrcli recordings start --title "Checkout flow"
+htrcli click @e1
+htrcli recordings stop
+
+htrcli recordings status                        # is anything recording?
+htrcli recordings list                          # newest first, paginated
+htrcli recordings list --limit 20 --offset 20
+htrcli recordings get <id>                      # steps + annotations, no screenshots
+htrcli recordings get <id> --with-screenshots   # include base64 screenshots
+htrcli recordings get <id> --output out.json    # write to a file
+htrcli recordings export <id> out.json          # always with screenshots
+htrcli recordings delete <id>
+
+htrcli recordings list --browser firefox        # prefer the Firefox profile
+```
+
+Notes:
+
+- `--browser chrome|firefox` names the browser profile you want. It is a
+  **hint, not a selector**: the daemon prefers a relay that announced that
+  browser and otherwise falls back to the earliest-connected relay, so a hint
+  naming a profile that is not running still returns an answer rather than an
+  error. `recordings list` prints `Answered by: <browser>` so you can always
+  see which profile actually served the request. Omit the flag for plain
+  first-connected-wins.
+
+- Handled entirely by the extension's background service worker, so there is no
+  `--tab`: a session recording always spans the whole browser profile.
+- `get` strips base64 screenshots by default (a session with a few dozen steps
+  is tens of megabytes) and reports `mediaStripped: true` when it does.
+  `export` always includes them.
+- **Screenshots have a hard 64 MiB ceiling.** The hydrated session must fit in
+  one native-messaging frame, and an over-cap frame is treated as a protocol
+  error that tears down the connection — costing you remote control until the
+  extension reconnects. `get --with-screenshots` and `export` pre-check the
+  step count and refuse up front rather than risking that.
+- Handled by the extension's background service worker, so there is no
+  `--tab`: a session recording always spans the whole browser profile. These
+  commands go to `POST /api/background/command`, a tab-less route that picks a
+  browser **connection** rather than a tab, so **no open page is required** —
+  recording works from a `chrome://` page, a settings page, or a browser sitting
+  on the new-tab screen. The only requirement is that the extension is running
+  and its relay is connected, else you get `404 no browser connected`.
+- `--audio` defaults to off, so a remote caller can never silently open the
+  microphone.
+- `start` refuses to clobber an in-flight session; `stop` it first. The same
+  refusal applies from the extension's popup and side panel, since all three
+  go through one `startRecording`.
+- `delete` refuses to remove the session that is currently recording — it is
+  not persisted yet, so deleting it would report success and then let the
+  session reappear on the next `stop`.
+- `--cdp` returns an explicit error — these live in the extension.
+- The same recorder can be driven by hand from the extension's toolbar popup or
+  side panel; recordings started either way show up in `htrcli recordings list`.
+
 ## Debug Trace Export
 
 Export console + network events, a screenshot, and page info as a zip:

@@ -56,6 +56,114 @@ type CommandResult struct {
 	PageInfo   *PageInfo `json:"pageInfo,omitempty"`
 }
 
+// ─── Session recordings ─────────────────────────────────────────────
+//
+// These mirror the extension's session recorder (interaction steps +
+// screenshots in IndexedDB), NOT the CDP screencast video recorder that
+// `htrcli record` drives. They are background-handled, so they need no tab.
+
+// RecordingSessionMeta is one entry in a `recordings list` result.
+type RecordingSessionMeta struct {
+	ID              string `json:"id"`
+	Title           string `json:"title"`
+	StartTime       int64  `json:"startTime"`
+	EndTime         *int64 `json:"endTime,omitempty"`
+	HasAudio        bool   `json:"hasAudio"`
+	StepCount       int    `json:"stepCount"`
+	AnnotationCount int    `json:"annotationCount"`
+}
+
+// RecordingListData is the `recordingList` result.
+type RecordingListData struct {
+	Sessions []RecordingSessionMeta `json:"sessions"`
+	Total    int                    `json:"total"`
+	Limit    int                    `json:"limit"`
+	Offset   int                    `json:"offset"`
+	// Browser is which browser answered: "chrome", "firefox", or "" if the
+	// result did not say. The extension is the authority on its own identity.
+	//
+	// The "" case is not hypothetical: encoding/json silently drops a JSON key
+	// with no matching struct field, so forgetting this line would not error —
+	// it would make the CLI's browser column permanently blank, which reads as
+	// a UI bug rather than a missing field. TestRecordingListDataDecodesBrowser
+	// exists to catch exactly that.
+	Browser string `json:"browser"`
+}
+
+// RecordingStateData is the `recordingStart`/`recordingStop`/
+// `recordingStatus` result.
+type RecordingStateData struct {
+	Recording bool                  `json:"recording"`
+	Session   *RecordingSessionMeta `json:"session"`
+}
+
+// RecordingElementInfo identifies the element a step acted on.
+// Mirrors ElementInfo in src/types/recording.ts.
+type RecordingElementInfo struct {
+	Tag       string `json:"tag"`
+	Text      string `json:"text"`
+	Selector  string `json:"selector"`
+	Type      string `json:"type,omitempty"`
+	Name      string `json:"name,omitempty"`
+	ID        string `json:"id,omitempty"`
+	ClassName string `json:"className,omitempty"`
+	AriaLabel string `json:"ariaLabel,omitempty"`
+}
+
+// RecordingStep is one captured interaction in a session.
+// Mirrors RecordingStep in src/types/recording.ts.
+type RecordingStep struct {
+	ID        string                `json:"id"`
+	Timestamp int64                 `json:"timestamp"` // ms from recording start
+	Type      string                `json:"type"`      // click | input | navigation
+	TabID     int                   `json:"tabId"`
+	TabTitle  string                `json:"tabTitle"`
+	URL       string                `json:"url"`
+	Element   *RecordingElementInfo `json:"element,omitempty"`
+	// InputValue is already masked by the extension when IsSensitive is set.
+	InputValue     string  `json:"inputValue,omitempty"`
+	IsSensitive    bool    `json:"isSensitive,omitempty"`
+	ScreenshotData *string `json:"screenshotData,omitempty"` // base64
+	AudioData      *string `json:"audioData,omitempty"`      // base64 webm
+}
+
+// RecordingAnnotation is a user note pinned to a session.
+// Mirrors Annotation in src/types/recording.ts.
+type RecordingAnnotation struct {
+	ID             string  `json:"id"`
+	Timestamp      int64   `json:"timestamp"`
+	Text           string  `json:"text"`
+	ScreenshotData *string `json:"screenshotData,omitempty"`
+	AudioData      *string `json:"audioData,omitempty"`
+}
+
+// RecordingSession is a full session, as returned by `recordingGet`.
+type RecordingSession struct {
+	ID           string                `json:"id"`
+	Title        string                `json:"title"`
+	StartTime    int64                 `json:"startTime"`
+	EndTime      *int64                `json:"endTime,omitempty"`
+	IsRecording  bool                  `json:"isRecording"`
+	HasAudio     bool                  `json:"hasAudio"`
+	Steps        []RecordingStep       `json:"steps"`
+	Annotations  []RecordingAnnotation `json:"annotations"`
+	TrackedTabID []int                 `json:"trackedTabIds,omitempty"`
+}
+
+// RecordingGetData is the `recordingGet` result.
+type RecordingGetData struct {
+	Session RecordingSession `json:"session"`
+	// MediaStripped reports that base64 screenshots/audio were removed to keep
+	// the payload inside the native-messaging limit.
+	MediaStripped bool `json:"mediaStripped"`
+}
+
+// RecordingDeleteData is the `recordingDelete` result.
+type RecordingDeleteData struct {
+	ID      string `json:"id"`
+	Deleted bool   `json:"deleted"`
+}
+
 // TabInfo contains information about a connected browser tab.
 type TabInfo struct {
 	ID         int    `json:"id"`
@@ -120,6 +228,19 @@ type CommandRequest struct {
 	Command    Command `json:"command"`
 	Screenshot bool    `json:"screenshot,omitempty"`
 	Timeout    int     `json:"timeout,omitempty"`
+}
+
+// BackgroundCommandRequest is the body of POST /api/background/command.
+// Deliberately NOT CommandRequest: that type carries `Screenshot`, a tab-routed
+// concept this route does not support, and reusing it would advertise a field
+// the daemon ignores.
+type BackgroundCommandRequest struct {
+	Command Command `json:"command"`
+	Timeout int     `json:"timeout,omitempty"`
+	// Browser is an advisory hint ("chrome"/"firefox") naming the profile to
+	// prefer. omitempty so a caller with no preference sends nothing, leaving the
+	// body identical to one that predates the flag.
+	Browser string `json:"browser,omitempty"`
 }
 
 // HealthResponse is the response from GET /api/health.

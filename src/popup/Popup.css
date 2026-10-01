@@ -1,53 +1,189 @@
-@media (prefers-color-scheme: light) {
-	a:hover {
-		color: #61dafb;
-	}
-}
-
 main {
-	text-align: center;
-	padding: 1em;
+	padding: 0.75rem 1rem 1rem;
 	margin: 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: 0.6rem;
+	min-width: 17rem;
 }
 
 h3 {
 	color: #61dafb;
 	text-transform: uppercase;
-	font-size: 1.5rem;
-	font-weight: 200;
-	line-height: 1.2rem;
-	margin: 2rem auto;
+	font-size: 0.8rem;
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	margin: 0;
 }
 
-.calc {
+h4 {
+	font-size: 0.7rem;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	margin: 0.25rem 0 0.35rem;
+	opacity: 0.7;
+}
+
+.status {
+	margin: 0;
+	font-size: 1rem;
+	font-weight: 600;
 	display: flex;
-	justify-content: center;
 	align-items: center;
-	margin: 2rem;
+	gap: 0.4rem;
+}
 
-	& > button {
-		font-size: 1rem;
-		padding: 0.5rem 1rem;
-		border: 1px solid #61dafb;
-		border-radius: 0.25rem;
-		background-color: transparent;
-		color: #61dafb;
-		cursor: pointer;
-		outline: none;
+.status.recording {
+	color: #ff5f57;
+}
 
-		width: 3rem;
-		margin: 0 a;
+.dot {
+	width: 0.55rem;
+	height: 0.55rem;
+	border-radius: 50%;
+	background: currentColor;
+	animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+	0%,
+	100% {
+		opacity: 1;
 	}
-
-	& > label {
-		font-size: 1.5rem;
-		margin: 0 1rem;
+	50% {
+		opacity: 0.25;
 	}
 }
 
-a {
-	font-size: 0.5rem;
-	margin: 0.5rem;
-	color: #cccccc;
-	text-decoration: none;
+@media (prefers-reduced-motion: reduce) {
+	.dot {
+		animation: none;
+	}
+}
+
+.muted {
+	opacity: 0.65;
+	font-size: 0.75rem;
+	margin: 0;
+}
+
+.small {
+	font-size: 0.65rem;
+}
+
+.error {
+	color: #ff5f57;
+	font-size: 0.8rem;
+	margin: 0;
+}
+
+.field {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+	font-size: 0.75rem;
+}
+
+.field.checkbox {
+	flex-direction: row;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.field input[type="text"] {
+	padding: 0.35rem 0.5rem;
+	border: 1px solid #61dafb55;
+	border-radius: 0.25rem;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	outline: none;
+}
+
+.field input[type="text"]:focus {
+	border-color: #61dafb;
+}
+
+button {
+	font: inherit;
+	font-size: 0.8rem;
+	padding: 0.4rem 0.75rem;
+	border: 1px solid #61dafb;
+	border-radius: 0.25rem;
+	background-color: transparent;
+	color: #61dafb;
+	cursor: pointer;
+	outline: none;
+}
+
+button:hover {
+	background-color: #61dafb22;
+}
+
+button.primary {
+	background-color: #61dafb;
+	color: #10161c;
+	font-weight: 600;
+}
+
+button.primary:hover {
+	background-color: #7ae4ff;
+}
+
+button.danger {
+	border-color: #ff5f57;
+	color: #ff5f57;
+	font-weight: 600;
+}
+
+button.danger:hover {
+	background-color: #ff5f5722;
+}
+
+button.link {
+	border: none;
+	color: #61dafb;
+	text-decoration: underline;
+	padding: 0.2rem 0;
+	align-self: flex-start;
+}
+
+.recent {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.3rem;
+}
+
+.recent li {
+	display: flex;
+	flex-direction: column;
+	font-size: 0.7rem;
+	border-left: 2px solid #61dafb44;
+	padding-left: 0.45rem;
+}
+
+.recent-title {
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 15rem;
+}
+
+/* The Delete button in a recent-recording row sits under the row's metadata
+   rather than inline with it, so a long title cannot squeeze it out of the
+   popup's fixed width. It reuses the existing `danger` button styling. */
+.recent li button.danger {
+	align-self: flex-start;
+	margin-top: 0.2rem;
+	padding: 0.15rem 0.4rem;
+	font-size: 0.65rem;
+}
+
+code {
+	font-size: 0.6rem;
+	opacity: 0.8;
 }

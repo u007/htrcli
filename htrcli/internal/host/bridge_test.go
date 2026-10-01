@@ -79,3 +79,135 @@ func TestGreetingIncludesGenerationAndConnectionInfo(t *testing.T) {
 		t.Fatalf("expected token in payload, got %+v", payload)
 	}
 }
+
+// relayForTest starts a relay connection on a pipe pair and returns the client
+// end, so a test can speak the native-messaging wire protocol to the daemon.
+func relayForTest(t *testing.T, d *Daemon) net.Conn {
+	t.Helper()
+	server, client := net.Pipe()
+	t.Cleanup(func() { client.Close() })
+	go handleRelayConn(d, server, 3845, "secret-token")
+
+	// The daemon greets every new relay with a ping; drain it so the pipe is
+	// not holding an unread frame when the test sends its own message.
+	if _, err := ReadMessage(client); err != nil {
+		t.Fatalf("reading the greeting: %v", err)
+	}
+	return client
+}
+
+func sendNative(t *testing.T, conn net.Conn, msg NativeMessage) {
+	t.Helper()
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal outbound message: %v", err)
+	}
+	if err := WriteMessage(conn, data); err != nil {
+		t.Fatalf("WriteMessage: %v", err)
+	}
+}
+
+// waitFor polls until cond holds or the deadline passes. Polling avoids a sleep
+// in the passing case while still bounding the failing one.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestIdentifyRecordsBrowserOnConnection(t *testing.T) {
+	d := NewDaemon()
+	conn := relayForTest(t, d)
+
+	browser, err := json.Marshal(map[string]string{"browser": "firefox"})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	sendNative(t, conn, NativeMessage{Type: "identify", Payload: browser})
+
+	var got string
+	waitFor(t, "the relay connection to record its browser", func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		for rc := range d.conns {
+			got = rc.browser
+			return rc.browser != ""
+		}
+		return false
+	})
+	if got != "firefox" {
+		t.Errorf("recorded browser = %q, want firefox", got)
+	}
+}
+
+// An extension is not a trusted source: junk in an identify must not be able to
+// disconnect the relay or fail the connection. An empty value, an absent value,
+// and a browser this build does not know are all simply "not announced" — none of
+// them may be stored, because a stored bogus value would be selectable as a
+// background-command target.
+func TestIdentifyIgnoresEmptyAndUnknownBrowser(t *testing.T) {
+	for _, payload := range []string{`{}`, `{"browser":""}`, `{"browser":"netscape"}`, `{"browser":123}`} {
+		t.Run(payload, func(t *testing.T) {
+			d := NewDaemon()
+			conn := relayForTest(t, d)
+
+			raw, err := json.Marshal(NativeMessage{Type: "identify", Payload: json.RawMessage(payload)})
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if err := WriteMessage(conn, raw); err != nil {
+				t.Fatalf("WriteMessage: %v", err)
+			}
+
+			// Prove the relay survived: a heartbeat after the junk must be accepted.
+			hb, err := json.Marshal(NativeMessage{Type: "heartbeat"})
+			if err != nil {
+				t.Fatalf("marshal heartbeat: %v", err)
+			}
+			if err := WriteMessage(conn, hb); err != nil {
+				t.Fatalf("relay did not survive the junk identify: %v", err)
+			}
+
+			waitFor(t, "the relay connection to still be connected", func() bool {
+				return d.RelaysConnected() == 1
+			})
+
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			for rc := range d.conns {
+				if rc.browser != "" {
+					t.Errorf("browser = %q, want it left empty for payload %s", rc.browser, payload)
+				}
+			}
+		})
+	}
+}
+
+// A completely unparseable frame is dropped before the type switch, but it must
+// not tear the relay down either — the read loop continues to the next message.
+func TestIdentifyGarbageFrameDoesNotDropRelay(t *testing.T) {
+	d := NewDaemon()
+	conn := relayForTest(t, d)
+
+	if err := WriteMessage(conn, []byte("this is not json")); err != nil {
+		t.Fatalf("WriteMessage: %v", err)
+	}
+
+	sendNative(t, conn, NativeMessage{Type: "identify",
+		Payload: json.RawMessage(`{"browser":"chrome"}`)})
+
+	waitFor(t, "the relay to still record identify after a garbage frame", func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		for rc := range d.conns {
+			return rc.browser == "chrome"
+		}
+		return false
+	})
+}

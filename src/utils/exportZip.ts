@@ -35,9 +35,16 @@ function slugify(text: string): string {
 }
 
 /**
- * Export recording session as ZIP file with all assets
+ * Build the recording bundle and return it WITHOUT downloading it.
+ *
+ * Split out from `exportToZip` so the entry names can be asserted in a test
+ * against `shared/recording-export-contract.json` — the same contract the Go
+ * CLI writer is pinned to. Without this seam, `exportToZip`'s only observable
+ * effect is a browser download, and the layout would be untestable.
  */
-export async function exportToZip(session: RecordingSession): Promise<void> {
+export async function buildRecordingZip(
+	session: RecordingSession,
+): Promise<JSZip> {
 	const zip = new JSZip();
 
 	// Add JSON file
@@ -102,6 +109,19 @@ export async function exportToZip(session: RecordingSession): Promise<void> {
 			}
 		}
 	});
+
+	return zip;
+}
+
+/**
+ * Export recording session as ZIP file with all assets.
+ *
+ * The bundle layout is specified by `shared/recording-export-contract.json`,
+ * which the Go CLI writer (`htrcli/internal/commands/recordings_export.go`) is
+ * pinned to as well, so a bundle from either producer is interchangeable.
+ */
+export async function exportToZip(session: RecordingSession): Promise<void> {
+	const zip = await buildRecordingZip(session);
 
 	// Generate the ZIP file
 	const zipBlob = await zip.generateAsync({
