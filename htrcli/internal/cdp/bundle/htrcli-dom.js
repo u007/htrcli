@@ -1338,7 +1338,7 @@
     }
   }
   async function handleHover(target, timeoutMs = 5e3) {
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: false
     });
