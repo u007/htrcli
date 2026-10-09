@@ -317,6 +317,54 @@ Clicked #submit-btn (23ms)
 
 **Endpoints:** `POST /api/command` with actions: `click`, `dblclick`, `fill`, `type`, `hover`, `pressKey`, `select`, `check`, `uncheck`, `scrollTo`, `clear`
 
+#### CDP-only form verbs: `pick`, `fill-form`, global `--frame`
+
+Implemented in `internal/cdp/{pick,fillform,frame}.go` + `formkit.js`
+(embedded; the DOM bundle is not modified). The extension transport returns
+`<verb> is only supported over --cdp` / `--frame is only supported over --cdp`.
+
+- `pick <selector> <text>` — `<select>`: resolve `<text>` to an option (exact
+  value, else best-ranked text), run the bundle `select` action with the
+  value, read back and fail on mismatch. Custom combobox: scroll + `focus()`
+  the input (no actionable-wait), trusted `ArrowDown`, `Input.insertText`, poll
+  ≤3s for visible `[role=option]` (inside the `aria-controls`/`aria-owns`
+  listbox when present, else the open listbox in the input's container; none
+  is an error, never a whole-document search). Rank: exact 3 > prefix 2 > contains 1
+  (case-insensitive, whitespace-collapsed); a tie at the best rank is an
+  error; an exact match is taken immediately, a weaker one only once two
+  polls return the same list. Scrolling uses `behavior: "instant"` (pages with
+  `scroll-behavior: smooth` would otherwise yield stale coordinates) and a point
+  outside the viewport is an error. Trusted click at the option centre, then
+  poll ≤2s until the displayed value contains `<text>`: react-select
+  `.select__single-value` inside the input's own `.select__value-container`
+  (else its `__control`), never the input's query text; without such a
+  container, input value, else `aria-valuetext`. The error names the value
+  read and the element it came from. Errors list ≤15 options. Output:
+  `Picked "<text>" in <selector> (cdp)`; `--json` →
+  `{success, action, selector, text, selected, mode}`.
+- `fill-form '<json>' | --file f.json` — ordered object (decoded with
+  `json.Decoder` tokens) or array of `{selector, value}`; duplicate selectors
+  are rejected. One CDP session, fields applied in order, each must match
+  exactly one element. Kinds: text/textarea (string or number literal),
+  select (as `pick`), checkbox (bool), radio (`true` only), combobox (as
+  `pick`), file (path or array, made absolute, `DOM.setFileInputFiles` by
+  `objectId`), `null` = skip. Failures never stop the batch. After all writes
+  every field is read back; statuses `OK|MISMATCH|FAILED|SKIPPED`; exit
+  non-zero if any FAILED/MISMATCH.
+- `--frame <css>` — CSS selector of an `<iframe>` in the top document. Honoured
+  by `find fill type check uncheck select click dblclick value text attr html
+  pick fill-form`; every other verb rejects it. The frame's main-world
+  execution context is resolved once per session (iframe element →
+  `DOM.describeNode` frameId → `Runtime.enable`'s `executionContextCreated`
+  replay) and every scoped call, including the bundle/form-kit install, is a
+  `Runtime.evaluate` with that `contextId` — CSP-exempt, so a frame served
+  without `'unsafe-eval'` still works, and globals bind to the frame realm;
+  trusted-input coordinates add the iframe's rect + border + padding
+  (scrolling the top window if needed).
+  Cross-origin (`contentDocument === null`) fails with
+  `htrcli --cdp open <src>` advice. One level only; `@eN`, `xy=` and
+  `find --ref` are rejected with `--frame`.
+
 ---
 
 ### Inspection
@@ -1107,6 +1155,18 @@ htrcli network wait --url <glob> [--status 200] [--timeout 10000]
   `src/background/index.ts`, same `NetworkEntry` shape written to the buffer.
 - `network wait` is a CLI-side filtered `EventPoller.Watch` call — no new
   server primitive.
+- **`--cdp` transport** (`internal/cdp/netlog.go`, `internal/commands/events_cdp.go`):
+  no daemon buffer, each invocation is a fresh CDP session. `network read`
+  evaluates the page's Performance API (`navigation` + `resource` entries →
+  url, `responseStatus`, initiatorType, duration, transferSize), because
+  `Network.enable` cannot replay completed requests: method and
+  request/response bodies are NOT available, in-flight requests are absent,
+  and Chrome's resource-timing buffer defaults to 250 entries.
+  `network watch`/`wait` attach `Network.enable` for `--timeout` and correlate
+  `requestWillBeSent` → `responseReceived` → `loadingFinished`/`loadingFailed`
+  (redirect hops complete separately); they only see requests completing after
+  attach. Entries reuse the extension's data shape, so `--url`/`--status`
+  matching is identical. `--since` is rejected (seq = per-invocation ordinal).
 
 **1b. Interception / mocking** — declarative rules registered ahead of time:
 
@@ -1144,6 +1204,16 @@ New `src/contentScript/consoleCapture.ts`, injected as a MAIN-world script,
 wraps `console.log/warn/error/info/debug`, posts each call via
 `chrome.runtime.sendMessage` to background, which appends a `ConsoleEntry`
 to the ring buffer. Identical on Chrome and Firefox.
+
+**`--cdp` transport** (`internal/cdp/console.go`): `Runtime.enable` makes V8
+replay the console messages and exceptions it still stores for the page
+(current document only, V8-capped, no object previews on replay). The backlog
+boundary is an ordering barrier — a `Runtime.evaluate` issued after
+`Runtime.enable` — not a timeout, since a websocket read deadline would kill the
+session. `console read` prints the backlog; `console watch` streams only later
+`consoleAPICalled`/`exceptionThrown` for `--timeout`. CDP `warning` maps to
+`warn` and exceptions to `error`, so `--level` means the same on both
+transports. `--since` is rejected.
 
 New: `src/contentScript/consoleCapture.ts`, `internal/commands/console.go`.
 Modified: `src/contentScript/index.ts` (inject), `src/background/index.ts`

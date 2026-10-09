@@ -12,9 +12,9 @@ import (
 )
 
 var (
-	publishSourceDir    string
-	publishSourceCode   string
-	publishChannel      string
+	publishSourceDir   string
+	publishSourceCode  string
+	publishChannel     string
 	publishAPIKey      string
 	publishAPISecret   string
 	publishBuild       bool

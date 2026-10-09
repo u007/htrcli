@@ -2,6 +2,7 @@ package cdp
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,6 +21,10 @@ func clickFake(t *testing.T, methods *[]string) string {
 			}
 			json.Unmarshal(m.Params, &p)
 			switch {
+			case strings.Contains(p.Expression, "__htrcliDom.exec"):
+				conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+					"result": map[string]any{"type": "object", "value": map[string]any{"ok": map[string]any{
+						"id": "1", "success": true, "data": map[string]any{"x": 120.5, "y": 240.0}}}}}})
 			case strings.Contains(p.Expression, "typeof window.__htrcliDom"):
 				conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
 					"result": map[string]any{"type": "string", "value": "object"}}})
@@ -72,6 +77,10 @@ func TestRightClickDispatchesTrustedInput(t *testing.T) {
 			}
 			json.Unmarshal(m.Params, &p)
 			switch {
+			case strings.Contains(p.Expression, "__htrcliDom.exec"):
+				conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+					"result": map[string]any{"type": "object", "value": map[string]any{"ok": map[string]any{
+						"id": "1", "success": true, "data": map[string]any{"x": 120.5, "y": 240.0}}}}}})
 			case strings.Contains(p.Expression, "typeof window.__htrcliDom"):
 				conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
 					"result": map[string]any{"type": "string", "value": "object"}}})
@@ -279,7 +288,7 @@ func TestDragUsesCoordinatesAndBoundedSteps(t *testing.T) {
 	s, _ := Dial(url)
 	defer s.Close()
 
-	if err := Drag(s, "T1", coordinateSelector(10, 20), coordinateSelector(30, 40), 2, -1); err != nil {
+	if err := Drag(s, "T1", DragEndpoint{Sel: coordinateSelector(10, 20)}, DragEndpoint{Sel: coordinateSelector(30, 40)}, 2, -1); err != nil {
 		t.Fatalf("drag: %v", err)
 	}
 	if len(calls) != 4 {
@@ -296,6 +305,147 @@ func TestDragUsesCoordinatesAndBoundedSteps(t *testing.T) {
 	}
 	if calls[2]["x"] != float64(30) || calls[2]["y"] != float64(40) {
 		t.Errorf("second move = (%v,%v), want (30,40)", calls[2]["x"], calls[2]["y"])
+	}
+}
+
+// TestDragResolvesBothEndpointsInOnePass pins the fix for resolving the two
+// drag endpoints independently: the source point was read, then the
+// destination's prepareClick centered the page, and the press landed where
+// the source USED to be. Both endpoints must now be resolved in a single
+// page-side evaluation (dragPointsFn), so exactly one Runtime.evaluate is
+// issued and the dispatched coordinates come from that one result.
+func TestDragResolvesBothEndpointsInOnePass(t *testing.T) {
+	var evals []string
+	var calls []map[string]any
+	url := fakeCDP(t, func(m fakeMsg, conn *websocket.Conn) {
+		switch m.Method {
+		case "Runtime.evaluate":
+			var p struct {
+				Expression string `json:"expression"`
+			}
+			json.Unmarshal(m.Params, &p)
+			evals = append(evals, p.Expression)
+			// The batched resolver returns both points in one envelope.
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"result": map[string]any{"type": "object", "value": map[string]any{
+					"ok": map[string]any{
+						"a": map[string]any{"x": 100.0, "y": 200.0},
+						"b": map[string]any{"x": 300.0, "y": 400.0},
+					}}}}})
+		case "Input.dispatchMouseEvent":
+			var params map[string]any
+			if err := json.Unmarshal(m.Params, &params); err != nil {
+				t.Errorf("decode drag params: %v", err)
+			}
+			calls = append(calls, params)
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		default:
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		}
+	})
+	s, _ := Dial(url)
+	defer s.Close()
+
+	src := DragEndpoint{Sel: &api.TargetSelector{Selector: "#src"}}
+	dst := DragEndpoint{Sel: &api.TargetSelector{Selector: "#dst"}}
+	if err := Drag(s, "T1", src, dst, 2, -1); err != nil {
+		t.Fatalf("drag: %v", err)
+	}
+
+	// ONE page-side evaluation resolves both endpoints (no per-endpoint
+	// prepareClick round trips whose scroll invalidates the earlier point),
+	// and no frame conversion runs (frame == "").
+	if len(evals) != 1 {
+		t.Fatalf("issued %d Runtime.evaluate calls (want 1 batched resolve): %v", len(evals), evals)
+	}
+	if !strings.Contains(evals[0], "drag-prep-a") || !strings.Contains(evals[0], "drag-prep-b") {
+		t.Errorf("batched expression must prepare BOTH endpoints, got: %s", evals[0])
+	}
+	// The bundle destructures {action, target} (lowercase); capitalised keys
+	// made every selector drag fail with "Unknown action: undefined".
+	if !strings.Contains(evals[0], "dom.exec({id: id, action: action, target: target})") {
+		t.Errorf("drag resolver must call the bundle with lowercase command keys, got: %s", evals[0])
+	}
+
+	if len(calls) != 4 {
+		t.Fatalf("want press, 2 moves, release; got %d: %#v", len(calls), calls)
+	}
+	if calls[0]["type"] != "mousePressed" || calls[0]["x"] != float64(100) || calls[0]["y"] != float64(200) {
+		t.Errorf("press = %v, want mousePressed at (100,200)", calls[0])
+	}
+	last := calls[len(calls)-1]
+	if last["type"] != "mouseReleased" || last["x"] != float64(300) || last["y"] != float64(400) {
+		t.Errorf("release = %v, want mouseReleased at (300,400)", last)
+	}
+}
+
+// TestDragRefEndpointsTravelAsElementHandles pins @eN drag endpoints: a ref
+// is NOT pre-resolved to pixels (those went stale as soon as the other
+// endpoint's prepare scrolled the page). The backendNodeId becomes a
+// RemoteObject via DOM.resolveNode and the page-side resolver receives the
+// ELEMENT through Runtime.callFunctionOn, so it is scrolled and re-read in
+// the same pass as a selector endpoint.
+func TestDragRefEndpointsTravelAsElementHandles(t *testing.T) {
+	var resolved []int64
+	var call map[string]any
+	var calls []map[string]any
+	url := fakeCDP(t, func(m fakeMsg, conn *websocket.Conn) {
+		switch m.Method {
+		case "DOM.resolveNode":
+			var p struct {
+				BackendNodeID int64 `json:"backendNodeId"`
+			}
+			json.Unmarshal(m.Params, &p)
+			resolved = append(resolved, p.BackendNodeID)
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"object": map[string]any{"objectId": fmt.Sprintf("obj-%d", p.BackendNodeID), "className": "HTMLDivElement"}}})
+		case "Runtime.callFunctionOn":
+			json.Unmarshal(m.Params, &call)
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"result": map[string]any{"type": "object", "value": map[string]any{
+					"a": map[string]any{"x": 11.0, "y": 22.0},
+					"b": map[string]any{"x": 33.0, "y": 44.0},
+				}}}})
+		case "Runtime.evaluate":
+			t.Errorf("a ref drag must not pre-resolve coordinates by evaluate")
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		case "Input.dispatchMouseEvent":
+			var params map[string]any
+			json.Unmarshal(m.Params, &params)
+			calls = append(calls, params)
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		default:
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		}
+	})
+	s, _ := Dial(url)
+	defer s.Close()
+
+	src := DragEndpoint{BackendNodeID: 100}
+	dst := DragEndpoint{Sel: &api.TargetSelector{Selector: "#dropzone"}}
+	if err := Drag(s, "T1", src, dst, 1, 0); err != nil {
+		t.Fatalf("drag: %v", err)
+	}
+	if !reflect.DeepEqual(resolved, []int64{100}) {
+		t.Fatalf("resolved backend nodes = %v, want [100]", resolved)
+	}
+	if call["objectId"] != "obj-100" || !strings.Contains(call["functionDeclaration"].(string), "drag-prep-a") {
+		t.Fatalf("callFunctionOn must run dragPointsFn on the ref element, got %v", call)
+	}
+	args, _ := call["arguments"].([]any)
+	if len(args) != 2 {
+		t.Fatalf("arguments = %v, want [element handle, selector]", call["arguments"])
+	}
+	if a0, _ := args[0].(map[string]any); a0["objectId"] != "obj-100" || a0["value"] != nil {
+		t.Errorf("source argument = %v, want the element handle", args[0])
+	}
+	if a1, _ := args[1].(map[string]any); a1["objectId"] != nil {
+		t.Errorf("destination argument = %v, want the selector by value", args[1])
+	} else if sel, _ := a1["value"].(map[string]any); sel["selector"] != "#dropzone" {
+		t.Errorf("destination argument = %v, want selector #dropzone", args[1])
+	}
+	if len(calls) != 3 || calls[0]["x"] != float64(11) || calls[0]["y"] != float64(22) || calls[2]["x"] != float64(33) || calls[2]["y"] != float64(44) {
+		t.Fatalf("dispatched = %v, want press at (11,22) … release at (33,44)", calls)
 	}
 }
 

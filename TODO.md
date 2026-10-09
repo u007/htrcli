@@ -6,6 +6,23 @@
 - The shared debuggerManager is used only by network + dialog capture. The existing trusted-input (cdpInput.ts) and CDP_EVAL paths still do their own chrome.debugger.attach, so running a click/eval command while a capture window is open on the same tab fails with "Already attached". Route those through debuggerManager in a later pass.
 - Network mocking/interception (spec §1b) is a separate deferred phase (needs webRequestBlocking + Fetch.enable).
 
+## htrcli console/network over --cdp — known limitations (2026-10-07)
+
+- `network read --cdp` reads the Performance API, so already-completed requests have no method and no request/response bodies; in-flight requests are absent and the resource-timing buffer (250 by default) can drop later entries. Recovering these would need a long-lived CDP attachment (daemon-side buffer), which `--cdp` deliberately does not have.
+- `network wait --cdp` sees only requests completing after it attaches; callers must start it before the triggering action (documented in README/SKILL).
+- `console read --cdp` gets V8's replay without object previews (objects print as `Object`); browser-side `Log` domain entries (e.g. "Failed to load resource") are not collected.
+- `--since` is rejected over `--cdp`: seq numbers are per-invocation ordinals.
+- Listings are not paginated on either transport (no `--limit`/`--offset` on `console`/`network read`).
+
+## htrcli pick / fill-form / --frame — deferred (2026-10-07)
+
+- `--frame` is one level and same-origin only. Nested frames (repeat `--frame`) and cross-origin/out-of-process iframes (would need `Target.attachToTarget` on the frame's own target) are not supported; the cross-origin case errors with an `open <src>` hint.
+- `--frame` is rejected by verbs that do not carry the `htrcli.frame-aware` cobra annotation (`findAll`, `hover`, `press`, `upload`, `drag`, `mousedown/up/move`, `eval`, `screenshot`, …), and `@eN` refs / `xy=` / `find --ref` cannot be combined with it. To honour `--frame` in a new verb, annotate its `cobra.Command` with `FrameAwareAnnotations()` — there is deliberately no name-keyed allowlist to keep in sync.
+- Resolved 2026-10-08: cross-realm args in `--frame` scoped calls — `scopedExpr` now ships the args as a JSON string and parses them with the frame realm's own `JSON.parse`, so the objects a frame function receives carry frame-realm prototypes (pinned by `TestScopedExpr`).
+- `fill-form` rejects a selector that matches several elements (incl. a whole checkbox/radio group); a "choose radio by value" form is not implemented.
+- Resolved 2026-10-07: `pick` types the full requested text as the query (decision: "type the full text"; no `--query` flag).
+- Integration tests set a temp `HOME`, and on macOS headless Chrome then cannot reach the login keychain: once the OS shows its keychain dialog, every network load in the test browser hangs (seen 2026-10-07; `about:blank`-only `TestCDPEndToEnd` is unaffected). Workaround: run with `HTRCLI_CHROME_PATH` pointing at a wrapper that execs Chrome with `--use-mock-keychain`. A proper fix needs a test-only launch-args hook in `StartBrowser`.
+
 ## htrcli dialog handling — known limitations
 
 - The Firefox MAIN-world override is racy against dialogs a page fires before it lands at document_start, and cannot intercept native beforeunload dialogs (Chrome CDP handles beforeunload; Firefox does not).
@@ -25,7 +42,9 @@
   are passed per `Input.dispatchKeyEvent` call, no daemon-side held-key tracking.
 - Synthetic viewport-coordinate mouse input uses `document.elementFromPoint` for
   hit-testing and returns an explicit error when no element is under the point;
-  CDP `@eN` drag endpoints resolve through the persistent backend-node ref store.
+  CDP `@eN` drag endpoints resolve through the persistent backend-node ref store
+  and reach the page-side drag resolver as element handles (scrolled and read
+  together with the other endpoint), never as pre-computed pixels.
 - Drag steps and delay are bounded to `1..100` and `0..2000ms` respectively;
   values outside those ranges are clamped.
 

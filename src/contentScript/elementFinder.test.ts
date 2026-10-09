@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import "../test/domSetup";
 import type { TargetSelector } from "../types/commands";
-import { findElement, waitForActionableElement } from "./elementFinder";
+import {
+	findElement,
+	waitForActionableElement,
+	waitForScrollableActionableElement,
+} from "./elementFinder";
 
 describe("elementFinder (DOM)", () => {
 	beforeEach(() => {
@@ -103,5 +107,121 @@ describe("waitForActionableElement", () => {
 
 		const found = await waitForActionableElement(target, { timeoutMs: 2000 });
 		expect((found as HTMLElement).id).toBe("reveal");
+	});
+
+	it("scrolls a rendered-but-offscreen element into view instead of calling it not visible", async () => {
+		const el = document.createElement("button");
+		el.id = "below-fold";
+		document.body.appendChild(el);
+		let scrolled = false;
+		const offscreen = {
+			x: 0,
+			y: 5000,
+			width: 100,
+			height: 50,
+			top: 5000,
+			bottom: 5050,
+			left: 0,
+			right: 100,
+			toJSON() {},
+		};
+		const onscreen = {
+			x: 0,
+			y: 100,
+			width: 100,
+			height: 50,
+			top: 100,
+			bottom: 150,
+			left: 0,
+			right: 100,
+			toJSON() {},
+		};
+		el.getBoundingClientRect = () =>
+			(scrolled ? onscreen : offscreen) as DOMRect;
+		el.scrollIntoView = () => {
+			scrolled = true;
+		};
+		const found = await waitForScrollableActionableElement(
+			{ selector: "#below-fold" },
+			{ timeoutMs: 500 },
+		);
+		expect(scrolled).toBe(true);
+		expect((found as HTMLElement).id).toBe("below-fold");
+	});
+
+	it("does not scroll a rendered-but-offscreen element for the default wait (focus, highlight)", async () => {
+		const el = document.createElement("button");
+		el.id = "below-fold-hover";
+		document.body.appendChild(el);
+		let scrolled = false;
+		const offscreen = {
+			x: 0,
+			y: 5000,
+			width: 100,
+			height: 50,
+			top: 5000,
+			bottom: 5050,
+			left: 0,
+			right: 100,
+			toJSON() {},
+		};
+		el.getBoundingClientRect = () => offscreen as DOMRect;
+		el.scrollIntoView = () => {
+			scrolled = true;
+		};
+		await expect(
+			waitForActionableElement(
+				{ selector: "#below-fold-hover" },
+				{ timeoutMs: 150 },
+			),
+		).rejects.toThrow(/not visible/i);
+		expect(scrolled).toBe(false);
+	});
+
+	it("scrolls an offscreen element at most once per wait, not on every poll", async () => {
+		const el = document.createElement("button");
+		el.id = "stuck";
+		document.body.appendChild(el);
+		let scrolls = 0;
+		const offscreen = {
+			x: 0,
+			y: 5000,
+			width: 100,
+			height: 50,
+			top: 5000,
+			bottom: 5050,
+			left: 0,
+			right: 100,
+			toJSON() {},
+		};
+		// Never becomes visible: scrollIntoView is a no-op here, so without the
+		// once-per-wait guard the 50ms poll would keep re-scrolling until the
+		// deadline (the bug: check() scrolled on every poll).
+		el.getBoundingClientRect = () => offscreen as DOMRect;
+		el.scrollIntoView = () => {
+			scrolls++;
+		};
+		await expect(
+			waitForScrollableActionableElement(
+				{ selector: "#stuck" },
+				{ timeoutMs: 300 },
+			),
+		).rejects.toThrow(/not visible/i);
+		expect(scrolls).toBe(1);
+	});
+
+	it("does not scroll a display:none element (scrolling cannot reveal it)", async () => {
+		const el = document.createElement("button");
+		el.id = "collapsed";
+		el.style.display = "none";
+		document.body.appendChild(el);
+		let scrolled = false;
+		el.scrollIntoView = () => {
+			scrolled = true;
+		};
+		await expect(
+			waitForActionableElement({ selector: "#collapsed" }, { timeoutMs: 150 }),
+		).rejects.toThrow(/not visible/i);
+		expect(scrolled).toBe(false);
 	});
 });

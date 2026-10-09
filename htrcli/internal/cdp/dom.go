@@ -60,12 +60,22 @@ func (e *pageError) Error() string {
 }
 
 func evaluate(s *Session, expression string, awaitPromise bool) (*evalResult, error) {
+	return evaluateIn(s, expression, 0, awaitPromise)
+}
+
+// evaluateIn is evaluate in the execution context ctx (0 = the target's
+// default context, i.e. the top document's main world).
+func evaluateIn(s *Session, expression string, ctx int64, awaitPromise bool) (*evalResult, error) {
 	var res evalResult
-	err := s.Call("Runtime.evaluate", map[string]any{
+	params := map[string]any{
 		"expression":    expression,
 		"returnByValue": true,
 		"awaitPromise":  awaitPromise,
-	}, &res)
+	}
+	if ctx != 0 {
+		params["contextId"] = ctx
+	}
+	err := s.Call("Runtime.evaluate", params, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -80,43 +90,90 @@ func evaluate(s *Session, expression string, awaitPromise bool) (*evalResult, er
 	return &res, nil
 }
 
-// ensureBundle installs the DOM bundle unless the page already has it.
-func ensureBundle(s *Session) error {
-	probe, err := evaluate(s, "typeof window.__htrcliDom", false)
-	if err != nil {
-		return err
+// pageBundle is a script htrcli installs once per realm and then calls by
+// name: the DOM bundle (window.__htrcliDom) and the form kit
+// (window.__htrcliFormKit). install is the expression that registers it.
+type pageBundle struct {
+	name    string
+	install func() string
+}
+
+var domBundleSpec = pageBundle{name: "DOM bundle", install: func() string { return domBundle }}
+
+// bundleNeeded reports whether a bundle-exec result is the sentinel the page
+// returns when the bundle is not installed yet. It is checked before
+// anything else so the sentinel can never be mistaken for a result.
+func bundleNeeded(raw json.RawMessage) bool {
+	var probe struct {
+		NeedBundle bool `json:"__htrcliNeedBundle"`
 	}
-	var typ string
-	if err := json.Unmarshal(probe.Result.Value, &typ); err != nil {
-		return fmt.Errorf("decoding bundle probe: %w", err)
-	}
-	if typ == "object" {
-		return nil
-	}
-	if _, err := evaluate(s, domBundle, false); err != nil {
-		return fmt.Errorf("installing DOM bundle: %w", err)
+	return json.Unmarshal(raw, &probe) == nil && probe.NeedBundle
+}
+
+// installBundle injects b into the session's realm (top document or the
+// --frame's execution context — CSP-exempt either way, see frame.go).
+// Callers only reach it after an exec attempt reported the bundle missing,
+// so there is no separate probe round trip: the check rides on the exec
+// expression itself (see withBundle), which halves the steady-state cost of
+// every bundle-backed command.
+func installBundle(s *Session, b pageBundle) error {
+	if _, err := evaluateScoped(s, b.install(), false); err != nil {
+		return fmt.Errorf("installing %s%s: %w", b.name, s.frameSuffix(), err)
 	}
 	return nil
 }
 
-// ExecDOM runs one command through the embedded bundle. A failed command is
-// returned as a CommandResult with Success=false, not a Go error — matching
-// the extension transport's semantics.
-func ExecDOM(s *Session, cmd api.Command) (*api.CommandResult, error) {
-	if err := ensureBundle(s); err != nil {
+// frameSuffix names the --frame in error messages ("" without one).
+func (s *Session) frameSuffix() string {
+	if s.frame == "" {
+		return ""
+	}
+	return fmt.Sprintf(" in --frame %q", s.frame)
+}
+
+// withBundle runs a page-side call that depends on b being installed. The
+// call itself reports a missing bundle by answering the sentinel object
+// instead of a result; withBundle then installs b and retries exactly once
+// (a second sentinel means the install did not take). Every bundle-backed
+// path — DOM commands, drag resolution, the form kit — goes through here so
+// the install/retry semantics live in one place.
+func withBundle(s *Session, b pageBundle, run func() (json.RawMessage, error)) (json.RawMessage, error) {
+	raw, err := run()
+	if err != nil {
 		return nil, err
 	}
-	payload, err := json.Marshal(cmd)
-	if err != nil {
-		return nil, fmt.Errorf("encoding command: %w", err)
+	if !bundleNeeded(raw) {
+		return raw, nil
 	}
-	expr := fmt.Sprintf("window.__htrcliDom.exec(%s)", payload)
-	res, err := evaluate(s, expr, true)
+	if err := installBundle(s, b); err != nil {
+		return nil, err
+	}
+	if raw, err = run(); err != nil {
+		return nil, err
+	}
+	if bundleNeeded(raw) {
+		return nil, fmt.Errorf("installing %s%s: bundle did not register", b.name, s.frameSuffix())
+	}
+	return raw, nil
+}
+
+// execDOMFn calls the DOM bundle, or answers the sentinel when it is not
+// installed in this realm yet.
+const execDOMFn = `(c) => typeof window.__htrcliDom === "object" ? window.__htrcliDom.exec(c) : {__htrcliNeedBundle: true}`
+
+// ExecDOM runs one command through the embedded bundle in the session's
+// realm (top document or --frame). A failed command is returned as a
+// CommandResult with Success=false, not a Go error — matching the extension
+// transport's semantics. A warm realm costs exactly one round trip.
+func ExecDOM(s *Session, cmd api.Command) (*api.CommandResult, error) {
+	raw, err := withBundle(s, domBundleSpec, func() (json.RawMessage, error) {
+		return runScoped(s, execDOMFn, cmd)
+	})
 	if err != nil {
 		return nil, err
 	}
 	var result api.CommandResult
-	if err := json.Unmarshal(res.Result.Value, &result); err != nil {
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, fmt.Errorf("decoding command result: %w", err)
 	}
 	return &result, nil

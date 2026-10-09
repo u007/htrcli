@@ -382,6 +382,26 @@ function isVisible(element: Element): boolean {
 }
 
 /**
+ * True when an element is rendered (not display:none / hidden / transparent, non-zero
+ * size) but lies wholly outside the viewport, i.e. scrolling is all it needs to become
+ * visible. A hidden or collapsed element returns false: scrolling cannot fix it.
+ */
+function isOnlyOffscreen(element: Element): boolean {
+	if (!element.ownerDocument) return false;
+	const style = window.getComputedStyle(element);
+	if (
+		style.display === "none" ||
+		style.visibility === "hidden" ||
+		style.opacity === "0"
+	) {
+		return false;
+	}
+	const rect = element.getBoundingClientRect();
+	if (rect.width === 0 || rect.height === 0) return false;
+	return !isVisible(element);
+}
+
+/**
  * Check if an element is enabled (not disabled)
  */
 function isEnabled(element: Element): boolean {
@@ -572,15 +592,56 @@ function describeTarget(target: TargetSelector): string {
  * - never appeared → "... was not found ..."
  * - present but hidden → "... is not visible ..."
  * - present but disabled → "... is disabled ..."
- * so callers can tell a wrong selector from a timing bug.
+ * so callers can tell a wrong selector from a timing bug. This wait never
+ * scrolls: an element outside the viewport reports "is not visible". Callers
+ * that act on the element itself use {@link waitForScrollableActionableElement}.
  */
-export async function waitForActionableElement(
+export function waitForActionableElement(
 	target: TargetSelector,
 	opts: WaitForActionableOptions = {},
+): Promise<Element> {
+	return waitForActionable(target, opts, false);
+}
+
+/**
+ * Same wait as {@link waitForActionableElement}, except that an element which
+ * is rendered but lies wholly outside the viewport is scrolled into view first.
+ * Only for actions that operate on the element itself (click, fill, type, ...);
+ * a hover, focus, or highlight must not move the page.
+ */
+export function waitForScrollableActionableElement(
+	target: TargetSelector,
+	opts: WaitForActionableOptions = {},
+): Promise<Element> {
+	return waitForActionable(target, opts, true);
+}
+
+async function waitForActionable(
+	target: TargetSelector,
+	opts: WaitForActionableOptions,
+	scrollOffscreen: boolean,
 ): Promise<Element> {
 	const timeoutMs = opts.timeoutMs ?? 5000;
 	const requireEnabled = opts.requireEnabled ?? true;
 	const deadline = Date.now() + timeoutMs;
+
+	// Scrolling is a side effect, so it is kept out of the check() predicate
+	// and attempted at most once per element per wait: check() runs on every
+	// 50ms poll and on every DOM mutation, and scrolling on each of those
+	// re-centers a below-the-fold element forever, fighting any scroll the
+	// page (or the user) performs while the wait is in flight.
+	const scrolled = new WeakSet<Element>();
+	const attemptScroll = (element: Element): void => {
+		if (!scrollOffscreen) return;
+		if (scrolled.has(element)) return;
+		// A rendered element below the fold is actionable once scrolled to:
+		// without this a long form reports "not visible" for every field past
+		// the first screen.
+		if (isOnlyOffscreen(element)) {
+			scrolled.add(element);
+			element.scrollIntoView({ behavior: "instant", block: "center" });
+		}
+	};
 
 	const check = (element: Element): { ok: boolean; reason?: string } => {
 		const info = getElementInfo(element);
@@ -592,7 +653,10 @@ export async function waitForActionableElement(
 
 	// Fast path: already present and actionable.
 	const immediate = findElement(target);
-	if (immediate && check(immediate).ok) return immediate;
+	if (immediate) {
+		attemptScroll(immediate);
+		if (check(immediate).ok) return immediate;
+	}
 
 	return new Promise<Element>((resolve, reject) => {
 		let settled = false;
@@ -636,6 +700,7 @@ export async function waitForActionableElement(
 			const el = findElement(target);
 			if (!el) return; // not appeared yet
 			foundElement = el;
+			attemptScroll(el);
 			const result = check(el);
 			if (result.ok) succeed(el);
 		};

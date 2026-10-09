@@ -1,6 +1,6 @@
 ---
 name: htrcli
-description: HTR NControl CLI (htrcli) usage guide. Read this before running any htrcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select, press, keydown/keyup, mousedown/mouseup/mousemove/drag with xy= viewport coordinates and @eN refs), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, recording video, session recordings (start/stop/list/get/export/delete — works on Chrome and Firefox), network capture/mocking, console watching, dialog handling, and more. Use when the user asks to control a browser, interact with a website, fill a form, click something, drag, press keys, extract data, take a screenshot, or automate any browser task via HTR NControl.
+description: HTR NControl CLI (htrcli) usage guide. Read this before running any htrcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select, press, keydown/keyup, mousedown/mouseup/mousemove/drag with xy= viewport coordinates and @eN refs), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, recording video, session recordings (start/stop/list/get/export/delete — works on Chrome and Firefox), network capture/mocking, console watching, dialog handling, and more. Includes a form-filling guide (pick/fill-form/--frame, datepickers, react-select, iframes, submit-and-verify) and the list of what works over --cdp. Use when the user asks to control a browser, interact with a website, fill a form, click something, drag, press keys, extract data, take a screenshot, or automate any browser task via HTR NControl.
 allowed-tools: Bash(htrcli:*), Bash(go run ./cmd/htrcli:*), Bash(make htrcli-*)
 ---
 
@@ -19,6 +19,84 @@ htrcli (Go) ──CDP──► Chrome DevTools Protocol (:9222)
 
 The extension transport works with both Chrome and Firefox; CDP transport works
 with Chrome only.
+
+## Agent quick rules (read this first; skip the probing)
+
+Everything you need is in this file. Do **not** run `htrcli --help`, `htrcli <cmd> --help`, `htrcli health`,
+`strings`/`grep` on the binary, or read htrcli's source: the commands, flags and CDP limits are listed here and
+each probe costs a round trip.
+
+1. **Transport.** If the task says a CDP browser is running (or you started one with `htrcli browser start`),
+   put `--cdp` on **every** command. `health` is an extension-daemon command and says nothing about CDP; skip it.
+2. **Tab.** `--cdp` without `--tab` drives the **first page target**, which may be someone else's tab, and
+   `open` replaces its page. If more than one tab exists, run `htrcli --cdp tabs list` once and pass
+   `--tab <id>` on every command. Never navigate a tab you did not open or were not given.
+3. **Look once, then act.** One `htrcli --cdp snapshot` (or one `eval` that lists
+   `tag/type/name/id/label/required` of every `input,select,textarea,button`) tells you the whole form. Do not
+   re-inspect between fields unless the page changed.
+4. **Batch.** Do not issue one tool call per field. Put all steps for a form in **one bash script** (or use
+   `fill-form`, below), finish with a single read-back, and fix only what the read-back shows wrong.
+5. **Scrolling is automatic.** An element that is rendered but below the fold is scrolled into view before
+   `fill`/`click`/`check`/... act. "not visible" now means hidden/collapsed/zero-size (open its step, accordion or
+   menu first), not "off screen". `scroll` itself is not available over `--cdp`.
+6. **Pick the right verb for the widget** (table below), and **verify**: read values back, submit **once**, then
+   confirm from the outcome (confirmation text/URL, or `network wait`, see below).
+7. **Never** fill a field you were not given data for, solve a CAPTCHA, enter card details, or submit when told
+   not to. Hidden/off-screen inputs (honeypots) stay empty.
+
+### Over `--cdp`: what is and is not available
+
+| Works | Not available over `--cdp` (use `eval` or the extension transport) |
+|---|---|
+| open, find/findAll, snapshot, text/value/attr/html, click/dblclick/rightclick, fill, type, select, check/uncheck, clear, press/keydown/keyup, mouse*, drag, upload, eval, screenshot, tabs list, **pick**, **fill-form**, **--frame**, console read/watch, network read/watch/wait | scroll, back/forward/reload, tabs get, dialog handle/list, fetch, printpdf, network mock/block/unmock, trace export, screenshot --annotate |
+
+### Filling forms: verb per widget
+
+| Widget | Use |
+|---|---|
+| text, email, tel, password, textarea, `type=time` (`18:30`), `type=number` | `fill "<sel>" "<value>"` |
+| native `<select>` | `pick "<sel>" "<option text or value>"` (verifies; plain `select` silently selects nothing for a label it can't match) |
+| custom dropdown / react-select / autocomplete (role=combobox) | `pick "<sel>" "<full option text>"`: opens, types, waits for the options, clicks the best match, and checks the widget shows it. Never `fill`/`click` the tiny input. |
+| checkbox / radio | `check "<sel>"` / `uncheck "<sel>"` (idempotent; `click` toggles). Target by `input[value=x]` or `label=...`, not position. |
+| JS datepicker text input | `type "<sel>" "03/14/2026"` (trusted keystrokes; `fill` leaves the widget's own state empty and it reverts), in the widget's format; then click elsewhere and read the value back |
+| calendar popup (grid of day buttons) | click the trigger, click next/prev until the month label matches, click the day |
+| range / colour input | `eval` set `.value` and dispatch `input`+`change` events (bubbles), then read back |
+| file input | `upload "<sel>" /abs/path` (never click it; it opens a native dialog). Only upload files you were told to. |
+| form inside an `<iframe>` (same origin) | add `--frame "<iframe css>"` to find/fill/type/check/select/click/pick/value/text/... or `open` the frame's `src` directly. Cross-origin frames: `open` their `src`. |
+
+**`fill-form`: many fields, one call, with read-back.**
+
+```bash
+htrcli --cdp fill-form '{
+  "#first_name": "Jordan",
+  "#email": "jordan@example.com",
+  "#plan": "Pro",
+  "input[value=pro]": true,
+  "#terms": true,
+  "#resume": "/abs/path/resume.pdf"
+}'            # or: --file fields.json ; add --frame "iframe#contact" for an iframe form
+```
+
+Values: string/number as written (text, date, time), option text/value for `<select>`, `true`/`false` for
+checkboxes (`true` only for radios), a path (or array) for file inputs, `null` skips. Comboboxes behave like `pick`.
+Each selector must match exactly one element. All fields are attempted even after a failure, then a table
+`Selector / Requested / Actual / Status` (`OK|MISMATCH|FAILED|SKIPPED`) is printed; the exit code is non-zero on
+any `FAILED`/`MISMATCH`. Read-back is exact: `<select>`/combobox rows compare against what the fill verified
+it set (never a substring of the request), and text rows are compared after the browser's own value
+sanitization, so an empty or partial request cannot pass for a field the fill never touched.
+
+**Submit and verify (do this once).** To confirm a submission, start the wait first, then click:
+
+```bash
+htrcli --cdp network wait --url "*/submit*" --timeout 10000 &
+htrcli --cdp click "button[type=submit]"
+wait
+htrcli --cdp text "body"     # confirmation text; do not re-click Submit "to be sure"
+```
+
+A submit that does nothing is almost always a validation error: read the page for the message (or
+`eval` over `:invalid` fields), fix the data (e.g. match the required `pattern`), then submit again. Do not
+remove the validation attribute.
 
 ## Setup
 
@@ -151,6 +229,7 @@ htrcli config set-chrome-path /path/to/chrome   # if not auto-detected
 --transport <type>  # Transport: ext (extension, default) or cdp
 --cdp               # Shorthand for --transport cdp
 --context <name>    # Named browser context (isolated profile)
+--frame <css>       # (--cdp) run the command inside a same-origin <iframe>
 ```
 
 ## The core loop
@@ -269,6 +348,10 @@ htrcli drag "#handle" "#dropzone"                         # Selector → selecto
 htrcli drag "xy=100,200" "xy=300,400"                      # Coords → coords
 htrcli drag "#handle" "xy=500,300" --steps 10 --delay 20  # Mixed + tuning
 htrcli drag @e1 @e2                                         # Ref → ref (CDP resolves via backendNodeId)
+
+Both endpoints are resolved in one page-side pass, so scrolling for one cannot move the
+other; if source and destination cannot both be visible in the viewport at once, `drag`
+errors instead of dispatching at stale coordinates.
 ```
 
 Supported key names: Enter, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown,
@@ -306,7 +389,7 @@ Use `mousemove` to position the cursor without pressing a button; pair `mousedow
 
 `htrcli drag <source> <target> [--steps 5] [--delay 0]` dispatches an interpolated drag: `mousePressed` at source → N `mouseMoved` steps → `mouseReleased` at target.
 
-- Both endpoints accept any selector form (CSS, `@eN`, or `xy=X,Y`) and can be mixed (`"#handle"` → `"xy=500,300"`). On CDP, `@eN` refs are resolved in the command layer via the persistent `RefStore` (`~/.htrcli/refs.json`) → `backendNodeId` → `DOM.getBoxModel` + `Page.getLayoutMetrics` → viewport center. Stale refs fail explicitly. See `docs/gotchas/cdp-drag-element-ref-coordinate-resolution.md`.
+- Both endpoints accept any selector form (CSS, `@eN`, or `xy=X,Y`) and can be mixed (`"#handle"` → `"xy=500,300"`). On CDP, `@eN` refs are looked up in the command layer via the persistent `RefStore` (`~/.htrcli/refs.json`) → `backendNodeId`, then handed to the page-side drag resolver as a live element handle (`DOM.resolveNode` + `Runtime.callFunctionOn`), so a ref is scrolled into view and re-read in the same pass as a selector endpoint — never a pixel captured before the other endpoint's scroll. Stale refs fail explicitly. See `docs/gotchas/cdp-drag-element-ref-coordinate-resolution.md`.
 - **Bounds**: `--steps` is clamped to `1..100` (default `5`; values `<1` become `5`); `--delay` is clamped to `0..2000` ms (default `0`). See `docs/gotchas/drag-input-bounds.md`.
 - On the extension transport, Firefox drag dispatches pointer/mouse events with `elementFromPoint` hit-testing at source, intermediate steps, and destination — not on `document.body`.
 - **Known limitation — native HTML5 DnD is NOT synthesized**: `drag` dispatches `pointerdown`/`mousedown` → `pointermove`/`mousemove` → `pointerup`/`mouseup` only. It does **not** fire `dragstart`/`dragover`/`drop` with `DataTransfer`. Most custom sortables/sliders listen to pointer/mouse events and work; native `draggable=true` drop zones and file-drop handlers require `eval` with a manual `DataTransfer`. See `TODO.md` and `src/contentScript/commandExecutor.ts:handleDrag`.
@@ -537,6 +620,26 @@ htrcli network wait --since 0 --url "*/api/users*" --status 200 --timeout 10000
 
 `network wait` accepts a glob `--url` pattern (`path.Match` semantics, `*`
 spans any character including `/`) and an optional `--status` filter.
+
+### Console and network over `--cdp`
+
+There is no buffer over `--cdp` (each invocation is a fresh CDP session), and
+`--since` is rejected:
+
+- `console read` — messages + uncaught exceptions V8 still stores for the
+  current document (cleared on navigation). `console watch` — new ones only.
+- `network read` — completed requests from the page's Performance API: url,
+  status, initiator type, duration. **No method (`—`) and no bodies.**
+- `network watch` / `network wait` — only requests that complete **after** the
+  command attached (method, status, url). To confirm a submission, start the
+  wait first, then click:
+
+```bash
+htrcli --cdp network wait --url "*/api/submit*" --status 200 --timeout 10000 &
+htrcli --cdp click "#submit"
+wait
+# Missed it? `htrcli --cdp network read` still shows its status.
+```
 
 ### Mocking and blocking
 

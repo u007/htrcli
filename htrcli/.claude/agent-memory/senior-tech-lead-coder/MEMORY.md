@@ -1,0 +1,1 @@
+- [CDP integration keychain hang](project_cdp_integration_keychain.md) — temp-HOME Chrome hangs on network loads on macOS; use --use-mock-keychain wrapper + unsandboxed Bash

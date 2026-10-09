@@ -25,6 +25,7 @@ import {
 	getElementInfo,
 	waitForActionableElement,
 	waitForElement,
+	waitForScrollableActionableElement,
 } from "./elementFinder";
 import { assignRef } from "./refRegistry";
 import { getSnapshot } from "./snapshot";
@@ -599,7 +600,7 @@ async function handleClick(
 	count = 1,
 	timeoutMs = 5000,
 ): Promise<void> {
-	const element = await waitForActionableElement(target, {
+	const element = await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
 	});
@@ -607,7 +608,7 @@ async function handleClick(
 	// Scroll into view FIRST (instant, centered) so the synthesized events land
 	// on the element's real geometry. Dispatching before scrolling is the wrong
 	// order and can miss an off-viewport target.
-	element.scrollIntoView({ behavior: "auto", block: "center" });
+	element.scrollIntoView({ behavior: "instant", block: "center" });
 
 	const rect = element.getBoundingClientRect();
 	const x = rect.left + rect.width / 2;
@@ -678,7 +679,7 @@ async function handleHover(
 	target: TargetSelector,
 	timeoutMs = 5000,
 ): Promise<void> {
-	const element = await waitForActionableElement(target, {
+	const element = await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: false,
 	});
@@ -763,13 +764,13 @@ async function handleScrollTo(
 	timeoutMs = 5000,
 ): Promise<void> {
 	// Auto-wait for the target to be visible (no enabled requirement).
-	const element = await waitForActionableElement(target, {
+	const element = await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: false,
 	});
 	// Instant scroll (no smooth animation) so the following action captures the
 	// settled position; then wait for the scroll to actually settle.
-	element.scrollIntoView({ behavior: "auto", block: "center" });
+	element.scrollIntoView({ behavior: "instant", block: "center" });
 	await waitForScrollSettle();
 }
 
@@ -778,7 +779,7 @@ async function handleFill(
 	value: string,
 	timeoutMs = 5000,
 ): Promise<void> {
-	const element = (await waitForActionableElement(target, {
+	const element = (await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
 	})) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
@@ -823,7 +824,7 @@ async function handleType(
 	value: string,
 	timeoutMs = 5000,
 ): Promise<void> {
-	const element = (await waitForActionableElement(target, {
+	const element = (await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
 	})) as HTMLInputElement | HTMLTextAreaElement;
@@ -893,7 +894,7 @@ async function handleClear(
 	target: TargetSelector,
 	timeoutMs = 5000,
 ): Promise<void> {
-	const element = (await waitForActionableElement(target, {
+	const element = (await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
 	})) as HTMLInputElement | HTMLTextAreaElement;
@@ -916,7 +917,7 @@ async function handleSelect(
 	value: string,
 	timeoutMs = 5000,
 ): Promise<void> {
-	const element = (await waitForActionableElement(target, {
+	const element = (await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
 	})) as HTMLSelectElement;
@@ -945,7 +946,7 @@ async function handleCheck(
 	checked: boolean,
 	timeoutMs = 5000,
 ): Promise<void> {
-	const element = (await waitForActionableElement(target, {
+	const element = (await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
 	})) as HTMLInputElement;
@@ -1107,11 +1108,11 @@ async function handleMouseDown(
 		targetElement.dispatchEvent(new MouseEvent("mousedown", mouseInit));
 		return;
 	}
-	const element = await waitForActionableElement(target, {
+	const element = await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
 	});
-	element.scrollIntoView({ behavior: "auto", block: "center" });
+	element.scrollIntoView({ behavior: "instant", block: "center" });
 	const rect = element.getBoundingClientRect();
 	const x = rect.left + rect.width / 2;
 	const y = rect.top + rect.height / 2;
@@ -1178,11 +1179,11 @@ async function handleMouseUp(
 		targetElement.dispatchEvent(new MouseEvent("mouseup", mouseInit));
 		return;
 	}
-	const element = await waitForActionableElement(target, {
+	const element = await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
 	});
-	element.scrollIntoView({ behavior: "auto", block: "center" });
+	element.scrollIntoView({ behavior: "instant", block: "center" });
 	const rect = element.getBoundingClientRect();
 	const x = rect.left + rect.width / 2;
 	const y = rect.top + rect.height / 2;
@@ -1249,11 +1250,11 @@ async function handleMouseMove(
 		targetElement.dispatchEvent(new MouseEvent("mousemove", mouseInit));
 		return;
 	}
-	const element = await waitForActionableElement(target, {
+	const element = await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: false,
 	});
-	element.scrollIntoView({ behavior: "auto", block: "center" });
+	element.scrollIntoView({ behavior: "instant", block: "center" });
 	const rect = element.getBoundingClientRect();
 	const x = rect.left + rect.width / 2;
 	const y = rect.top + rect.height / 2;
@@ -1289,33 +1290,83 @@ async function handleDrag(
 	steps = 5,
 	delayMs = 0,
 ): Promise<void> {
-	async function getDragPoint(sel: TargetSelector): Promise<{
-		x: number;
-		y: number;
-		element: Element;
-	}> {
-		if (typeof sel.x === "number" && typeof sel.y === "number") {
-			return {
-				x: sel.x,
-				y: sel.y,
-				element: resolveSyntheticCoordinateTarget(sel.x, sel.y),
-			};
-		}
-		const el = await waitForActionableElement(sel, {
-			timeoutMs,
-			requireEnabled: true,
-		});
-		el.scrollIntoView({ behavior: "auto", block: "center" });
-		const rect = el.getBoundingClientRect();
-		return {
-			x: rect.left + rect.width / 2,
-			y: rect.top + rect.height / 2,
-			element: el,
-		};
+	// Both selector endpoints are waited for and scrolled to centre BEFORE either
+	// is read: scrolling to the destination moves the source, so reading the
+	// source first left its point stale. Mirrors dragPointsFn (cdp/input.go).
+	const pinned = (sel: TargetSelector): { x: number; y: number } | undefined =>
+		typeof sel.x === "number" && typeof sel.y === "number"
+			? { x: sel.x, y: sel.y }
+			: undefined;
+	const srcPin = pinned(source);
+	const dstPin = pinned(dest);
+	const waitOpts = { timeoutMs, requireEnabled: true };
+	const srcWait =
+		srcPin === undefined
+			? await waitForScrollableActionableElement(source, waitOpts)
+			: undefined;
+	const dstWait =
+		dstPin === undefined
+			? await waitForScrollableActionableElement(dest, waitOpts)
+			: undefined;
+	if (srcWait !== undefined) {
+		srcWait.scrollIntoView({ behavior: "instant", block: "center" });
+	}
+	if (dstWait !== undefined) {
+		dstWait.scrollIntoView({ behavior: "instant", block: "center" });
 	}
 
-	const src = await getDragPoint(source);
-	const dst = await getDragPoint(dest);
+	type DragPoint = { x: number; y: number; element: Element };
+	const readPoint = (
+		pin: { x: number; y: number } | undefined,
+		el: Element | undefined,
+	): DragPoint => {
+		if (el !== undefined) {
+			const rect = el.getBoundingClientRect();
+			return {
+				x: rect.left + rect.width / 2,
+				y: rect.top + rect.height / 2,
+				element: el,
+			};
+		}
+		if (pin === undefined) {
+			throw new Error("drag endpoint has neither coordinates nor an element");
+		}
+		return {
+			x: pin.x,
+			y: pin.y,
+			element: resolveSyntheticCoordinateTarget(pin.x, pin.y),
+		};
+	};
+	const inViewport = (p: DragPoint): boolean =>
+		p.x >= 0 && p.y >= 0 && p.x < window.innerWidth && p.y < window.innerHeight;
+	// Only selector endpoints are fit into view; literal coordinates mean "these
+	// pixels at dispatch time" and are never moved by a scroll.
+	const selectorPoints = (): DragPoint[] => {
+		const points: DragPoint[] = [];
+		if (srcWait !== undefined) points.push(readPoint(undefined, srcWait));
+		if (dstWait !== undefined) points.push(readPoint(undefined, dstWait));
+		return points;
+	};
+
+	let src = readPoint(srcPin, srcWait);
+	let dst = readPoint(dstPin, dstWait);
+	if (selectorPoints().some((p) => !inViewport(p))) {
+		const pts = selectorPoints();
+		const xs = pts.map((p) => p.x);
+		const ys = pts.map((p) => p.y);
+		window.scrollBy({
+			left: (Math.min(...xs) + Math.max(...xs)) / 2 - window.innerWidth / 2,
+			top: (Math.min(...ys) + Math.max(...ys)) / 2 - window.innerHeight / 2,
+			behavior: "instant",
+		});
+		src = readPoint(srcPin, srcWait);
+		dst = readPoint(dstPin, dstWait);
+		if (selectorPoints().some((p) => !inViewport(p))) {
+			throw new Error(
+				`drag endpoints (${Math.round(src.x)},${Math.round(src.y)}) and (${Math.round(dst.x)},${Math.round(dst.y)}) are still outside the ${window.innerWidth}x${window.innerHeight} viewport after scrolling; not draggable`,
+			);
+		}
+	}
 	const sx = src.x;
 	const sy = src.y;
 	const dx = dst.x;
@@ -1431,14 +1482,14 @@ async function handlePrepareClick(
 	target: TargetSelector,
 	timeoutMs = 5000,
 ): Promise<{ x: number; y: number }> {
-	const element = await waitForActionableElement(target, {
+	const element = await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
 	});
 
 	// Scroll into view FIRST (instant, centered) so the reported coordinates
 	// reflect the element's real, on-screen geometry.
-	element.scrollIntoView({ behavior: "auto", block: "center" });
+	element.scrollIntoView({ behavior: "instant", block: "center" });
 
 	const rect = element.getBoundingClientRect();
 	const x = rect.left + rect.width / 2;
@@ -1463,12 +1514,12 @@ async function handlePrepareKeys(
 	if (!target) {
 		return { focused: document.activeElement != null };
 	}
-	const element = (await waitForActionableElement(target, {
+	const element = (await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
 	})) as HTMLElement;
 
-	element.scrollIntoView({ behavior: "auto", block: "center" });
+	element.scrollIntoView({ behavior: "instant", block: "center" });
 	element.focus();
 	return { focused: document.activeElement === element };
 }

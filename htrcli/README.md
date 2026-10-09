@@ -90,6 +90,34 @@ entries. `network wait` accepts a glob `--url` pattern (path.Match semantics,
 where `*` spans any character including `/`) and an optional `--status` filter.
 It prints the first matching entry, or exits with a timeout error.
 
+### Console and network over `--cdp`
+
+Over `--cdp` there is no daemon buffer — every invocation opens a fresh CDP
+session — so these verbs read what the page itself still holds, or stream for
+the command's duration:
+
+| Verb | Source over `--cdp` | Limits |
+|---|---|---|
+| `console read` | V8 replays the console messages and uncaught exceptions it still stores for the page when `Runtime.enable` attaches | Current document only (cleared on navigation), capped by V8; replayed objects print as their description (`Object`), not a preview |
+| `console watch` | `Runtime.consoleAPICalled` / `exceptionThrown` for `--timeout` | New messages only |
+| `network read` | The page's Performance API (`navigation` + `resource` entries): url, `responseStatus`, initiator type, duration, transfer size | **Method and request/response bodies are not available** for already-completed requests (method prints as `—`); in-flight requests are not listed; status is `—` when the browser does not expose it (cross-origin without `Timing-Allow-Origin`, Chrome < 109); current document only; Chrome's resource-timing buffer holds 250 entries by default (a warning is printed when it may be full) |
+| `network watch` / `network wait` | `Network.enable` for `--timeout`: method, status, url, duration, failures | Only requests that **complete after the command attached** |
+
+```bash
+# Confirm a form submission: start the wait first, then trigger it
+htrcli --cdp network wait --url "*/api/submit*" --status 200 --timeout 10000 &
+htrcli --cdp click "#submit"
+wait
+
+# Already submitted? Check what the page completed (status, no method/body)
+htrcli --cdp network read
+```
+
+Seq numbers are per-invocation ordinals, not a cursor, so `--since` is
+rejected over `--cdp` with an explicit error. The limits are printed to stderr
+(human output) or carried in the `transport`/`source`/`limitations` fields
+(`--json` on `read`).
+
 ### Mocking and blocking network requests
 
 Intercept requests before they reach the server. Rules are per-tab and apply to
@@ -222,6 +250,56 @@ htrcli config set-chrome-path /path/to/chrome   # if not auto-detected
 Flags override config in both directions: `--transport ext` beats a
 `transport=cdp` config, and `--cdp` beats a `transport=ext` config. If both
 flags are passed, `--transport` wins (`--cdp` is only shorthand).
+
+### Forms over `--cdp`: `pick`, `fill-form`, `--frame`
+
+These three are **CDP-only**; on the extension transport they fail with
+`<verb> is only supported over --cdp` (and `--frame is only supported over --cdp`).
+
+```bash
+# Custom combobox (react-select, async autocomplete) or a native <select>
+htrcli --cdp pick "#country" "Malaysia"
+htrcli --cdp pick "#location" "San Francisco, California, United States"
+
+# A whole form in one call (order preserved); exits non-zero on any FAILED/MISMATCH
+htrcli --cdp fill-form '{"#first":"Ada","#country":"Singapore","#terms":true,"#cv":"./cv.pdf","#notes":null}'
+htrcli --cdp fill-form --file form.json      # object, or [{"selector":…,"value":…}, …]
+
+# Run selector verbs inside a same-origin <iframe>
+htrcli --cdp --frame "#grnhse_iframe" fill-form --file form.json
+```
+
+- **`pick <selector> <text>`** focuses the combobox input (no visibility wait,
+  so react-select's 2px input works), presses ArrowDown, types `<text>` with
+  trusted input, polls up to 3s for `role=option` entries (preferring the
+  listbox named by `aria-controls`/`aria-owns`, else the open listbox in the
+  input's container; with neither it fails rather than reading the whole page),
+  and clicks the best match with
+  a trusted mouse click: exact beats prefix beats contains (case-insensitive);
+  a tie at the best rank is an error. It then verifies the widget shows the
+  choice for up to 2s (react-select: `.select__single-value` in the input's own
+  `.select__value-container`; without such a container, the input value or
+  `aria-valuetext`). Failures list up to 15 available options. A native
+  `<select>` resolves `<text>` to an option by value or visible text instead.
+- **`fill-form`** value by detected element: text input/textarea → string
+  (numbers, `date`/`time` values as written); `<select>` → option value or
+  visible text; checkbox → `true`/`false`; radio → `true`; `role=combobox` or
+  react-select → as `pick`; `type=file` → path or array of paths; `null` skips.
+  Each selector must match exactly one element (one selector per
+  checkbox/radio). All fields are attempted even after a failure, then every
+  field is read back into a `Selector / Requested / Actual / Status` table
+  (`OK`, `MISMATCH`, `FAILED`, `SKIPPED`). Read-back is **exact**: `<select>`
+  and combobox rows compare against what the fill verified it set — never a
+  substring of the request — and text rows are compared after the browser's
+  own value sanitization, so an empty or partial request cannot pass for a
+  field the fill never touched. With `--json` stdout is exactly one
+  document, `{"success", "fields"}`, still exiting non-zero on failure.
+- **`--frame <css>`** is honoured by `find`, `fill`, `type`, `check`,
+  `uncheck`, `select`, `click`, `dblclick`, `value`, `text`, `attr`, `html`,
+  `pick`, `fill-form`; any other verb rejects it rather than silently acting
+  on the top page. One level, **same-origin only**: a cross-origin frame fails
+  with a hint to `htrcli --cdp open <frame src>`. `@eN` refs, `xy=` and
+  `find --ref` cannot be combined with `--frame`.
 
 ## Quick Start
 
@@ -356,6 +434,10 @@ real user interacted: pressing `Enter` in a field submits the form, clicks pass
 support) — they drive most automation but do not count as trusted.
 `drag` dispatches pointer/mouse events only; it does **not** fire native HTML5
 `dragstart`/`dragover`/`drop` with `DataTransfer`. Use `eval` with `DataTransfer` for native DnD.
+Both endpoints are resolved in one pass (prepare both, then read both points), so scrolling
+to reveal one endpoint can never move the other out from under the press. If source and
+destination cannot both be shown in the viewport at once, `drag` fails with an error naming
+both points instead of dispatching at coordinates that have moved.
 `keydown`/`keyup` are stateless per-command (no daemon-side held-key state) — the caller
 tracks hold by pairing `keydown Shift` ... `keyup Shift`.
 
@@ -417,6 +499,7 @@ htrcli click "xpath=//button[1]"           # By XPath
 --json                                    # JSON output
 --tab <id>                                # Target specific tab
 --context <name>                          # Named browser context (isolated profile)
+--frame <css>                             # Run selector verbs inside a same-origin <iframe> (--cdp only)
 --timeout <ms>                            # Command timeout
 ```
 

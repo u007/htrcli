@@ -201,7 +201,7 @@ var consoleReadCmd = &cobra.Command{
 	Short: "Read buffered console events",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
-			return errUnsupportedCDP("console read")
+			return runConsoleReadCDP(cmd)
 		}
 		level, err := parseConsoleLevelFilter(consoleLevelFilter)
 		if err != nil {
@@ -239,7 +239,7 @@ var consoleWatchCmd = &cobra.Command{
 	Short: "Watch console events until timeout",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
-			return errUnsupportedCDP("console watch")
+			return runConsoleWatchCDP(cmd)
 		}
 		level, err := parseConsoleLevelFilter(consoleLevelFilter)
 		if err != nil {

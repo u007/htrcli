@@ -490,6 +490,71 @@ describe("low-level synthetic input", () => {
 		]);
 	});
 
+	it("reads both drag endpoints only after both are scrolled (press lands on the source's final position)", async () => {
+		// A simulated page: each element has a fixed document top, and every
+		// scroll moves all of them. Scrolling to the destination moves the source,
+		// so a source point read before that scroll is stale.
+		const viewportHeight = window.innerHeight;
+		let scrollY = 0;
+		const originalScrollBy = window.scrollBy;
+		window.scrollBy = ((opts: { top: number }) => {
+			scrollY += opts.top;
+		}) as typeof window.scrollBy;
+		const place = (id: string, docTop: number): HTMLElement => {
+			const el = document.createElement("div");
+			el.id = id;
+			document.body.append(el);
+			el.getBoundingClientRect = () => {
+				const top = docTop - scrollY;
+				return {
+					x: 0,
+					y: top,
+					top,
+					bottom: top + 40,
+					left: 0,
+					right: 40,
+					width: 40,
+					height: 40,
+					toJSON() {},
+				} as DOMRect;
+			};
+			el.scrollIntoView = () => {
+				scrollY = docTop + 20 - viewportHeight / 2;
+			};
+			return el;
+		};
+		const source = place("drag-source-far", 300);
+		const destination = place("drag-dest-far", 700);
+		const events: string[] = [];
+		for (const element of [source, destination]) {
+			for (const type of ["mousedown", "mousemove", "mouseup"] as const) {
+				element.addEventListener(type, (event) =>
+					events.push(`${event.type}:${element.id}:${event.clientY}`),
+				);
+			}
+		}
+
+		try {
+			const result = await executeCommand({
+				id: "drag-both-scrolled",
+				action: "drag",
+				target: { selector: "#drag-source-far" },
+				options: { endTarget: { selector: "#drag-dest-far" }, steps: 1 },
+			});
+			expect(result.success).toBe(true);
+		} finally {
+			window.scrollBy = originalScrollBy;
+		}
+
+		// Both centred, then one fit-scroll for the pair: the endpoints end up
+		// 200px either side of the viewport centre.
+		expect(events).toEqual([
+			`mousedown:drag-source-far:${viewportHeight / 2 - 200}`,
+			`mousemove:drag-dest-far:${viewportHeight / 2 + 200}`,
+			`mouseup:drag-dest-far:${viewportHeight / 2 + 200}`,
+		]);
+	});
+
 	it("returns explicit errors for missing coordinate hit targets and destinations", async () => {
 		document.elementFromPoint = (() =>
 			null) as typeof document.elementFromPoint;

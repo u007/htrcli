@@ -1,10 +1,13 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+
+	"sort"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -22,9 +25,12 @@ var (
 	transportFlag string
 	// browserFlag is the advisory --browser hint. Empty means no preference, so
 	// the daemon falls back to the earliest-connected relay.
-	browserFlag      string
-	cdpFlag          bool
-	contextName      string
+	browserFlag string
+	cdpFlag     bool
+	contextName string
+	// frameFlag is the global --frame: CSS selector of a same-origin <iframe>
+	// that frame-aware CDP verbs run inside. Empty = top-level document.
+	frameFlag        string
 	timeout          int
 	client           *api.Client
 	resolveContextFn = resolveContext
@@ -42,6 +48,9 @@ server running.`,
 		if err := validateBrowserHint(browserFlag); err != nil {
 			return err
 		}
+		if err := validateFrameFlag(frameFlag, cmd, UseCDP()); err != nil {
+			return err
+		}
 		output.JSONOutput = jsonOutput
 		initClient()
 		return nil
@@ -49,6 +58,7 @@ server running.`,
 }
 
 func init() {
+	rootRef = rootCmd
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.htrcli/config.json)")
@@ -59,6 +69,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&transportFlag, "transport", "", "transport: ext (extension, default) or cdp")
 	rootCmd.PersistentFlags().BoolVar(&cdpFlag, "cdp", false, "shorthand for --transport cdp")
 	rootCmd.PersistentFlags().StringVar(&contextName, "context", "", "named browser context (isolated profile)")
+	rootCmd.PersistentFlags().StringVar(&frameFlag, "frame", "",
+		"CSS selector of a same-origin <iframe> to run the command inside (--cdp only; selector verbs and fill-form)")
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 30000, "command timeout in ms")
 	rootCmd.PersistentFlags().StringVar(&browserFlag, "browser", "",
 		"advisory hint for tab-less commands: prefer this browser profile (chrome|firefox); "+
@@ -79,6 +91,70 @@ func validateBrowserHint(v string) error {
 	default:
 		return fmt.Errorf("invalid --browser %q: want chrome, firefox, or omitted for no preference", v)
 	}
+}
+
+// AnnotationFrameAware marks a cobra command as honouring the global --frame:
+// every CDP verb that takes an element selector and runs through the DOM
+// bundle or trusted input. The annotation lives ON the command (see the
+// frame-aware verbs in interact.go, inspect.go, pick.go, fillform.go) instead
+// of in a name-keyed allowlist, so a command cannot be accepted because its
+// leaf name collides with another verb's, and a new frame-aware command can
+// never be silently rejected. Anything not annotated (eval, screenshot, open,
+// upload, drag, findAll, tabs, …) would silently ignore the flag and act on
+// the top-level document, so it is rejected instead.
+const AnnotationFrameAware = "htrcli.frame-aware"
+
+// FrameAwareAnnotations returns the annotation value to set on a command that
+// honours --frame.
+func FrameAwareAnnotations() map[string]string {
+	return map[string]string{AnnotationFrameAware: "true"}
+}
+
+// frameAware reports whether cmd, or one of its parents, honours --frame.
+func frameAware(cmd *cobra.Command) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Annotations[AnnotationFrameAware] == "true" {
+			return true
+		}
+	}
+	return false
+}
+
+// rootRef points at rootCmd once init() has run. frameAwareVerbs goes through
+// it rather than rootCmd directly: rootCmd's PersistentPreRunE calls
+// validateFrameFlag, so a direct reference would be an initialization cycle.
+var rootRef *cobra.Command
+
+// frameAwareVerbs lists the annotated commands (sorted) so the rejection
+// message can never drift from the annotations themselves.
+func frameAwareVerbs() []string {
+	var verbs []string
+	if rootRef == nil {
+		return nil
+	}
+	for _, c := range rootRef.Commands() {
+		if c.Annotations[AnnotationFrameAware] == "true" {
+			verbs = append(verbs, c.Name())
+		}
+	}
+	sort.Strings(verbs)
+	return verbs
+}
+
+// validateFrameFlag rejects --frame wherever it cannot be honoured: on the
+// extension transport, and on verbs that do not run inside a frame.
+func validateFrameFlag(frame string, cmd *cobra.Command, cdp bool) error {
+	if frame == "" {
+		return nil
+	}
+	if !cdp {
+		return fmt.Errorf("--frame is only supported over --cdp")
+	}
+	if !frameAware(cmd) {
+		return fmt.Errorf("--frame is not supported by %q (frame-aware verbs: %s)",
+			cmd.Name(), strings.Join(frameAwareVerbs(), ", "))
+	}
+	return nil
 }
 
 // BrowserHint returns the advisory --browser value, or "" when unset.
@@ -215,10 +291,27 @@ func resolveContext() error {
 // Execute runs the root command.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		output.PrintJSON(map[string]any{
-			"success": false,
-			"error":   err.Error(),
-		})
+		if errorObjectNeeded(err) {
+			output.PrintJSON(map[string]any{
+				"success": false,
+				"error":   err.Error(),
+			})
+		}
 		os.Exit(1)
 	}
+}
+
+// reportedJSONError marks a failure whose full report a command has already
+// printed as its single --json document (with "success": false). Execute
+// then exits non-zero without appending a second JSON object, so stdout stays
+// one parseable value.
+type reportedJSONError struct{ msg string }
+
+func (e *reportedJSONError) Error() string { return e.msg }
+
+// errorObjectNeeded reports whether Execute must print the standard
+// {"success": false, "error"} object for err.
+func errorObjectNeeded(err error) bool {
+	var reported *reportedJSONError
+	return !errors.As(err, &reported)
 }

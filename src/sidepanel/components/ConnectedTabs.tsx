@@ -7,6 +7,7 @@ interface TabInfo {
 	title: string;
 	active: boolean;
 	favIconUrl?: string;
+	index: number;
 }
 
 // The host access the content scripts need in order to connect tabs for
@@ -33,7 +34,7 @@ export function ConnectedTabs() {
 				type: "GET_READY_TABS",
 			})) as { success?: boolean; tabs?: TabInfo[] } | undefined;
 			if (res?.success && Array.isArray(res.tabs)) {
-				setTabs(res.tabs);
+				setTabs([...res.tabs].sort((a, b) => a.index - b.index));
 			}
 		} catch (err) {
 			console.warn("[HTR NControl] GET_READY_TABS failed:", err);
@@ -79,6 +80,18 @@ export function ConnectedTabs() {
 				await refresh();
 			} catch (err) {
 				console.warn("[HTR NControl] activate tab failed:", err);
+			}
+		},
+		[refresh],
+	);
+
+	const closeTab = useCallback(
+		async (tabId: number): Promise<void> => {
+			try {
+				await chrome.tabs.remove(tabId);
+				await refresh();
+			} catch (err) {
+				console.warn("[HTR NControl] close tab failed:", err);
 			}
 		},
 		[refresh],
@@ -131,7 +144,8 @@ export function ConnectedTabs() {
 		void chrome.runtime
 			.sendMessage({ type: "SYNC_READY_TABS" })
 			.then((res: { success?: boolean; tabs?: TabInfo[] } | undefined) => {
-				if (res?.success && Array.isArray(res.tabs)) setTabs(res.tabs);
+				if (res?.success && Array.isArray(res.tabs))
+					setTabs([...res.tabs].sort((a, b) => a.index - b.index));
 			})
 			.catch(() => void refresh());
 		const id = setInterval(() => {
@@ -206,8 +220,17 @@ export function ConnectedTabs() {
 								<button
 									type="button"
 									className={`ct-item${tab.active ? " ct-active" : ""}`}
-									title="Switch to this tab"
+									title="Switch to this tab (middle-click to close)"
 									onClick={() => void activateTab(tab.id)}
+									onMouseDown={(e) => {
+										if (e.button === 1) e.preventDefault();
+									}}
+									onAuxClick={(e) => {
+										if (e.button === 1) {
+											e.preventDefault();
+											void closeTab(tab.id);
+										}
+									}}
 								>
 									{tab.favIconUrl ? (
 										<img className="ct-favicon" src={tab.favIconUrl} alt="" />

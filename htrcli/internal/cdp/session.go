@@ -16,7 +16,25 @@ type Session struct {
 	nextID int64
 	// events buffered while waiting for a Call's response, FIFO.
 	pending []cdpMessage
+	// frame is the CSS selector of a same-origin <iframe> (global --frame).
+	// When set, DOM commands and form helpers run inside that frame's
+	// window, and trusted-input coordinates are offset by the frame's
+	// position. Empty = the top-level document.
+	frame string
+	// frameContextID caches the main-world execution context of frame
+	// (resolved lazily by frameContext; 0 = not resolved yet).
+	frameContextID int64
 }
+
+// SetFrame scopes DOM work on this session to the same-origin <iframe>
+// matched by sel in the top-level document ("" = top-level document).
+func (s *Session) SetFrame(sel string) {
+	s.frame = sel
+	s.frameContextID = 0
+}
+
+// Frame returns the --frame selector this session is scoped to ("" = none).
+func (s *Session) Frame() string { return s.frame }
 
 type cdpMessage struct {
 	ID     int64           `json:"id"`

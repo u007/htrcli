@@ -80,7 +80,11 @@ func formatNetworkEvent(entry api.EventEntry) string {
 	if data.Status > 0 {
 		status = fmt.Sprintf("%d", data.Status)
 	}
-	return fmt.Sprintf("[seq %d] %s %s %s (%dms)", entry.Seq, status, data.Method, data.URL, data.DurationMs)
+	method := data.Method
+	if method == "" {
+		method = "—" // unknown: CDP's Performance API does not expose the method
+	}
+	return fmt.Sprintf("[seq %d] %s %s %s (%dms)", entry.Seq, status, method, data.URL, data.DurationMs)
 }
 
 func formatNetworkEntries(resp *api.EventsResponse) string {
@@ -132,7 +136,7 @@ var networkReadCmd = &cobra.Command{
 	Short: "Read buffered network entries",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
-			return errUnsupportedCDP("network read")
+			return runNetworkReadCDP(cmd)
 		}
 		tabID, err := GetTabID()
 		if err != nil {
@@ -157,7 +161,7 @@ var networkWatchCmd = &cobra.Command{
 	Short: "Arm capture and stream network entries until timeout",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
-			return errUnsupportedCDP("network watch")
+			return runNetworkWatchCDP(cmd)
 		}
 		tabID, err := GetTabID()
 		if err != nil {
@@ -185,7 +189,7 @@ var networkWaitCmd = &cobra.Command{
 	Short: "Arm capture and block until a matching request completes",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
-			return errUnsupportedCDP("network wait")
+			return runNetworkWaitCDP(cmd)
 		}
 		if networkWaitURL == "" {
 			return fmt.Errorf("--url is required (glob pattern to match against request URLs)")

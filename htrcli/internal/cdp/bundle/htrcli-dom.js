@@ -424,6 +424,16 @@
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
     return rect.bottom > 0 && rect.right > 0 && rect.top < viewportHeight && rect.left < viewportWidth;
   }
+  function isOnlyOffscreen(element) {
+    if (!element.ownerDocument) return false;
+    const style = window.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+      return false;
+    }
+    const rect = element.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+    return !isVisible(element);
+  }
   function isEnabled(element) {
     if (element instanceof HTMLInputElement) return !element.disabled;
     if (element instanceof HTMLSelectElement) return !element.disabled;
@@ -532,10 +542,25 @@
     if (target.role) return `[role="${target.role}"]`;
     return JSON.stringify(target);
   }
-  async function waitForActionableElement(target, opts = {}) {
+  function waitForActionableElement(target, opts = {}) {
+    return waitForActionable(target, opts, false);
+  }
+  function waitForScrollableActionableElement(target, opts = {}) {
+    return waitForActionable(target, opts, true);
+  }
+  async function waitForActionable(target, opts, scrollOffscreen) {
     const timeoutMs = opts.timeoutMs ?? 5e3;
     const requireEnabled = opts.requireEnabled ?? true;
     const deadline = Date.now() + timeoutMs;
+    const scrolled = /* @__PURE__ */ new WeakSet();
+    const attemptScroll = (element) => {
+      if (!scrollOffscreen) return;
+      if (scrolled.has(element)) return;
+      if (isOnlyOffscreen(element)) {
+        scrolled.add(element);
+        element.scrollIntoView({ behavior: "instant", block: "center" });
+      }
+    };
     const check = (element) => {
       const info = getElementInfo(element);
       if (!info.visible) return { ok: false, reason: "is not visible" };
@@ -544,7 +569,10 @@
       return { ok: true };
     };
     const immediate = findElement(target);
-    if (immediate && check(immediate).ok) return immediate;
+    if (immediate) {
+      attemptScroll(immediate);
+      if (check(immediate).ok) return immediate;
+    }
     return new Promise((resolve, reject) => {
       let settled = false;
       let foundElement = null;
@@ -583,6 +611,7 @@
         const el = findElement(target);
         if (!el) return;
         foundElement = el;
+        attemptScroll(el);
         const result = check(el);
         if (result.ok) succeed(el);
       };
@@ -1252,11 +1281,11 @@
     return generateXPath(element);
   }
   async function handleClick(target, button = "left", count = 1, timeoutMs = 5e3) {
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: true
     });
-    element.scrollIntoView({ behavior: "auto", block: "center" });
+    element.scrollIntoView({ behavior: "instant", block: "center" });
     const rect = element.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
@@ -1370,16 +1399,16 @@
     });
   }
   async function handleScrollTo(target, timeoutMs = 5e3) {
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: false
     });
-    element.scrollIntoView({ behavior: "auto", block: "center" });
+    element.scrollIntoView({ behavior: "instant", block: "center" });
     await waitForScrollSettle();
   }
   async function handleFill(target, value, timeoutMs = 5e3) {
     var _a;
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: true
     });
@@ -1406,7 +1435,7 @@
     }
   }
   async function handleType(target, value, timeoutMs = 5e3) {
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: true
     });
@@ -1459,7 +1488,7 @@
     }
   }
   async function handleClear(target, timeoutMs = 5e3) {
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: true
     });
@@ -1474,7 +1503,7 @@
   }
   async function handleSelect(target, value, timeoutMs = 5e3) {
     var _a;
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: true
     });
@@ -1497,7 +1526,7 @@
   }
   async function handleCheck(target, checked, timeoutMs = 5e3) {
     var _a;
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: true
     });
@@ -1614,11 +1643,11 @@
       targetElement.dispatchEvent(new MouseEvent("mousedown", mouseInit2));
       return;
     }
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: true
     });
-    element.scrollIntoView({ behavior: "auto", block: "center" });
+    element.scrollIntoView({ behavior: "instant", block: "center" });
     const rect = element.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
@@ -1677,11 +1706,11 @@
       targetElement.dispatchEvent(new MouseEvent("mouseup", mouseInit2));
       return;
     }
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: true
     });
-    element.scrollIntoView({ behavior: "auto", block: "center" });
+    element.scrollIntoView({ behavior: "instant", block: "center" });
     const rect = element.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
@@ -1739,11 +1768,11 @@
       targetElement.dispatchEvent(new MouseEvent("mousemove", mouseInit2));
       return;
     }
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: false
     });
-    element.scrollIntoView({ behavior: "auto", block: "center" });
+    element.scrollIntoView({ behavior: "instant", block: "center" });
     const rect = element.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
@@ -1770,28 +1799,62 @@
     el.dispatchEvent(new MouseEvent("mousemove", mouseInit));
   }
   async function handleDrag(source, dest, timeoutMs = 5e3, steps = 5, delayMs = 0) {
-    async function getDragPoint(sel) {
-      if (typeof sel.x === "number" && typeof sel.y === "number") {
+    const pinned = (sel) => typeof sel.x === "number" && typeof sel.y === "number" ? { x: sel.x, y: sel.y } : void 0;
+    const srcPin = pinned(source);
+    const dstPin = pinned(dest);
+    const waitOpts = { timeoutMs, requireEnabled: true };
+    const srcWait = srcPin === void 0 ? await waitForScrollableActionableElement(source, waitOpts) : void 0;
+    const dstWait = dstPin === void 0 ? await waitForScrollableActionableElement(dest, waitOpts) : void 0;
+    if (srcWait !== void 0) {
+      srcWait.scrollIntoView({ behavior: "instant", block: "center" });
+    }
+    if (dstWait !== void 0) {
+      dstWait.scrollIntoView({ behavior: "instant", block: "center" });
+    }
+    const readPoint = (pin, el) => {
+      if (el !== void 0) {
+        const rect = el.getBoundingClientRect();
         return {
-          x: sel.x,
-          y: sel.y,
-          element: resolveSyntheticCoordinateTarget(sel.x, sel.y)
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+          element: el
         };
       }
-      const el = await waitForActionableElement(sel, {
-        timeoutMs,
-        requireEnabled: true
-      });
-      el.scrollIntoView({ behavior: "auto", block: "center" });
-      const rect = el.getBoundingClientRect();
+      if (pin === void 0) {
+        throw new Error("drag endpoint has neither coordinates nor an element");
+      }
       return {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-        element: el
+        x: pin.x,
+        y: pin.y,
+        element: resolveSyntheticCoordinateTarget(pin.x, pin.y)
       };
+    };
+    const inViewport = (p) => p.x >= 0 && p.y >= 0 && p.x < window.innerWidth && p.y < window.innerHeight;
+    const selectorPoints = () => {
+      const points = [];
+      if (srcWait !== void 0) points.push(readPoint(void 0, srcWait));
+      if (dstWait !== void 0) points.push(readPoint(void 0, dstWait));
+      return points;
+    };
+    let src = readPoint(srcPin, srcWait);
+    let dst = readPoint(dstPin, dstWait);
+    if (selectorPoints().some((p) => !inViewport(p))) {
+      const pts = selectorPoints();
+      const xs = pts.map((p) => p.x);
+      const ys = pts.map((p) => p.y);
+      window.scrollBy({
+        left: (Math.min(...xs) + Math.max(...xs)) / 2 - window.innerWidth / 2,
+        top: (Math.min(...ys) + Math.max(...ys)) / 2 - window.innerHeight / 2,
+        behavior: "instant"
+      });
+      src = readPoint(srcPin, srcWait);
+      dst = readPoint(dstPin, dstWait);
+      if (selectorPoints().some((p) => !inViewport(p))) {
+        throw new Error(
+          `drag endpoints (${Math.round(src.x)},${Math.round(src.y)}) and (${Math.round(dst.x)},${Math.round(dst.y)}) are still outside the ${window.innerWidth}x${window.innerHeight} viewport after scrolling; not draggable`
+        );
+      }
     }
-    const src = await getDragPoint(source);
-    const dst = await getDragPoint(dest);
     const sx = src.x;
     const sy = src.y;
     const dx = dst.x;
@@ -1879,11 +1942,11 @@
     d.dispatchEvent(new MouseEvent("mouseup", upMouse));
   }
   async function handlePrepareClick(target, timeoutMs = 5e3) {
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: true
     });
-    element.scrollIntoView({ behavior: "auto", block: "center" });
+    element.scrollIntoView({ behavior: "instant", block: "center" });
     const rect = element.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
@@ -1893,11 +1956,11 @@
     if (!target) {
       return { focused: document.activeElement != null };
     }
-    const element = await waitForActionableElement(target, {
+    const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: true
     });
-    element.scrollIntoView({ behavior: "auto", block: "center" });
+    element.scrollIntoView({ behavior: "instant", block: "center" });
     element.focus();
     return { focused: document.activeElement === element };
   }

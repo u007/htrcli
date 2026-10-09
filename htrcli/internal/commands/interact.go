@@ -73,36 +73,40 @@ func parseSelector(arg string) *api.TargetSelector {
 }
 
 var clickCmd = &cobra.Command{
-	Use:   "click <selector>",
-	Short: "Click element",
-	Args:  cobra.ExactArgs(1),
+	Annotations: FrameAwareAnnotations(),
+	Use:         "click <selector>",
+	Short:       "Click element",
+	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runInteract("click", args[0], "")
 	},
 }
 
 var dblclickCmd = &cobra.Command{
-	Use:   "dblclick <selector>",
-	Short: "Double-click element",
-	Args:  cobra.ExactArgs(1),
+	Annotations: FrameAwareAnnotations(),
+	Use:         "dblclick <selector>",
+	Short:       "Double-click element",
+	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runInteract("dblclick", args[0], "")
 	},
 }
 
 var fillCmd = &cobra.Command{
-	Use:   "fill <selector> <value>",
-	Short: "Clear and fill input",
-	Args:  cobra.ExactArgs(2),
+	Annotations: FrameAwareAnnotations(),
+	Use:         "fill <selector> <value>",
+	Short:       "Clear and fill input",
+	Args:        cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runInteract("fill", args[0], args[1])
 	},
 }
 
 var typeCmd = &cobra.Command{
-	Use:   "type <selector> <value>",
-	Short: "Type into input (appends)",
-	Args:  cobra.ExactArgs(2),
+	Annotations: FrameAwareAnnotations(),
+	Use:         "type <selector> <value>",
+	Short:       "Type into input (appends)",
+	Args:        cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runInteract("type", args[0], args[1])
 	},
@@ -153,27 +157,30 @@ var pressCmd = &cobra.Command{
 }
 
 var selectCmd = &cobra.Command{
-	Use:   "select <selector> <value>",
-	Short: "Select dropdown option",
-	Args:  cobra.ExactArgs(2),
+	Annotations: FrameAwareAnnotations(),
+	Use:         "select <selector> <value>",
+	Short:       "Select dropdown option",
+	Args:        cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runInteract("select", args[0], args[1])
 	},
 }
 
 var checkCmd = &cobra.Command{
-	Use:   "check <selector>",
-	Short: "Check checkbox",
-	Args:  cobra.ExactArgs(1),
+	Annotations: FrameAwareAnnotations(),
+	Use:         "check <selector>",
+	Short:       "Check checkbox",
+	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runInteract("check", args[0], "")
 	},
 }
 
 var uncheckCmd = &cobra.Command{
-	Use:   "uncheck <selector>",
-	Short: "Uncheck checkbox",
-	Args:  cobra.ExactArgs(1),
+	Annotations: FrameAwareAnnotations(),
+	Use:         "uncheck <selector>",
+	Short:       "Uncheck checkbox",
+	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runInteract("uncheck", args[0], "")
 	},

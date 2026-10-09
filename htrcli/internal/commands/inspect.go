@@ -43,9 +43,10 @@ func parseAnnotateSelectors(s string) []api.TargetSelector {
 }
 
 var findCmd = &cobra.Command{
-	Use:   "find <selector>",
-	Short: "Find element and return info",
-	Args:  cobra.ExactArgs(1),
+	Annotations: FrameAwareAnnotations(),
+	Use:         "find <selector>",
+	Short:       "Find element and return info",
+	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
 			if findRef {
@@ -135,9 +136,10 @@ var findAllCmd = &cobra.Command{
 }
 
 var getTextCmd = &cobra.Command{
-	Use:   "text <selector>",
-	Short: "Get text content of element",
-	Args:  cobra.ExactArgs(1),
+	Annotations: FrameAwareAnnotations(),
+	Use:         "text <selector>",
+	Short:       "Get text content of element",
+	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
 			return runInspectCDP("getText", args[0], "")
@@ -147,9 +149,10 @@ var getTextCmd = &cobra.Command{
 }
 
 var getValueCmd = &cobra.Command{
-	Use:   "value <selector>",
-	Short: "Get input value",
-	Args:  cobra.ExactArgs(1),
+	Annotations: FrameAwareAnnotations(),
+	Use:         "value <selector>",
+	Short:       "Get input value",
+	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
 			return runInspectCDP("getValue", args[0], "")
@@ -159,9 +162,10 @@ var getValueCmd = &cobra.Command{
 }
 
 var getAttrCmd = &cobra.Command{
-	Use:   "attr <selector> <attribute>",
-	Short: "Get attribute value",
-	Args:  cobra.ExactArgs(2),
+	Annotations: FrameAwareAnnotations(),
+	Use:         "attr <selector> <attribute>",
+	Short:       "Get attribute value",
+	Args:        cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
 			return runInspectCDP("getAttribute", args[0], args[1])
@@ -197,9 +201,10 @@ var getAttrCmd = &cobra.Command{
 }
 
 var getHTMLCmd = &cobra.Command{
-	Use:   "html <selector>",
-	Short: "Get innerHTML of element",
-	Args:  cobra.ExactArgs(1),
+	Annotations: FrameAwareAnnotations(),
+	Use:         "html <selector>",
+	Short:       "Get innerHTML of element",
+	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
 			return runInspectCDP("getHTML", args[0], "")

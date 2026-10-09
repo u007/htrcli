@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,8 +33,9 @@ func setViperCDPPort(t *testing.T, port int) {
 	t.Cleanup(func() { viper.Set("cdp-port", 0) })
 }
 
-func TestRunDragCDPResolvesBothPersistentRefsToCoordinates(t *testing.T) {
-	var boxCalls int
+func TestRunDragCDPPassesPersistentRefsAsElementHandles(t *testing.T) {
+	var resolved []int64
+	var dispatched int
 	upgrader := websocket.Upgrader{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -53,18 +55,21 @@ func TestRunDragCDPResolvesBothPersistentRefsToCoordinates(t *testing.T) {
 			}
 			result := map[string]any{}
 			switch request.Method {
-			case "DOM.getBoxModel":
-				boxCalls++
+			case "DOM.resolveNode":
 				var params struct {
 					BackendNodeID int64 `json:"backendNodeId"`
 				}
 				_ = json.Unmarshal(request.Params, &params)
-				left := float64(params.BackendNodeID)
-				result = map[string]any{"model": map[string]any{
-					"content": []float64{left, 10, left + 10, 10, left + 10, 20, left, 20},
-				}}
-			case "Page.getLayoutMetrics":
-				result = map[string]any{"visualViewport": map[string]any{"pageX": 0, "pageY": 0}}
+				resolved = append(resolved, params.BackendNodeID)
+				result = map[string]any{"object": map[string]any{"objectId": fmt.Sprintf("obj-%d", params.BackendNodeID)}}
+			case "Runtime.callFunctionOn":
+				// The page-side resolver scrolls both ELEMENTS, then reads them.
+				result = map[string]any{"result": map[string]any{"type": "object", "value": map[string]any{
+					"a": map[string]any{"x": 105, "y": 15}, "b": map[string]any{"x": 205, "y": 15}}}}
+			case "Input.dispatchMouseEvent":
+				dispatched++
+			case "DOM.getBoxModel", "Page.getLayoutMetrics":
+				t.Errorf("%s must not be called: refs are no longer pre-resolved to stale pixels", request.Method)
 			}
 			if err := conn.WriteJSON(map[string]any{"id": request.ID, "result": result}); err != nil {
 				return
@@ -92,15 +97,18 @@ func TestRunDragCDPResolvesBothPersistentRefsToCoordinates(t *testing.T) {
 	if err := runDragCDP(s, "T1", "@e1", "@e2", 1, 0); err != nil {
 		t.Fatalf("runDragCDP: %v", err)
 	}
-	if boxCalls != 2 {
-		t.Fatalf("getBoxModel calls = %d, want 2", boxCalls)
+	if len(resolved) != 2 || resolved[0] != 100 || resolved[1] != 200 {
+		t.Fatalf("resolved backend nodes = %v, want [100 200]", resolved)
+	}
+	if dispatched != 3 {
+		t.Fatalf("mouse events = %d, want press, move, release", dispatched)
 	}
 }
 
 func TestResolveDragTargetCDPReportsStaleRefs(t *testing.T) {
 	refs := &RefStore{Refs: map[string]int64{"@e1": 100}}
 	for _, ref := range []string{"@e2", "@e999"} {
-		_, err := resolveDragTargetCDP(nil, refs, &api.TargetSelector{Ref: ref})
+		_, err := resolveDragTargetCDP(refs, &api.TargetSelector{Ref: ref})
 		if err == nil || !strings.Contains(err.Error(), "stale ref") {
 			t.Fatalf("resolve %s error = %v, want stale ref error", ref, err)
 		}

@@ -693,6 +693,7 @@ async function getTabsInfo(): Promise<
 		url: tab.url || "",
 		title: tab.title || "",
 		active: tab.active || false,
+		index: tab.index,
 	}));
 }
 
@@ -704,6 +705,7 @@ async function getReadyTabsInfo(): Promise<
 		active: boolean;
 		favIconUrl?: string;
 		browser: ReturnType<typeof getBrowserType>;
+		index: number;
 	}>
 > {
 	const tabs = await Promise.all(
@@ -719,6 +721,7 @@ async function getReadyTabsInfo(): Promise<
 					active: tab.active || false,
 					favIconUrl: tab.favIconUrl,
 					browser: getBrowserType(),
+					index: tab.index,
 				};
 			} catch {
 				return null;

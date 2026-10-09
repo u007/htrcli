@@ -16,6 +16,9 @@ import (
 // runFindRefCDP finds an element via CDP, mints a ref for it, and saves it
 // to the persistent ref store (~/.htrcli/refs.json).
 func runFindRefCDP(selector string, all bool) error {
+	if frameFlag != "" {
+		return fmt.Errorf("find --ref cannot be combined with --frame (refs are resolved in the top-level document)")
+	}
 	sel := parseSelector(selector)
 	cssSel := ""
 	if sel.Ref != "" {
@@ -95,6 +98,28 @@ func errUnsupportedCDP(name string) error {
 	return fmt.Errorf("%s is not supported over --cdp yet — run it with --transport ext", name)
 }
 
+// errCDPOnly guards CDP-only verbs on the extension transport, so they fail
+// loudly instead of being misrouted to the extension daemon.
+func errCDPOnly(name string) error {
+	return fmt.Errorf("%s is only supported over --cdp", name)
+}
+
+// checkFrameTarget rejects selector forms that cannot be scoped to --frame:
+// @eN refs live in the top document's ref store, and xy= coordinates are
+// top-viewport pixels, so neither can be meaningfully resolved inside a frame.
+func checkFrameTarget(sel *api.TargetSelector) error {
+	if frameFlag == "" || sel == nil {
+		return nil
+	}
+	if sel.Ref != "" {
+		return fmt.Errorf("@eN refs cannot be combined with --frame; use a CSS (or name=/label=/text=…) selector")
+	}
+	if sel.X != nil || sel.Y != nil {
+		return fmt.Errorf("xy= coordinates cannot be combined with --frame; use an element selector")
+	}
+	return nil
+}
+
 // cdpSession opens the target page session for the current --tab/--cdp-port.
 func cdpSession() (*cdp.Session, string, error) {
 	targetID := GetTabTarget()
@@ -106,6 +131,7 @@ func cdpSession() (*cdp.Session, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	s.SetFrame(frameFlag)
 	if targetID == "" {
 		targets, err := cdp.ListTargets(port)
 		if err == nil && len(targets) > 0 {
@@ -117,6 +143,9 @@ func cdpSession() (*cdp.Session, string, error) {
 
 // runInteractCDP mirrors runInteract over the CDP transport.
 func runInteractCDP(action, selector, value string) error {
+	if err := checkFrameTarget(parseSelector(selector)); err != nil {
+		return err
+	}
 	s, targetID, err := cdpSession()
 	if err != nil {
 		return err
@@ -183,42 +212,43 @@ func runDragCDP(s *cdp.Session, targetID, src, dst string, steps, delay int) err
 		}
 	}
 
-	var err error
-	srcSel, err = resolveDragTargetCDP(s, refs, srcSel)
+	srcEnd, err := resolveDragTargetCDP(refs, srcSel)
 	if err != nil {
 		return fmt.Errorf("resolve drag source: %w", err)
 	}
-	dstSel, err = resolveDragTargetCDP(s, refs, dstSel)
+	dstEnd, err := resolveDragTargetCDP(refs, dstSel)
 	if err != nil {
 		return fmt.Errorf("resolve drag destination: %w", err)
 	}
-	return cdp.Drag(s, targetID, srcSel, dstSel, steps, delay)
+	return cdp.Drag(s, targetID, srcEnd, dstEnd, steps, delay)
 }
 
-// resolveDragTargetCDP translates a persistent @eN ref in the command layer.
-// RefStore belongs to commands, while the cdp package only owns the protocol
-// operation that turns the stored backend node into viewport coordinates.
-func resolveDragTargetCDP(s *cdp.Session, refs *RefStore, sel *api.TargetSelector) (*api.TargetSelector, error) {
+// resolveDragTargetCDP translates a persistent @eN ref in the command layer
+// into the backendNodeId the cdp package drags by. RefStore belongs to
+// commands; the cdp package only owns the protocol work. The ref is NOT
+// turned into pixels here: the drag resolver scrolls both endpoints first and
+// reads their positions afterwards, so a coordinate taken now would be stale
+// by the time the other endpoint has been scrolled into view.
+func resolveDragTargetCDP(refs *RefStore, sel *api.TargetSelector) (cdp.DragEndpoint, error) {
 	if sel == nil || sel.Ref == "" {
-		return sel, nil
+		return cdp.DragEndpoint{Sel: sel}, nil
 	}
 	if refs == nil {
-		return nil, fmt.Errorf("stale ref %q: CDP ref store was not loaded", sel.Ref)
+		return cdp.DragEndpoint{}, fmt.Errorf("stale ref %q: CDP ref store was not loaded", sel.Ref)
 	}
 	backendNodeID, ok := refs.Lookup(sel.Ref)
 	if !ok {
-		return nil, fmt.Errorf("stale ref %q: not found in the CDP ref store", sel.Ref)
+		return cdp.DragEndpoint{}, fmt.Errorf("stale ref %q: not found in the CDP ref store", sel.Ref)
 	}
-	x, y, err := cdp.ResolveBackendNodeCoordinates(s, backendNodeID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve %s (backendNodeId %d): %w", sel.Ref, backendNodeID, err)
-	}
-	return &api.TargetSelector{X: &x, Y: &y}, nil
+	return cdp.DragEndpoint{BackendNodeID: backendNodeID}, nil
 }
 
 // runInspectCDP routes inspect verbs (find, getValue, getText, getHTML,
 // getAttribute, getPageInfo, ...) through the embedded DOM bundle.
 func runInspectCDP(action, selector, attr string) error {
+	if err := checkFrameTarget(parseSelector(selector)); err != nil {
+		return err
+	}
 	s, _, err := cdpSession()
 	if err != nil {
 		return err

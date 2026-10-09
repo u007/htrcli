@@ -1,4 +1,5 @@
 import type { ConsoleEntry } from "../types/recording";
+import { getSourceFromStack, ownScriptFromStack } from "./stackSource";
 
 const MESSAGE_SOURCE = "htrncontrol-console-capture";
 // Posted by the isolated-world content script (src/contentScript/index.ts)
@@ -18,6 +19,10 @@ interface ConsoleCaptureWindow extends Window {
 const captureWindow = window as ConsoleCaptureWindow;
 let relayReady = false;
 const pendingBeforeReady: ConsoleEntry[] = [];
+// Captured at module load — document_start, before page code can replace
+// Error.prepareStackTrace — so own frames stay recognisable even when a page
+// formatter strips the scheme from the URL (see stackSource.ts).
+const ownScript = ownScriptFromStack(new Error().stack);
 
 function stringifyConsoleArg(arg: unknown): string {
 	if (typeof arg === "string") return arg;
@@ -32,17 +37,6 @@ function stringifyConsoleArg(arg: unknown): string {
 	} catch {
 		return "[unserializable]";
 	}
-}
-
-function getSourceFromStack(stack?: string): string | undefined {
-	if (!stack) return undefined;
-	const lines = stack.split("\n").slice(2);
-	for (const line of lines) {
-		const trimmed = line.trim();
-		if (!trimmed || trimmed.includes("consoleCapture")) continue;
-		return trimmed.replace(/^at\s+/, "");
-	}
-	return undefined;
 }
 
 function sendConsoleEntry(entry: ConsoleEntry): void {
@@ -87,7 +81,7 @@ function wrapConsoleLevel(level: (typeof CONSOLE_LEVELS)[number]): void {
 		const entry: ConsoleEntry = {
 			level,
 			args: args.map(stringifyConsoleArg),
-			source: getSourceFromStack(new Error().stack),
+			source: getSourceFromStack(new Error().stack, ownScript),
 		};
 		let result: unknown;
 		try {
