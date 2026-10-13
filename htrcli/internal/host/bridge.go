@@ -120,6 +120,10 @@ func handleRelayConn(d *Daemon, conn net.Conn, port int, bearerToken string) {
 			if err := json.Unmarshal(msg.Payload, &info); err == nil {
 				d.RegisterTab(rc, msg.TabID, info)
 			}
+		case "unregister":
+			// A closed tab must leave the registry, or its ID keeps being
+			// routed to and fails as "Invalid tab ID".
+			d.RemoveTab(rc, msg.TabID)
 		case "identify":
 			// The extension reports which browser it is, so tab-less commands
 			// (session recording) have something to select on. Validate before
@@ -158,24 +162,33 @@ func sendBackgroundCommand(d *Daemon, cmd Command, browserHint string, timeoutMs
 	if err != nil {
 		return nil, err
 	}
-	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
-	defer timer.Stop()
-	select {
-	case result := <-ch:
-		return &result, nil
-	case <-timer.C:
-		d.mu.Lock()
-		delete(d.pending, cmd.ID)
-		d.mu.Unlock()
-		return nil, fmt.Errorf("command timed out after %dms", timeoutMs)
-	}
+	return awaitCommand(d, cmd.ID, ch, timeoutMs)
 }
 
-func sendCommand(d *Daemon, tabID int, cmd Command, timeoutMs int) (*CommandResult, error) {
-	ch, err := d.EnqueueCommand(tabID, cmd)
+// sendBrowserCommand is sendBackgroundCommand pinned to browser: it never falls
+// back to another browser's relay.
+func sendBrowserCommand(d *Daemon, cmd Command, browser string, timeoutMs int) (*CommandResult, error) {
+	if cmd.ID == "" {
+		cmd.ID = generateID()
+	}
+	ch, err := d.EnqueueBrowserCommand(cmd, browser)
 	if err != nil {
 		return nil, err
 	}
+	return awaitCommand(d, cmd.ID, ch, timeoutMs)
+}
+
+func sendCommand(d *Daemon, tabID int, browser string, cmd Command, timeoutMs int) (*CommandResult, error) {
+	ch, err := d.EnqueueCommand(tabID, browser, cmd)
+	if err != nil {
+		return nil, err
+	}
+	return awaitCommand(d, cmd.ID, ch, timeoutMs)
+}
+
+// awaitCommand waits up to timeoutMs for the result on ch. On timeout it drops
+// the pending entry for id, so a late result has nowhere to land.
+func awaitCommand(d *Daemon, id string, ch <-chan CommandResult, timeoutMs int) (*CommandResult, error) {
 	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
 	defer timer.Stop()
 	select {
@@ -183,7 +196,7 @@ func sendCommand(d *Daemon, tabID int, cmd Command, timeoutMs int) (*CommandResu
 		return &result, nil
 	case <-timer.C:
 		d.mu.Lock()
-		delete(d.pending, cmd.ID)
+		delete(d.pending, id)
 		d.mu.Unlock()
 		return nil, fmt.Errorf("command timed out after %dms", timeoutMs)
 	}

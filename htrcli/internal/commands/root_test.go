@@ -1,6 +1,9 @@
 package commands
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestGetTabIDNumeric(t *testing.T) {
 	tabTarget = "123"
@@ -98,5 +101,24 @@ func TestPersistentPreRunDoesNotResolveContext(t *testing.T) {
 	})
 	if err := rootCmd.PersistentPreRunE(rootCmd, nil); err != nil {
 		t.Fatalf("PersistentPreRunE: %v", err)
+	}
+}
+
+// TestVersionFlagPrintsBareVersion pins the --version contract ocode relies on
+// when it verifies an installed htrcli on a remote host: the bare version and a
+// newline, nothing else, exit 0.
+func TestVersionFlagPrintsBareVersion(t *testing.T) {
+	var out bytes.Buffer
+	rootCmd.SetOut(&out)
+	rootCmd.SetArgs([]string{"--version"})
+	t.Cleanup(func() {
+		rootCmd.SetOut(nil)
+		rootCmd.SetArgs(nil)
+	})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("--version: %v", err)
+	}
+	if want := Version + "\n"; out.String() != want {
+		t.Fatalf("--version output = %q; want %q", out.String(), want)
 	}
 }

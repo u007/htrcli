@@ -387,25 +387,64 @@ func lowestTabID(tabs map[int]TabInfo) int {
 }
 
 // findOwner returns the connection that owns tabID. Caller must hold d.mu.
-// If the same native tab ID exists in more than one browser (possible only
-// when both use low, overlapping IDs), the first match wins.
+// See findOwnerIn for how a tab ID that two browsers share is resolved.
 func (d *Daemon) findOwner(tabID int) (*RelayConn, bool) {
-	for rc := range d.conns {
-		if _, ok := rc.tabs[tabID]; ok {
-			return rc, true
-		}
-	}
-	return nil, false
+	return d.findOwnerIn(tabID, "")
 }
 
-// EnqueueCommand sends a command to the relay for a specific tab.
+// findOwnerIn is findOwner restricted to connections announcing browser.
+// An empty browser matches any connection. A native tab ID can exist in Chrome
+// and Firefox at once, so when several connections own it the earliest
+// connected (lowest seq) wins: the same answer on every call, and the same rule
+// selectConn applies to tab-less commands. Caller must hold d.mu.
+func (d *Daemon) findOwnerIn(tabID int, browser string) (*RelayConn, bool) {
+	rc := d.earliestConn(func(rc *RelayConn) bool {
+		_, owns := rc.tabs[tabID]
+		return owns && (browser == "" || rc.browser == browser)
+	})
+	return rc, rc != nil
+}
+
+// TabInfoFor returns the registered info for tabID, limited to browser when set.
+// Ownership follows findOwnerIn, so the answer does not depend on map order.
+func (d *Daemon) TabInfoFor(tabID int, browser string) (TabInfo, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rc, ok := d.findOwnerIn(tabID, browser)
+	if !ok {
+		return TabInfo{}, false
+	}
+	return rc.tabs[tabID], true
+}
+
+// earliestConn returns the connection with the lowest seq that match accepts,
+// or nil when none does. Caller must hold d.mu.
+func (d *Daemon) earliestConn(match func(*RelayConn) bool) *RelayConn {
+	var best *RelayConn
+	for rc := range d.conns {
+		if !match(rc) {
+			continue
+		}
+		if best == nil || rc.seq < best.seq {
+			best = rc
+		}
+	}
+	return best
+}
+
+// EnqueueCommand sends a command to the relay for a specific tab. browser
+// constrains which browser's tab is meant, so a native tab ID shared by Chrome
+// and Firefox routes deterministically; "" accepts any owner.
 // Returns a channel that receives the result when the extension responds.
-func (d *Daemon) EnqueueCommand(tabID int, cmd Command) (<-chan CommandResult, error) {
+func (d *Daemon) EnqueueCommand(tabID int, browser string, cmd Command) (<-chan CommandResult, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	rc, ok := d.findOwner(tabID)
+	rc, ok := d.findOwnerIn(tabID, browser)
 	if !ok {
+		if browser != "" {
+			return nil, fmt.Errorf("tab %d not connected in %s", tabID, browser)
+		}
 		return nil, fmt.Errorf("tab %d not connected", tabID)
 	}
 
@@ -461,24 +500,13 @@ func (d *Daemon) ConnBrowser(rc *RelayConn) string {
 // Ties — including two connections that both announced the same browser — go to
 // the lowest seq, i.e. the earliest connected. Caller must hold d.mu.
 func (d *Daemon) selectConn(browserHint string) (*RelayConn, bool) {
-	var matched, earliest *RelayConn
-	for rc := range d.conns {
-		if earliest == nil || rc.seq < earliest.seq {
-			earliest = rc
-		}
-		if browserHint != "" && rc.browser == browserHint {
-			if matched == nil || rc.seq < matched.seq {
-				matched = rc
-			}
+	if browserHint != "" {
+		if rc := d.earliestConn(func(rc *RelayConn) bool { return rc.browser == browserHint }); rc != nil {
+			return rc, true
 		}
 	}
-	if matched != nil {
-		return matched, true
-	}
-	if earliest != nil {
-		return earliest, true
-	}
-	return nil, false
+	rc := d.earliestConn(func(*RelayConn) bool { return true })
+	return rc, rc != nil
 }
 
 // EnqueueBackgroundCommand sends a command to a browser relay without naming a
@@ -504,7 +532,29 @@ func (d *Daemon) EnqueueBackgroundCommand(cmd Command, browserHint string) (<-ch
 	if !ok {
 		return nil, fmt.Errorf("no browser connected")
 	}
+	return d.enqueueTabless(rc, cmd)
+}
 
+// EnqueueBrowserCommand is EnqueueBackgroundCommand pinned to browser: it never
+// falls back to another browser's relay. Use it where the answering browser
+// decides the outcome, such as closing a tab whose ID is only meaningful in one
+// browser. Returns an error when no relay has announced browser.
+func (d *Daemon) EnqueueBrowserCommand(cmd Command, browser string) (<-chan CommandResult, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	rc := d.earliestConn(func(rc *RelayConn) bool {
+		return browser != "" && rc.browser == browser
+	})
+	if rc == nil {
+		return nil, fmt.Errorf("no %s browser connected", browser)
+	}
+	return d.enqueueTabless(rc, cmd)
+}
+
+// enqueueTabless writes cmd to rc as a tab-less command and returns the channel
+// its result arrives on. Caller must hold d.mu.
+func (d *Daemon) enqueueTabless(rc *RelayConn, cmd Command) (<-chan CommandResult, error) {
 	if cmd.ID == "" {
 		cmd.ID = generateID()
 	}

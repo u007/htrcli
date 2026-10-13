@@ -16,6 +16,11 @@ type Client struct {
 	BaseURL    string
 	Token      string
 	HTTPClient *http.Client
+	// TabBrowser pins tab-routed requests (ExecuteCommand, ExecuteCommandInto,
+	// GetTab) to tabs of that browser ("chrome" or "firefox"). Empty accepts any
+	// browser. Tab-less requests never carry it, because the daemon rejects a
+	// browser on them.
+	TabBrowser string
 }
 
 // NewClient creates a new API client.
@@ -209,7 +214,11 @@ func (c *Client) ListTabs() ([]TabInfo, error) {
 
 // GetTab returns information about a specific tab.
 func (c *Client) GetTab(id int) (*TabInfo, error) {
-	data, err := c.doRequest("GET", "/api/tabs/"+strconv.Itoa(id), nil)
+	path := "/api/tabs/" + strconv.Itoa(id)
+	if c.TabBrowser != "" {
+		path += "?browser=" + url.QueryEscape(c.TabBrowser)
+	}
+	data, err := c.doRequest("GET", path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -236,17 +245,26 @@ func (c *Client) GetTab(id int) (*TabInfo, error) {
 	return &tab, nil
 }
 
-// ExecuteCommand sends a command to a specific tab.
+// ExecuteCommand sends a command to a specific tab, pinned to c.TabBrowser, or to
+// the default tab when tabID is nil.
 func (c *Client) ExecuteCommand(tabID *int, cmd Command) (*CommandResult, error) {
+	path := "/api/command"
 	req := CommandRequest{Command: cmd}
-
-	var path string
 	if tabID != nil {
 		path = "/api/tabs/" + strconv.Itoa(*tabID) + "/command"
-	} else {
-		path = "/api/command"
+		req.Browser = c.TabBrowser
 	}
+	return c.postCommand(path, req)
+}
 
+// ExecuteTabCommand sends a command to tabID, accepting only a tab that belongs
+// to browser ("chrome" or "firefox"; "" accepts any browser).
+func (c *Client) ExecuteTabCommand(tabID int, browser string, cmd Command) (*CommandResult, error) {
+	return c.postCommand("/api/tabs/"+strconv.Itoa(tabID)+"/command", CommandRequest{Command: cmd, Browser: browser})
+}
+
+// postCommand POSTs req to path and decodes the command result.
+func (c *Client) postCommand(path string, req CommandRequest) (*CommandResult, error) {
 	data, err := c.doRequest("POST", path, req)
 	if err != nil {
 		return nil, err
@@ -301,10 +319,22 @@ type commandDataEnvelope struct {
 // falls back to the earliest-connected relay when none matches, so this is never
 // a hard selector. Pass "" for no preference.
 func (c *Client) ExecuteBackgroundCommandInto(cmd Command, browserHint string, out any) error {
-	data, err := c.doRequest("POST", "/api/background/command", BackgroundCommandRequest{
-		Command: cmd,
-		Browser: browserHint,
-	})
+	return c.postBackgroundInto(BackgroundCommandRequest{Command: cmd, Browser: browserHint}, out)
+}
+
+// ExecuteBrowserCommandInto runs a tab-less command in the background worker of
+// browser alone. Unlike ExecuteBackgroundCommandInto it never falls back to
+// another browser, and it fails when browser has no connected relay. Use it when
+// the answering browser decides the outcome, such as closing a tab by its ID.
+func (c *Client) ExecuteBrowserCommandInto(browser string, cmd Command, out any) error {
+	return c.postBackgroundInto(BackgroundCommandRequest{Command: cmd, Browser: browser, BrowserStrict: true}, out)
+}
+
+// postBackgroundInto POSTs req to the background route and decodes the result's
+// `data` into out. Both background variants share it.
+func (c *Client) postBackgroundInto(req BackgroundCommandRequest, out any) error {
+	cmd := req.Command
+	data, err := c.doRequest("POST", "/api/background/command", req)
 	if err != nil {
 		return err
 	}
@@ -337,11 +367,10 @@ func (c *Client) ExecuteBackgroundCommandInto(cmd Command, browserHint string, o
 func (c *Client) ExecuteCommandInto(tabID *int, cmd Command, out any) error {
 	req := CommandRequest{Command: cmd}
 
-	var path string
+	path := "/api/command"
 	if tabID != nil {
 		path = "/api/tabs/" + strconv.Itoa(*tabID) + "/command"
-	} else {
-		path = "/api/command"
+		req.Browser = c.TabBrowser
 	}
 
 	data, err := c.doRequest("POST", path, req)

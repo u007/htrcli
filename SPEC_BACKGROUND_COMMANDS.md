@@ -1,7 +1,8 @@
 # Spec: tab-less background commands + `--browser` hint
 
 Status: **approved** (2026-09-30) — including the `FirstTabID()` determinism fix, which the
-user explicitly kept in scope
+user explicitly kept in scope; see [Status update](#status-update) for what
+shipped afterwards
 Date: 2026-09-30
 Scope: `htrcli` daemon/client/CLI + the extension's native-host bridge
 Supersedes: the TODO.md note "Not done: it changes the host protocol" — see
@@ -27,10 +28,20 @@ themselves need no page.
 The extension is **already** able to serve these actions without a tab. In
 `src/background/nativeHost.ts`, `sendCommandToTab` handles the six recording
 actions at the very top of the function, before any tab lookup, content-script
-injection, or `chrome.tabs` access. `NativeMessage.TabID` is `json:"tabId,omitempty"`,
-so a `tabId` of 0 is omitted from the frame, and the daemon resolves results by
-`commandId` alone (`bridge.go`: `d.ResolveCommand(result.ID, result)`), never by
-tabID. **No extension change is required for the route itself.**
+injection, or `chrome.tabs` access. The daemon resolves results by `commandId`
+alone (`bridge.go`: `d.ResolveCommand(result.ID, result)`), never by tabID.
+**No extension change is required for the route itself.**
+
+> **Correction (2026-10-13).** This section originally claimed `NativeMessage.TabID`
+> was `json:"tabId,omitempty"` and that a `tabId` of 0 was therefore "omitted from
+> the frame" as a harmless optimisation. That was wrong, and it is exactly what
+> made `tabs new` / `tabs close` time out for 30s on both browsers: the extension
+> routes a tab-less `openTab`/`closeTab` by `tabId === 0`, received `undefined`,
+> fell through to the per-tab content-script path for a tab that does not exist,
+> and never answered. Recording commands were saved only because they do not
+> check `tabId` at all. `TabID` is no longer `omitempty`; a test now asserts the
+> literal `"tabId":0` on the wire. Never treat a zero-valued field as "the same as
+> absent" when a receiver keys on its presence.
 
 ## Decisions
 
@@ -243,20 +254,22 @@ the test fails, restore) before this spec is considered done.
 
 This is a checklist, not a suggestion; each is part of "done":
 
-- [ ] `SPEC_HTRCLI.md` — has **no session-recordings section at all** today; add
+- [x] `SPEC_HTRCLI.md` — has **no session-recordings section at all** today; add
       one covering the `recordings` verb, the background route, and `identify`.
-- [ ] `skills/htrcli/SKILL.md` (symlinked as `~/.claude/skills/htrcli`) —
+- [x] `skills/htrcli/SKILL.md` (symlinked as `~/.claude/skills/htrcli`) —
       document `--browser` and the tab-less behaviour.
-- [ ] `CLAUDE.md` — the architecture/command list.
-- [ ] `CHANGELOG.md` — under `## Unreleased`.
-- [ ] `htrcli/README.md`.
-- [ ] `TODO.md` — close the items this spec lands, and add an entry for anything
+- [x] `CLAUDE.md` — the architecture/command list.
+- [x] `CHANGELOG.md` — under `## Unreleased`.
+- [x] `htrcli/README.md`.
+- [x] `TODO.md` — close the items this spec lands, and add an entry for anything
       deferred.
 
 ## Out of scope
 
-- **Strict** browser selection (erroring instead of falling back). The hint can
-  be promoted to strict later without changing the route.
+- ~~**Strict** browser selection (erroring instead of falling back).~~ **Shipped
+  afterwards** (see [Status update](#status-update)): `browserStrict` on the
+  background route and `browser` on the tab-routed route are both hard
+  requirements now.
 - Changing `/api/command`'s existing tab resolution.
 - React component tests (item 3, previously declined — it needs a new dev
   dependency and this repo has no component tests at all).
@@ -289,6 +302,31 @@ Note: `git checkout <path>` is denied by `.claude/settings.json` in this repo, s
 | A third browser connects (e.g. Edge) | `getBrowserType()` reports what it reports; the hint simply never matches and first-wins applies |
 | `identify` lost on reconnect | Re-sent on every successful connect; a lost identity degrades to first-wins, which is the old behaviour |
 | Daemon grows a new lock-guarded field | Same mutex and discipline as `tabs`/`lastSeen`; no new lock |
+
+## Status update — 2026-10-13 (`tabs new` / `tabs close`)
+
+Everything above landed, and the design held without modification: the tab-less
+route and the `identify` message were exactly the pieces the follow-on work
+needed. This section records what this spec got wrong or left open, so the
+document stays an accurate description of the code.
+
+1. **The `omitempty` on `TabID` was not inert.** See the correction in the
+   [Problem](#problem) section — it cost a full debugging cycle when
+   `tabs new`/`tabs close` silently timed out. Zero no longer means absent.
+2. **"Out of scope: strict browser selection" has been implemented.** The hint
+   still falls back on the background route; two strict forms exist on top of it:
+   `browserStrict: true` on `/api/background/command` (`EnqueueBrowserCommand`,
+   never falls back) and `browser` on `/api/tabs/<id>/command` (the tab must
+   belong to that browser). Because each browser numbers its own tabs, a shared
+   ID is resolvable at all only now: `findOwner` used to return whatever Go's
+   randomised map iteration hit first, so `tabs close 3` could hit either
+   browser. `findOwnerIn` + `earliestConn` make it the lowest `seq`.
+3. **Tab ownership can go stale.** A closed tab stayed in `rc.tabs` and kept
+   being routed to, failing as "Invalid tab ID"; the extension now sends an
+   `unregister` message the daemon applies in `handleRelayConn`.
+4. **`identify`'s wire shape changed**: `{ "type": "identify", "browser": … }`
+   became `{ "type": "identify", "payload": { "browser": … } }`, matching every
+   other fan-out message. The daemon reads `Payload`, not a top-level key.
 
 ## Corrections to prior notes
 

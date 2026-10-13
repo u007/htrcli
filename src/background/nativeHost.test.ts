@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
+import { getBrowserType } from "./browserType";
 import {
 	getConnectionMode,
 	isPermanentError,
@@ -143,5 +144,131 @@ describe("connection confirmation state machine", () => {
 
 		portB.emit({ type: "ping" });
 		expect(getConnectionMode()).toBe("native");
+	});
+});
+
+// ─── Tab-less openTab / closeTab (htrcli tabs new / tabs close) ─────
+// These arrive on the background route with tabId 0 and must be answered by
+// the background worker, not forwarded to a content script.
+
+describe("tab-less openTab / closeTab", () => {
+	const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+	let tabsCreated: Array<{ url: string; active: boolean }> = [];
+	let tabsRemoved: number[] = [];
+	let updatedListeners: Array<
+		(tid: number, info: { status?: string }) => void
+	> = [];
+
+	type CommandResultPayload = {
+		id: string;
+		success: boolean;
+		data?: unknown;
+		error?: string;
+	};
+
+	function resultFor(id: string): CommandResultPayload | undefined {
+		const found = getPort().messages.find(
+			(m) =>
+				(m as { type?: string }).type === "command_result" &&
+				(m as { payload?: { id?: string } }).payload?.id === id,
+		) as { payload: CommandResultPayload } | undefined;
+		return found?.payload;
+	}
+
+	beforeEach(() => {
+		createdPorts.length = 0;
+		currentPort = null;
+		installFakeChrome();
+		tabsCreated = [];
+		tabsRemoved = [];
+		updatedListeners = [];
+		const fake = (globalThis as { chrome?: { tabs?: unknown } }).chrome;
+		if (!fake) throw new Error("fake chrome not installed");
+		fake.tabs = {
+			query: (_q: unknown, cb: (t: unknown[]) => void) => cb([]),
+			create: async (props: { url: string; active: boolean }) => {
+				tabsCreated.push(props);
+				return { id: 42 };
+			},
+			remove: async (id: number) => {
+				tabsRemoved.push(id);
+			},
+			onUpdated: {
+				addListener: (l: (tid: number, info: { status?: string }) => void) => {
+					updatedListeners.push(l);
+				},
+				removeListener: (
+					l: (tid: number, info: { status?: string }) => void,
+				) => {
+					updatedListeners = updatedListeners.filter((x) => x !== l);
+				},
+			},
+		};
+		startNativeHost();
+		getPort().emit({ type: "ping" });
+	});
+
+	it("openTab with tabId 0 opens an inactive tab and reports the browser", async () => {
+		getPort().emit({
+			type: "command",
+			tabId: 0,
+			payload: {
+				id: "t1",
+				action: "openTab",
+				options: { url: "https://example.com" },
+			},
+		});
+		await flush();
+		for (const listener of updatedListeners)
+			listener(42, { status: "complete" });
+		await flush();
+
+		expect(tabsCreated).toEqual([
+			{ url: "https://example.com", active: false },
+		]);
+		expect(resultFor("t1")).toEqual({
+			id: "t1",
+			success: true,
+			data: { tabId: 42, browser: getBrowserType() },
+		});
+	});
+
+	it("closeTab with tabId 0 removes the tab and reports the browser", async () => {
+		getPort().emit({
+			type: "command",
+			tabId: 0,
+			payload: { id: "t2", action: "closeTab", options: { tabId: 42 } },
+		});
+		await flush();
+
+		expect(tabsRemoved).toEqual([42]);
+		expect(resultFor("t2")?.success).toBe(true);
+		expect(resultFor("t2")?.data).toEqual({ browser: getBrowserType() });
+	});
+
+	it("closeTab without a positive tabId fails loudly and removes nothing", async () => {
+		getPort().emit({
+			type: "command",
+			tabId: 0,
+			payload: { id: "t3", action: "closeTab", options: { tabId: 0 } },
+		});
+		await flush();
+
+		expect(tabsRemoved).toEqual([]);
+		expect(resultFor("t3")?.success).toBe(false);
+		expect(resultFor("t3")?.error).toContain("positive options.tabId");
+	});
+
+	it("openTab without a url fails loudly and opens nothing", async () => {
+		getPort().emit({
+			type: "command",
+			tabId: 0,
+			payload: { id: "t4", action: "openTab", options: {} },
+		});
+		await flush();
+
+		expect(tabsCreated).toEqual([]);
+		expect(resultFor("t4")?.success).toBe(false);
+		expect(resultFor("t4")?.error).toContain("options.url");
 	});
 });

@@ -228,6 +228,9 @@ type CommandRequest struct {
 	Command    Command `json:"command"`
 	Screenshot bool    `json:"screenshot,omitempty"`
 	Timeout    int     `json:"timeout,omitempty"`
+	// Browser restricts a tab-routed command to tabs of that browser
+	// ("chrome" or "firefox"). Empty means any browser.
+	Browser string `json:"browser,omitempty"`
 }
 
 // BackgroundCommandRequest is the body of POST /api/background/command.
@@ -241,6 +244,10 @@ type BackgroundCommandRequest struct {
 	// prefer. omitempty so a caller with no preference sends nothing, leaving the
 	// body identical to one that predates the flag.
 	Browser string `json:"browser,omitempty"`
+	// BrowserStrict pins the request to Browser with no fallback: the daemon
+	// answers only from a relay that announced Browser, or fails. Requires Browser
+	// to be set.
+	BrowserStrict bool `json:"browserStrict,omitempty"`
 }
 
 // HealthResponse is the response from GET /api/health.

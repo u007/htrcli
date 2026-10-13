@@ -64,7 +64,9 @@ registers only its own tabs. Two routes reach a relay:
 
 - `POST /api/tabs/<id>/command` — routed by tab, to the content script.
 - `POST /api/background/command` — **tab-less**, to the background service
-  worker, optionally with an advisory `browser` hint. Session recording needs
+  worker, optionally with an advisory `browser` hint, or with `browserStrict:
+  true` to pin the hint with no fallback (`tabs new` and `tabs close` use this).
+  Session recording needs
   this: those actions belong to no page, so requiring an open `http/https` tab
   would be wrong. Connections are ordered by a monotonic `seq`, so selection is
   deterministic; a hint that matches nothing falls back to the earliest

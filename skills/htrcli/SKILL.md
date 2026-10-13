@@ -1,6 +1,6 @@
 ---
 name: htrcli
-description: HTR NControl CLI (htrcli) usage guide. Read this before running any htrcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select, press, keydown/keyup, mousedown/mouseup/mousemove/drag with xy= viewport coordinates and @eN refs), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, recording video, session recordings (start/stop/list/get/export/delete — works on Chrome and Firefox), network capture/mocking, console watching, dialog handling, and more. Includes a form-filling guide (pick/fill-form/--frame, datepickers, react-select, iframes, submit-and-verify) and the list of what works over --cdp. Use when the user asks to control a browser, interact with a website, fill a form, click something, drag, press keys, extract data, take a screenshot, or automate any browser task via HTR NControl.
+description: HTR NControl CLI (htrcli) usage guide. Read this before running any htrcli commands. Covers connecting to the HTR NControl server, listing, filtering by browser, opening and closing tabs, navigating pages, interacting with elements (click, fill, type, select, press, keydown/keyup, mousedown/mouseup/mousemove/drag with xy= viewport coordinates and @eN refs), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, recording video, session recordings (start/stop/list/get/export/delete — works on Chrome and Firefox), network capture/mocking, console watching, dialog handling, and more. Includes a form-filling guide (pick/fill-form/--frame, datepickers, react-select, iframes, submit-and-verify) and the list of what works over --cdp. Use when the user asks to control a browser, interact with a website, fill a form, click something, drag, press keys, extract data, take a screenshot, or automate any browser task via HTR NControl.
 allowed-tools: Bash(htrcli:*), Bash(go run ./cmd/htrcli:*), Bash(make htrcli-*)
 ---
 
@@ -48,7 +48,7 @@ each probe costs a round trip.
 
 | Works | Not available over `--cdp` (use `eval` or the extension transport) |
 |---|---|
-| open, find/findAll, snapshot, text/value/attr/html, click/dblclick/rightclick, fill, type, select, check/uncheck, clear, press/keydown/keyup, mouse*, drag, upload, eval, screenshot, tabs list, **pick**, **fill-form**, **--frame**, console read/watch, network read/watch/wait | scroll, back/forward/reload, tabs get, dialog handle/list, fetch, printpdf, network mock/block/unmock, trace export, screenshot --annotate |
+| open, find/findAll, snapshot, text/value/attr/html, click/dblclick/rightclick, fill, type, select, check/uncheck, clear, press/keydown/keyup, mouse*, drag, upload, eval, screenshot, tabs list/get/new/close (Chrome only), **pick**, **fill-form**, **--frame**, console read/watch, network read/watch/wait | scroll, back/forward/reload, dialog handle/list, fetch, printpdf, network mock/block/unmock, trace export, screenshot --annotate |
 
 ### Filling forms: verb per widget
 
@@ -163,7 +163,11 @@ htrcli install --browser chrome  --uninstall           # remove manifest
 
 Chrome and Firefox may both be registered and connected at once —
 `htrcli tabs list` shows tabs from both, and `--tab <id>` routes to whichever
-browser owns that tab.
+browser owns that tab. Each browser numbers its own tabs, so the same ID can
+exist in both: `tabs get` and `tabs close` then fail until you add
+`--browser chrome|firefox`. Plain `--tab <id>` on other commands takes the
+earliest-connected browser that owns the ID. With `--browser`, `--tab <id>` is
+strict: the tab must belong to that browser, or the command fails.
 
 ### Tray icon
 
@@ -207,7 +211,7 @@ htrcli --cdp eval "document.title"
 
 | Transport | `--tab` value | Example |
 |---|---|---|
-| extension (`ext`, default) | numeric tab ID from `htrcli tabs list` | `--tab 43` |
+| extension (`ext`, default) | numeric tab ID from `htrcli tabs list` (per browser; see below) | `--tab 43` |
 | CDP (`cdp`) | 32-char hex CDP target ID | `--tab 8E17C9D2...` |
 
 **Configuration:**
@@ -512,13 +516,34 @@ htrcli snapshot                     # Accessibility snapshot tree with refs
 ## Tab management
 
 ```bash
-htrcli tabs list                           # list all connected tabs
-htrcli tabs get 123                        # get info for specific tab
+htrcli tabs list                           # list all connected tabs (Chrome and Firefox)
+htrcli tabs list --browser firefox         # only Firefox tabs (chrome|firefox)
+htrcli tabs get 123                        # get info for a tab
+htrcli tabs get 123 --browser chrome       # same, when the ID also exists in another browser
+htrcli tabs new https://example.com        # open a URL in a new tab (not activated); prints its ID
+htrcli tabs new https://example.com --browser firefox
+htrcli tabs close 123 --browser chrome     # close a tab
 
 # Target a specific tab for commands
 htrcli --tab 123 find "input[name=q]"
 htrcli --tab 123 click "input[name=q]"
 ```
+
+`--browser` on the `tabs` subcommands is a strict filter: it never falls back
+to the other browser, and it is separate from the global `--browser` hint used
+by tab-less commands. Pass it after `tabs`, e.g. `htrcli tabs list --browser
+firefox`.
+
+- `tabs new <url>` opens the tab from the extension's background worker, so no
+  connected page is needed. With `--browser`, only that browser answers and the
+  command fails if it is not connected; without it, the earliest-connected
+  browser answers. The output names the browser, e.g. `Opened tab 7 (chrome)`,
+  and `--json` carries it as `browser`. Pass the ID to `--tab`.
+- `tabs close <id>` runs in the owning browser's background worker, so it no
+  longer needs another tab in that browser. It still resolves the ID against the
+  connected http(s) tabs, so a tab must be connected before it can be closed.
+- Over `--cdp`, `tabs list`, `tabs get`, `tabs new`, and `tabs close` work on
+  Chrome. `--browser firefox` is rejected because CDP only drives Chrome.
 
 ## Navigation
 
@@ -1014,8 +1039,10 @@ after the page loads.
 | `htrcli config show` | Show current config |
 | `htrcli install` | Register as native messaging host |
 | `htrcli serve` | Start native messaging daemon (:3845) |
-| `htrcli tabs list` | List connected tabs |
-| `htrcli tabs get <id>` | Get tab info |
+| `htrcli tabs list [--browser chrome\|firefox]` | List connected tabs, optionally one browser |
+| `htrcli tabs get <id> [--browser chrome\|firefox]` | Get tab info |
+| `htrcli tabs new <url> [--browser chrome\|firefox]` | Open a URL in a new tab; prints its ID and browser |
+| `htrcli tabs close <id> [--browser chrome\|firefox]` | Close a tab |
 | `htrcli open <url>` | Navigate to URL |
 | `htrcli back [steps]` | Browser back — 1 step or N steps (`back 3` loops sequentially, reports partial progress) |
 | `htrcli forward [steps]` | Browser forward — 1 step or N steps |

@@ -166,6 +166,7 @@ func resolveUploadTab(c *api.Client, requestedTabID *int) (*api.TabInfo, error) 
 	if err != nil {
 		return nil, err
 	}
+	tabs = filterTabs(tabs, c.TabBrowser)
 	if len(tabs) == 0 {
 		return nil, fmt.Errorf("no tabs connected")
 	}
@@ -201,7 +202,7 @@ func runUploadExt(target string, files []string) error {
 	if err != nil {
 		return err
 	}
-	result, err := c.ExecuteCommand(&tab.ID, api.Command{
+	result, err := c.ExecuteTabCommand(tab.ID, tab.Browser, api.Command{
 		ID:      "1",
 		Action:  "uploadFiles",
 		Target:  sel,

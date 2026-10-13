@@ -178,6 +178,8 @@ export type CommandAction =
 	| "fetchViaDOM"
 	| "fetchFromCS"
 	| "debuggerEval"
+	// Tab lifecycle. With tabId 0 (background route, htrcli tabs new/close) the
+	// background worker runs them; tab-routed, the content script forwards them.
 	| "openTab"
 	| "closeTab"
 	| "cdpNavigate"

@@ -3,6 +3,7 @@ package host
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -50,8 +51,10 @@ func TestSetConnBrowserIgnoresEmptyValue(t *testing.T) {
 }
 
 // TestEnqueueBackgroundCommandWritesZeroTabID pins the difference from
-// EnqueueCommand: a background command carries no tab, so TabID stays zero and
-// is omitted from the wire (it is `omitempty` on NativeMessage).
+// EnqueueCommand: a background command carries no tab, so TabID stays zero AND
+// the key is present on the wire. The extension routes tab-less commands with
+// `tabId === 0`; an omitted key arrives as `undefined` there, falls through to
+// the per-tab path, and never answers (htrcli `tabs new` then times out).
 func TestEnqueueBackgroundCommandWritesZeroTabID(t *testing.T) {
 	d := NewDaemon()
 	var raw string
@@ -73,6 +76,9 @@ func TestEnqueueBackgroundCommandWritesZeroTabID(t *testing.T) {
 	}
 	if nm.TabID != 0 {
 		t.Errorf("TabID = %d, want 0 for a tab-less command", nm.TabID)
+	}
+	if !strings.Contains(raw, `"tabId":0`) {
+		t.Errorf("wire message %q lacks an explicit \"tabId\":0", raw)
 	}
 }
 

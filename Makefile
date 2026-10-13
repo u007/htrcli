@@ -8,10 +8,14 @@ export
 
 HTRCLI_DIR := htrcli
 
+# HTRCLI_VERSION is stamped into commands.Version; "dev" when git cannot describe.
+HTRCLI_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION_LDFLAGS := -ldflags "-X github.com/u007/htrcli/internal/commands.Version=$(HTRCLI_VERSION)"
+
 # ── htrcli ──────────────────────────────────────────────────────────────
 
 htrcli-build:
-	cd $(HTRCLI_DIR) && go build -o bin/htrcli ./cmd/htrcli
+	cd $(HTRCLI_DIR) && go build $(VERSION_LDFLAGS) -o bin/htrcli ./cmd/htrcli
 
 # Cross-compile htrcli for the targets that build from any host.
 # Binaries are placed in htrcli/bin/ with platform-specific names.
@@ -24,17 +28,17 @@ htrcli-build:
 # build it with the real getlantern/systray backend instead.
 htrcli-build-all:
 	cd $(HTRCLI_DIR) && \
-	GOOS=darwin  GOARCH=arm64 go build -o bin/htrcli-darwin-arm64   ./cmd/htrcli && \
-	GOOS=windows GOARCH=amd64 go build -o bin/htrcli-windows-amd64.exe ./cmd/htrcli
+	GOOS=darwin  GOARCH=arm64 go build $(VERSION_LDFLAGS) -o bin/htrcli-darwin-arm64   ./cmd/htrcli && \
+	GOOS=windows GOARCH=amd64 go build $(VERSION_LDFLAGS) -o bin/htrcli-windows-amd64.exe ./cmd/htrcli
 
 # Native Linux build (CGO + libappindicator dev headers required, e.g.
 # `apt-get install libayatana-appindicator3-dev`). Built for the host
 # architecture; pass GOARCH with a matching cross C toolchain for others.
 htrcli-build-linux:
-	cd $(HTRCLI_DIR) && go build -o bin/htrcli-linux-$$(go env GOARCH) ./cmd/htrcli
+	cd $(HTRCLI_DIR) && go build $(VERSION_LDFLAGS) -o bin/htrcli-linux-$$(go env GOARCH) ./cmd/htrcli
 
 htrcli-install:
-	cd $(HTRCLI_DIR) && go install ./cmd/htrcli
+	cd $(HTRCLI_DIR) && go install $(VERSION_LDFLAGS) ./cmd/htrcli
 
 htrcli-clean:
 	rm -rf $(HTRCLI_DIR)/bin

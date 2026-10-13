@@ -23,8 +23,8 @@ var (
 	jsonOutput    bool
 	tabTarget     string
 	transportFlag string
-	// browserFlag is the advisory --browser hint. Empty means no preference, so
-	// the daemon falls back to the earliest-connected relay.
+	// browserFlag is the --browser hint. Empty means no preference. Tab-less
+	// commands treat it as advisory; tab-routed commands require the tab to match.
 	browserFlag string
 	cdpFlag     bool
 	contextName string
@@ -36,9 +36,15 @@ var (
 	resolveContextFn = resolveContext
 )
 
+// Version is the htrcli build version. The Makefile and release build set it at
+// link time (-X github.com/u007/htrcli/internal/commands.Version=...); an
+// unversioned build reports "dev".
+var Version = "dev"
+
 var rootCmd = &cobra.Command{
-	Use:   "htrcli",
-	Short: "HTR NControl CLI - control browser tabs remotely",
+	Use:     "htrcli",
+	Version: Version,
+	Short:   "HTR NControl CLI - control browser tabs remotely",
 	Long: `htrcli is a CLI for controlling browser tabs via the HTR NControl
 remote control API. Requires the HTR NControl Chrome extension and
 server running.`,
@@ -60,6 +66,8 @@ server running.`,
 func init() {
 	rootRef = rootCmd
 	cobra.OnInitialize(initConfig)
+	// Bare version on stdout, so callers can compare it directly.
+	rootCmd.SetVersionTemplate("{{.Version}}\n")
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.htrcli/config.json)")
 	rootCmd.PersistentFlags().StringVar(&serverURL, "server", "", "server URL (overrides config)")
@@ -73,8 +81,8 @@ func init() {
 		"CSS selector of a same-origin <iframe> to run the command inside (--cdp only; selector verbs and fill-form)")
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 30000, "command timeout in ms")
 	rootCmd.PersistentFlags().StringVar(&browserFlag, "browser", "",
-		"advisory hint for tab-less commands: prefer this browser profile (chrome|firefox); "+
-			"falls back to the earliest connected browser if it is not connected")
+		"browser profile (chrome|firefox): tab-less commands prefer it and fall back to the earliest connected browser; "+
+			"with --tab the tab must belong to it")
 }
 
 // validateBrowserHint rejects an unrecognised --browser value. An empty value is
@@ -201,6 +209,7 @@ func initClient() {
 	}
 
 	client = api.NewClient(srv, tkn)
+	client.TabBrowser = browserFlag
 }
 
 // GetClient returns the initialized API client.

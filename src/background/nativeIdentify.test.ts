@@ -88,9 +88,15 @@ describe("native host identify", () => {
 		if (!currentPort) throw new Error("no native port was opened");
 		currentPort.emit({ type: "ping", id: "greeting-1" });
 
+		// The daemon reads the browser from `payload`, like every other native
+		// message (htrcli/internal/host/bridge.go). A top-level `browser` is
+		// silently dropped, which leaves the relay unidentified.
 		const sent = identifies();
 		expect(sent).toHaveLength(1);
-		expect(sent[0].browser).toBe(getBrowserType());
+		expect(sent[0]).toEqual({
+			type: "identify",
+			payload: { browser: getBrowserType() },
+		});
 	});
 
 	// confirmConnected is guarded by portConfirmed, but that flag is the thing
@@ -123,6 +129,6 @@ describe("native host identify", () => {
 
 		// The new port carries its own identify; the dead one keeps the old.
 		expect(identifies()).toHaveLength(1);
-		expect(identifies()[0].browser).toBe(getBrowserType());
+		expect(identifies()[0].payload).toEqual({ browser: getBrowserType() });
 	});
 });

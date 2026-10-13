@@ -21,6 +21,7 @@ git clone https://github.com/u007/htrncontrol.git
 cd htrncontrol/htrcli
 make build
 ./bin/htrcli --help
+./bin/htrcli --version   # bare version; `make build` stamps `git describe`
 ```
 
 ### Install globally
@@ -52,8 +53,8 @@ htrcli serve
 ```
 
 Chrome and Firefox may both be registered and connected at once — `htrcli tabs
-list` shows tabs from both, and `--tab <id>` routes to whichever browser owns
-that tab. Screenshots and large command results (e.g. `fetch` bodies) travel
+list` shows tabs from both, and `--tab <id>` routes to the browser that owns
+that tab, the earliest connected when both own it. `--browser` makes that strict. Screenshots and large command results (e.g. `fetch` bodies) travel
 over HTTP, so they are not limited by the 1 MB native-messaging frame size.
 
 ### Captured console output

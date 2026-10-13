@@ -32,6 +32,7 @@ import { addRulesFirefox, removeRulesFirefox } from "./networkMockFirefox";
 import type { NetworkMockRule } from "./networkMockMatch";
 import type { RecordingCommandDeps } from "./recordingCommands";
 import { handleRecordingCommand, isRecordingAction } from "./recordingCommands";
+import { closeTab, openTab } from "./tabActions";
 import { resolveAndSetFiles } from "./uploadFiles";
 
 const HOST_NAME = "com.htrcontrol.host";
@@ -285,7 +286,7 @@ function confirmConnected(): void {
 	// and because every reconnect creates a NEW daemon-side connection whose
 	// identity starts empty. confirmConnected is guarded by portConfirmed, which
 	// connect() resets per port, so this fires exactly once per connection.
-	sendToNative({ type: "identify", browser: getBrowserType() });
+	sendToNative({ type: "identify", payload: { browser: getBrowserType() } });
 
 	// Broadcast new status to all content scripts
 	broadcastStatus();
@@ -1206,6 +1207,38 @@ async function handleRecording(tabId: number, payload: Command): Promise<void> {
 	}
 }
 
+// Tab-less openTab / closeTab. The background worker opens and closes the tab
+// itself, so no connected page is needed; the shared logic is in tabActions.ts.
+async function handleTabLifecycle(payload: Command): Promise<void> {
+	try {
+		let data: { tabId?: number; browser: string };
+		if (payload.action === "openTab") {
+			const url = payload.options?.url;
+			if (typeof url !== "string" || url === "") {
+				throw new Error("openTab requires options.url");
+			}
+			const tabId = await openTab(url);
+			data = { tabId, browser: getBrowserType() };
+		} else {
+			const tabId = payload.options?.tabId;
+			if (typeof tabId !== "number" || tabId <= 0) {
+				throw new Error("closeTab requires a positive options.tabId");
+			}
+			await closeTab(tabId);
+			data = { browser: getBrowserType() };
+		}
+		sendToNative({
+			type: "command_result",
+			tabId: 0,
+			payload: { id: payload.id, success: true, data } as CommandResult,
+		});
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.warn(`[HTR NControl] ${payload.action} failed:`, message);
+		replyError(0, payload.id, message);
+	}
+}
+
 // ─── Navigation with load-wait ────────────────────────────────────
 // Navigation actions are handled here (not in the content script) because the
 // content script is destroyed by the navigation and can only reply before the
@@ -1672,6 +1705,16 @@ async function sendCommandToTab(
 		await handleDialogPolicy(tabId, payload);
 		return;
 	}
+	// Tab-less openTab / closeTab (htrcli `tabs new` / `tabs close`). Only the
+	// background route carries tabId 0; a tab-routed openTab still reaches the
+	// content script below.
+	if (
+		tabId === 0 &&
+		(payload.action === "openTab" || payload.action === "closeTab")
+	) {
+		await handleTabLifecycle(payload);
+		return;
+	}
 	if (isRecordingAction(payload.action)) {
 		await handleRecording(tabId, payload);
 		return;
@@ -1852,6 +1895,10 @@ export function registerTab(tabId: number, info: TabInfo): void {
 		tabId,
 		payload: info,
 	});
+}
+
+export function unregisterTab(tabId: number): void {
+	sendToNative({ type: "unregister", tabId });
 }
 
 // The implementation moved to ./browserType so recordingCommands.ts can use it

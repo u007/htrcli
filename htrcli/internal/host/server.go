@@ -116,14 +116,12 @@ func apiHandler(d *Daemon, port int, bearerToken string) http.Handler {
 		case tabGetRe.MatchString(path) && r.Method == "GET":
 			m := tabGetRe.FindStringSubmatch(path)
 			id := parseTabID(m[1])
-			tabs := d.Tabs()
-			for _, t := range tabs {
-				if t.ID == id {
-					apiOK(w, t)
-					return
-				}
+			t, ok := d.TabInfoFor(id, r.URL.Query().Get("browser"))
+			if !ok {
+				apiError(w, 404, "tab not found")
+				return
 			}
-			apiError(w, 404, "tab not found")
+			apiOK(w, t)
 
 		case path == "/api/command" && r.Method == "POST":
 			handleCommand(w, r, d, 0)
@@ -144,11 +142,14 @@ func apiHandler(d *Daemon, port int, bearerToken string) http.Handler {
 type commandRequest struct {
 	Command Command `json:"command"`
 	Timeout int     `json:"timeout"`
-	// Browser is an advisory hint naming the browser profile to prefer
-	// ("chrome" or "firefox"). Only meaningful on the tab-less background route,
-	// where there is no tab to route by. It is omitempty so the body of a
-	// tab-routed request is unchanged by its presence here.
+	// Browser names the browser ("chrome" or "firefox") a request is meant for.
+	// On a tab-routed request it is strict: the tab must belong to that browser.
+	// On the background route it is advisory (see Daemon.selectConn). It is
+	// omitempty so requests that do not name a browser are unchanged.
 	Browser string `json:"browser,omitempty"`
+	// BrowserStrict makes Browser a hard requirement with no fallback. Only the
+	// background route accepts it; see Daemon.EnqueueBrowserCommand.
+	BrowserStrict bool `json:"browserStrict,omitempty"`
 }
 
 func handleCommand(w http.ResponseWriter, r *http.Request, d *Daemon, tabID int) {
@@ -165,7 +166,15 @@ func handleCommand(w http.ResponseWriter, r *http.Request, d *Daemon, tabID int)
 		timeoutMs = 30000
 	}
 
+	if req.BrowserStrict {
+		apiError(w, 400, "browserStrict requires the background route (/api/background/command)")
+		return
+	}
 	if tabID == 0 {
+		if req.Browser != "" {
+			apiError(w, 400, "browser requires a tab-routed command (/api/tabs/<id>/command)")
+			return
+		}
 		id, ok := d.FirstTabID()
 		if !ok {
 			apiError(w, 404, "no tabs connected")
@@ -174,7 +183,7 @@ func handleCommand(w http.ResponseWriter, r *http.Request, d *Daemon, tabID int)
 		tabID = id
 	}
 
-	result, err := sendCommand(d, tabID, req.Command, timeoutMs)
+	result, err := sendCommand(d, tabID, req.Browser, req.Command, timeoutMs)
 	if err != nil {
 		apiError(w, 404, err.Error())
 		return
@@ -203,7 +212,17 @@ func handleBackgroundCommand(w http.ResponseWriter, r *http.Request, d *Daemon) 
 		timeoutMs = 30000
 	}
 
-	result, err := sendBackgroundCommand(d, req.Command, req.Browser, timeoutMs)
+	var result *CommandResult
+	var err error
+	if req.BrowserStrict {
+		if req.Browser == "" {
+			apiError(w, 400, "browserStrict requires browser")
+			return
+		}
+		result, err = sendBrowserCommand(d, req.Command, req.Browser, timeoutMs)
+	} else {
+		result, err = sendBackgroundCommand(d, req.Command, req.Browser, timeoutMs)
+	}
 	if err != nil {
 		apiError(w, 404, err.Error())
 		return
@@ -234,6 +253,7 @@ func handlePageGet(w http.ResponseWriter, r *http.Request, d *Daemon) {
 	result, err := sendCommand(
 		d,
 		tabID,
+		"",
 		Command{ID: generateID(), Action: "getPageInfo"},
 		5000,
 	)

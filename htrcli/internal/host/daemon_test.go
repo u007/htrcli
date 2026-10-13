@@ -41,7 +41,7 @@ func TestDaemonEnqueueAndResolve(t *testing.T) {
 	rc := noopConn(d)
 	d.RegisterTab(rc, 1, host.TabInfo{ID: 1, URL: "https://a.com", Title: "A", Active: true})
 
-	ch, err := d.EnqueueCommand(1, host.Command{ID: "cmd-1", Action: "navigate", Value: "https://x.com"})
+	ch, err := d.EnqueueCommand(1, "", host.Command{ID: "cmd-1", Action: "navigate", Value: "https://x.com"})
 	if err != nil {
 		t.Fatalf("EnqueueCommand: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestDaemonEnqueueAndResolve(t *testing.T) {
 
 func TestDaemonEnqueueTabNotFound(t *testing.T) {
 	d := host.NewDaemon()
-	_, err := d.EnqueueCommand(99, host.Command{ID: "cmd-x", Action: "navigate"})
+	_, err := d.EnqueueCommand(99, "", host.Command{ID: "cmd-x", Action: "navigate"})
 	if err == nil {
 		t.Error("expected error for missing tab, got nil")
 	}
@@ -94,7 +94,7 @@ func TestDaemonRoutesPerConnection(t *testing.T) {
 	d.RegisterTab(chrome, 1100638190, host.TabInfo{ID: 1100638190, URL: "https://maps.google.com"})
 	d.RegisterTab(firefox, 3, host.TabInfo{ID: 3, URL: "https://yahoo.com"})
 
-	if _, err := d.EnqueueCommand(3, host.Command{ID: "c1", Action: "reload"}); err != nil {
+	if _, err := d.EnqueueCommand(3, "", host.Command{ID: "c1", Action: "reload"}); err != nil {
 		t.Fatalf("EnqueueCommand(firefox tab): %v", err)
 	}
 	select {
@@ -114,8 +114,70 @@ func TestDaemonRoutesPerConnection(t *testing.T) {
 	if len(tabs) != 1 || tabs[0].ID != 1100638190 {
 		t.Fatalf("after firefox disconnect, want only chrome tab; got %+v", tabs)
 	}
-	if _, err := d.EnqueueCommand(1100638190, host.Command{ID: "c2", Action: "reload"}); err != nil {
+	if _, err := d.EnqueueCommand(1100638190, "", host.Command{ID: "c2", Action: "reload"}); err != nil {
 		t.Fatalf("chrome command after firefox disconnect: %v", err)
+	}
+}
+
+// TestDaemonRoutesSharedTabIDByBrowser covers a native tab ID that exists in
+// both browsers: the browser named on the request picks the owner, instead of
+// the first connection that happens to have the ID.
+func TestDaemonRoutesSharedTabIDByBrowser(t *testing.T) {
+	d := host.NewDaemon()
+
+	chromeGot := make(chan int, 1)
+	firefoxGot := make(chan int, 1)
+	chrome := d.AddConn(func(msg []byte) error {
+		var m host.NativeMessage
+		json.Unmarshal(msg, &m)
+		chromeGot <- m.TabID
+		return nil
+	})
+	firefox := d.AddConn(func(msg []byte) error {
+		var m host.NativeMessage
+		json.Unmarshal(msg, &m)
+		firefoxGot <- m.TabID
+		return nil
+	})
+	d.SetConnBrowser(chrome, "chrome")
+	d.SetConnBrowser(firefox, "firefox")
+	d.RegisterTab(chrome, 7, host.TabInfo{ID: 7, Browser: "chrome"})
+	d.RegisterTab(firefox, 7, host.TabInfo{ID: 7, Browser: "firefox"})
+
+	if _, err := d.EnqueueCommand(7, "firefox", host.Command{ID: "f1", Action: "reload"}); err != nil {
+		t.Fatalf("EnqueueCommand(firefox): %v", err)
+	}
+	select {
+	case <-firefoxGot:
+	case <-chromeGot:
+		t.Fatal("firefox-scoped command was delivered to chrome")
+	case <-time.After(time.Second):
+		t.Fatal("firefox connection never received the command")
+	}
+
+	if _, err := d.EnqueueCommand(7, "chrome", host.Command{ID: "c1", Action: "reload"}); err != nil {
+		t.Fatalf("EnqueueCommand(chrome): %v", err)
+	}
+	select {
+	case <-chromeGot:
+	case <-firefoxGot:
+		t.Fatal("chrome-scoped command was delivered to firefox")
+	case <-time.After(time.Second):
+		t.Fatal("chrome connection never received the command")
+	}
+
+	if _, err := d.EnqueueCommand(7, "", host.Command{ID: "a1", Action: "reload"}); err != nil {
+		t.Fatalf("EnqueueCommand(any browser): %v", err)
+	}
+	select {
+	case <-chromeGot:
+	case <-firefoxGot:
+	case <-time.After(time.Second):
+		t.Fatal("unscoped command was never delivered")
+	}
+
+	if _, err := d.EnqueueCommand(7, "safari", host.Command{ID: "s1", Action: "reload"}); err == nil {
+		t.Fatal("command scoped to a browser that is not connected must fail")
 	}
 }
 
@@ -218,7 +280,7 @@ func TestDaemonLastErrorFromFailedCommand(t *testing.T) {
 	rc := noopConn(d)
 	d.RegisterTab(rc, 1, host.TabInfo{ID: 1, URL: "https://a.com"})
 
-	if _, err := d.EnqueueCommand(1, host.Command{ID: "c1", Action: "click"}); err != nil {
+	if _, err := d.EnqueueCommand(1, "", host.Command{ID: "c1", Action: "click"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	// Deliver a failed result.
@@ -234,5 +296,59 @@ func TestDaemonLastErrorOnRelayDrop(t *testing.T) {
 	d.RemoveConn(rc)
 	if got := d.LastError(); got != "relay disconnected" {
 		t.Fatalf("LastError = %q, want %q", got, "relay disconnected")
+	}
+}
+
+// TestEnqueueCommandSharedTabIDPicksEarliestConnection pins that an unscoped
+// command for a tab ID that two browsers both own goes to the earliest-connected
+// relay on every call. Map iteration order used to decide this at random.
+func TestEnqueueCommandSharedTabIDPicksEarliestConnection(t *testing.T) {
+	const repeats = 200
+
+	d := host.NewDaemon()
+	chrome := newProbe(d)
+	firefox := newProbe(d)
+	d.SetConnBrowser(chrome.rc, "chrome")
+	d.SetConnBrowser(firefox.rc, "firefox")
+	d.RegisterTab(chrome.rc, 7, host.TabInfo{ID: 7, Browser: "chrome"})
+	d.RegisterTab(firefox.rc, 7, host.TabInfo{ID: 7, Browser: "firefox"})
+
+	for i := range repeats {
+		if _, err := d.EnqueueCommand(7, "", host.Command{ID: fmt.Sprintf("c%d", i), Action: "reload"}); err != nil {
+			t.Fatalf("iteration %d: %v", i, err)
+		}
+	}
+	if n := len(chrome.got()); n != repeats {
+		t.Errorf("earliest connection received %d of %d commands; want all of them", n, repeats)
+	}
+	if n := len(firefox.got()); n != 0 {
+		t.Errorf("later connection received %d commands; want none", n)
+	}
+}
+
+// TestTabInfoForSharedTabIDPicksEarliestConnection pins the same rule for the
+// tab lookup behind GET /api/tabs/<id>: unscoped resolves to the earliest
+// connection, and a browser filter selects that browser's tab.
+func TestTabInfoForSharedTabIDPicksEarliestConnection(t *testing.T) {
+	d := host.NewDaemon()
+	chrome := newProbe(d)
+	firefox := newProbe(d)
+	d.SetConnBrowser(chrome.rc, "chrome")
+	d.SetConnBrowser(firefox.rc, "firefox")
+	d.RegisterTab(chrome.rc, 7, host.TabInfo{ID: 7, Browser: "chrome", Title: "ch"})
+	d.RegisterTab(firefox.rc, 7, host.TabInfo{ID: 7, Browser: "firefox", Title: "ff"})
+
+	for i := range 200 {
+		info, ok := d.TabInfoFor(7, "")
+		if !ok || info.Title != "ch" {
+			t.Fatalf("iteration %d: TabInfoFor(7, any) = %+v, %v; want the earliest connection's chrome tab", i, info, ok)
+		}
+	}
+	info, ok := d.TabInfoFor(7, "firefox")
+	if !ok || info.Title != "ff" {
+		t.Fatalf("TabInfoFor(7, firefox) = %+v, %v; want the firefox tab", info, ok)
+	}
+	if _, ok := d.TabInfoFor(7, "safari"); ok {
+		t.Fatal("TabInfoFor for a browser that is not connected must report not found")
 	}
 }

@@ -30,7 +30,7 @@ htrcli/
 │   │   └── errors.go                  # API error types (NotFoundError, AuthError, etc.)
 	│   ├── commands/
 	│   │   ├── root.go                    # Root cobra command, global flags (--server, --token, --json)
-	│   │   ├── tabs.go                    # htr tabs list | tabs get <id>
+	│   │   ├── tabs.go                    # htr tabs list | get | new | close
 	│   │   ├── console.go                 # htr console read | watch (event buffer)
 	│   │   ├── navigate.go               # htr open <url> | back | forward | reload
 	│   │   ├── interact.go               # htr click | fill | type | hover | press | scroll | check | select
@@ -229,6 +229,9 @@ Global flags:
 - `--token <token>` — Bearer token (overrides config)
 - `--json` — Output raw JSON instead of formatted text
 - `--tab <id>` — Target specific tab (for commands that support it)
+- `--browser <chrome|firefox>` — Browser profile: an advisory hint for tab-less
+  commands (falls back to the earliest connected), strict for tab-routed
+  commands with `--tab`, where the tab must belong to that browser
 - `--timeout <ms>` — Command timeout in milliseconds (default: 30000)
 
 ### Health Check
@@ -251,20 +254,41 @@ Uptime: 1h 23m
 ### Tab Management
 
 ```bash
-htrcli tabs list
+htrcli tabs list                              # list all connected tabs (Chrome + Firefox)
+htrcli tabs list --browser firefox            # one browser only (strict filter, no fallback)
 htrcli tabs get <id>
+htrcli tabs get <id> --browser chrome         # when the same ID exists in both browsers
+htrcli tabs new <url> [--browser chrome]      # open a URL in a new (non-activated) tab; prints its ID
+htrcli tabs close <id> [--browser chrome]     # close a tab
 ```
 
 **`tabs list` output (human):**
 ```
-ID      Title                          URL                          Active
-123     GitHub - u007/htrcli           https://github.com/u007...  yes
-124     Google                         https://google.com           no
+ID      Browser  Title                          URL                          Active
+123     chrome   GitHub - u007/htrcli           https://github.com/u007...  yes
+124     firefox  Google                         https://google.com           no
 ```
+
+Each browser numbers its own tabs, so the same native tab ID can exist in Chrome
+and Firefox at once. `--tab <id>` without `--browser` resolves ownership to the
+earliest-connected browser that owns it; adding the global `--browser` makes it
+strict (the command fails if the tab is not in that browser). The `tabs`
+subcommands take their own `--browser` filter, which is strict by nature — it
+never widens to the other browser.
+
+`tabs new` / `tabs close` run in the extension's **background worker** over the
+tab-less `POST /api/background/command` route (see
+[Session Recording](#session-recording-recordings)), so neither needs another
+connected page. `tabs new` opens the tab unactivated, so a later command without
+`--tab` still targets the previously active tab, and it names the browser that
+answered (`Opened tab 7 (chrome)`; `--json` carries `browser`). With
+`--browser` the request is pinned to that browser and fails if it is not
+connected; without it, the earliest-connected browser answers.
 
 **Endpoints:**
 - `GET /api/tabs`
-- `GET /api/tabs/:id`
+- `GET /api/tabs/:id` (optional `?browser=`)
+- `POST /api/background/command` (`openTab` / `closeTab`, with `browserStrict` when `--browser` is given, otherwise an advisory hint)
 
 ---
 
@@ -497,6 +521,28 @@ An unrecognised `--browser` value is a **loud CLI error** rather than being
 silently ignored, precisely because the daemon's own handling is silent: a typo
 would otherwise look like a working first-wins call.
 
+#### `--browser` strict variants
+
+The hint above is the tab-less behaviour, and it is unchanged. Two later
+additions make `browser` a hard requirement instead, because in each case the
+answering browser *is* the answer:
+
+- **`browserStrict: true`** on `POST /api/background/command` — served by
+  `Daemon.EnqueueBrowserCommand`, which never falls back to another browser's
+  relay and errors with `no <browser> browser connected` when that browser has
+  no relay. Rejected with 400 on the tab-less route without a `browser`, and
+  rejected on the tab-routed route entirely.
+- **`browser` on `POST /api/tabs/<id>/command`** — a tab-routed request becomes
+  strict: the tab must belong to that browser, or the command fails with
+  `tab <id> not connected in <browser>`. Meanwhile `POST /api/command` (the
+  legacy nil-tab route) rejects a `browser` with 400 — a request that resolves
+  its tab by first-wins has nothing for it to match — and
+  `POST /api/background/command` rejects `browserStrict` without a `browser`
+  with 400.
+
+`tabs new` / `tabs close` use the strict background form, so a caller that asks
+to close a tab in Firefox never closes the same-numbered Chrome tab.
+
 #### Result shape
 
 `recordingList` returns `sessions`, `total`, `limit`, `offset` and `browser`
@@ -535,7 +581,7 @@ htrcli page --json | jq '.data.url'
 .PHONY: build run test clean
 
 build:
-	go build -o bin/htrcli ./cmd/htrcli
+	go build -ldflags "-X github.com/u007/htrcli/internal/commands.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev)" -o bin/htrcli ./cmd/htrcli
 
 run:
 	go run ./cmd/htrcli
@@ -547,8 +593,14 @@ clean:
 	rm -rf bin/
 
 install:
-	go install ./cmd/htrcli
+	go install -ldflags "-X github.com/u007/htrcli/internal/commands.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev)" ./cmd/htrcli
 ```
+
+`commands.Version` is stamped at link time by the root `Makefile`
+(`HTRCLI_VERSION ?= $(shell git describe --tags --always --dirty)`, exported
+through `VERSION_LDFLAGS`) so `htrcli-build`, `htrcli-build-all`,
+`htrcli-build-linux` and `htrcli-install` all agree. `htrcli --version` prints
+the bare value on stdout; an unversioned build reports `dev`.
 
 ---
 
@@ -560,6 +612,8 @@ builds:
     binary: htrcli
     env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/u007/htrcli/internal/commands.Version={{.Version}}
     goos:
       - linux
       - darwin

@@ -20,8 +20,12 @@ const MaxMessageSize = 64 << 20 // 64 MB
 
 // NativeMessage is the envelope for all messages between the relay and daemon.
 type NativeMessage struct {
-	Type      string          `json:"type"`
-	TabID     int             `json:"tabId,omitempty"`
+	Type string `json:"type"`
+	// TabID is never omitempty: a tab-less command is sent with tabId 0 and the
+	// extension keys on that exact value to route it to the background worker
+	// (see sendCommandToTab in src/background/nativeHost.ts). Omitting the key
+	// would hand the command to a content-script lookup that never answers.
+	TabID     int             `json:"tabId"`
 	CommandID string          `json:"commandId,omitempty"`
 	Payload   json.RawMessage `json:"payload,omitempty"`
 }

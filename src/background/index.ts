@@ -52,10 +52,12 @@ import {
 	startNativeHost,
 	stopDialogCapture,
 	stopNetworkCapture,
+	unregisterTab,
 } from "./nativeHost";
 import { startWebRequestCapture } from "./networkWebRequest";
 import { assertNotLiveSession } from "./recordingCommands";
 import { computeStitchPlan } from "./stitch";
+import { closeTab, openTab } from "./tabActions";
 
 /** Minimum ms between scroll-and-capture steps during full-page stitching. */
 const CAPTURE_THROTTLE_MS = 600;
@@ -1412,55 +1414,7 @@ chrome.runtime.onMessage.addListener(
 						sessionData?: string;
 					};
 					try {
-						const tab = await chrome.tabs.create({
-							url: msg.url,
-							active: false,
-						});
-						if (tab.id == null) {
-							throw new Error("Opened tab has no id");
-						}
-						const tabId = tab.id;
-						// Wait for initial load
-						await new Promise<void>((resolve) => {
-							const onUpdated = (
-								tid: number,
-								info: chrome.tabs.TabChangeInfo,
-							) => {
-								if (tid === tabId && info.status === "complete") {
-									chrome.tabs.onUpdated.removeListener(onUpdated);
-									resolve();
-								}
-							};
-							chrome.tabs.onUpdated.addListener(onUpdated);
-							// Fallback: 15s
-							setTimeout(resolve, 15000);
-						});
-						if (msg.sessionData) {
-							// Inject sessionStorage into the page (main world)
-							await chrome.scripting.executeScript({
-								target: { tabId },
-								world: "MAIN",
-								func: (data: string) => {
-									sessionStorage.setItem("eReceiptData", data);
-								},
-								args: [msg.sessionData],
-							});
-							// Navigate to the preview URL (re-run in case tab redirected)
-							await chrome.tabs.update(tabId, { url: msg.url });
-							await new Promise<void>((resolve) => {
-								const onUpdated = (
-									tid: number,
-									info: chrome.tabs.TabChangeInfo,
-								) => {
-									if (tid === tabId && info.status === "complete") {
-										chrome.tabs.onUpdated.removeListener(onUpdated);
-										resolve();
-									}
-								};
-								chrome.tabs.onUpdated.addListener(onUpdated);
-								setTimeout(resolve, 15000);
-							});
-						}
+						const tabId = await openTab(msg.url, msg.sessionData);
 						sendResponse({ ok: true, tabId });
 					} catch (error) {
 						console.error("[HTR NControl] OPEN_TAB error:", error);
@@ -1509,7 +1463,7 @@ chrome.runtime.onMessage.addListener(
 				case "CLOSE_TAB": {
 					const msg = message as { type: "CLOSE_TAB"; tabId: number };
 					try {
-						await chrome.tabs.remove(msg.tabId);
+						await closeTab(msg.tabId);
 						sendResponse({ ok: true });
 					} catch (error) {
 						console.error("[HTR NControl] CLOSE_TAB error:", error);
@@ -1673,6 +1627,7 @@ chrome.tabs.onCreated.addListener(async (tab) => {
 // Handle tab closure
 chrome.tabs.onRemoved.addListener((tabId) => {
 	readyTabs.delete(tabId);
+	unregisterTab(tabId);
 
 	// Tear down any active network capture window (Chrome CDP) on the closing tab.
 	void stopNetworkCapture(tabId);

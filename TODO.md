@@ -145,7 +145,17 @@ Still open:
   is deterministic and documented, but a caller that genuinely wants the *other*
   chrome profile has no way to ask. Needs a profile label from the extension
   (e.g. the profile directory) before it can be addressed.
-- **The `--browser` flag is persistent and therefore inert for tab-routed
-  commands.** `htrcli click --browser firefox` is accepted and ignored, because
-  a tab-routed command already knows its browser. Worth rejecting or scoping if
-  it starts confusing users.
+- **`--browser` without `--tab` is still ignored.** The root flag reaches a
+  tab-routed command only when `--tab` is given, and then it is strict. Without
+  `--tab` the command takes the earliest-connected tab, because the daemon
+  rejects a browser on the untargeted route. Worth rejecting or routing by
+  browser if it starts confusing users.
+- **`--browser` strictness covers commands, upload, and tab lookup only.**
+  `GET /api/page`, `GET /api/screenshot`, and the events endpoints still pick the
+  earliest-connected owner of a shared tab ID and ignore `--browser`. Thread the
+  hint through `GetPageInfo`, `GetScreenshotOpts`, and `GetEvents` the same way
+  `ExecuteCommand` does.
+- **Tab-routed `openTab` and `closeTab` still use the content-script path.**
+  `htrcli inspect` closes and opens tabs through a tab-routed command, so it
+  still needs a connected page in that browser. Only the tab-less route (htrcli
+  `tabs new` and `tabs close`) runs in the background worker.

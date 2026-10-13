@@ -3,6 +3,8 @@ builds:
     binary: htrcli
     env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/u007/htrcli/internal/commands.Version={{.Version}}
     goos:
       - linux
       - darwin

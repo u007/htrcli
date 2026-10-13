@@ -226,3 +226,39 @@ func TestEnqueueBackgroundCommandFailedWriteReportsError(t *testing.T) {
 		t.Errorf("error = %q, want it to mention the relay write", err)
 	}
 }
+
+// TestEnqueueBrowserCommandNeverFallsBack pins the strict contract: when the named
+// browser is not connected the command fails, and no other relay receives it.
+// A closeTab sent to the wrong browser would close an unrelated tab.
+func TestEnqueueBrowserCommandNeverFallsBack(t *testing.T) {
+	d := host.NewDaemon()
+	chrome := newProbe(d)
+	d.SetConnBrowser(chrome.rc, "chrome")
+
+	if _, err := d.EnqueueBrowserCommand(host.Command{Action: "closeTab"}, "firefox"); err == nil {
+		t.Fatal("strict firefox command must fail when only chrome is connected")
+	}
+	if n := len(chrome.got()); n != 0 {
+		t.Errorf("chrome received %d commands; a strict firefox command must reach no other relay", n)
+	}
+}
+
+// TestEnqueueBrowserCommandTargetsNamedBrowser covers the named browser being a
+// later connection than another browser: it must still receive the command.
+func TestEnqueueBrowserCommandTargetsNamedBrowser(t *testing.T) {
+	d := host.NewDaemon()
+	chrome := newProbe(d) // earliest, but not named
+	firefox := newProbe(d)
+	d.SetConnBrowser(chrome.rc, "chrome")
+	d.SetConnBrowser(firefox.rc, "firefox")
+
+	if _, err := d.EnqueueBrowserCommand(host.Command{Action: "closeTab"}, "firefox"); err != nil {
+		t.Fatalf("EnqueueBrowserCommand: %v", err)
+	}
+	if !firefox.winner("closeTab") {
+		t.Error("the named firefox connection did not receive the strict command")
+	}
+	if chrome.winner("closeTab") {
+		t.Error("a strict firefox command was delivered to chrome")
+	}
+}

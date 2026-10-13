@@ -12,7 +12,7 @@ func TestSendCommandTimeoutClearsPending(t *testing.T) {
 	rc := d.AddConn(func(_ []byte) error { return nil })
 	d.RegisterTab(rc, 1, TabInfo{ID: 1, URL: "https://example.com", Title: "Example", Active: true})
 
-	_, err := sendCommand(d, 1, Command{ID: "cmd-timeout", Action: "navigate", Value: "https://example.com/next"}, 10)
+	_, err := sendCommand(d, 1, "", Command{ID: "cmd-timeout", Action: "navigate", Value: "https://example.com/next"}, 10)
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
 	}
@@ -210,4 +210,21 @@ func TestIdentifyGarbageFrameDoesNotDropRelay(t *testing.T) {
 		}
 		return false
 	})
+}
+
+// A tab the extension reports as closed must leave the registry. Otherwise its
+// ID stays routable and every command to it fails with "Invalid tab ID".
+func TestUnregisterRemovesClosedTab(t *testing.T) {
+	d := NewDaemon()
+	conn := relayForTest(t, d)
+
+	info, err := json.Marshal(TabInfo{ID: 5, URL: "https://example.com", Browser: "firefox"})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	sendNative(t, conn, NativeMessage{Type: "register", TabID: 5, Payload: info})
+	waitFor(t, "tab 5 to register", func() bool { return len(d.Tabs()) == 1 })
+
+	sendNative(t, conn, NativeMessage{Type: "unregister", TabID: 5})
+	waitFor(t, "tab 5 to unregister", func() bool { return len(d.Tabs()) == 0 })
 }
