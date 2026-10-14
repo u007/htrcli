@@ -42,7 +42,8 @@ bun run preview  # Preview production build
 
 # Firefox (separate workspace under firefox/)
 bun run firefox:build      # tsc -p firefox/tsconfig.json + vite build
-bun run firefox:typecheck  # tsc -p firefox/tsconfig.json --noEmit
+bun run firefox:typecheck  # bun check . (lint + format)
+bun run typecheck          # bun check . (lint + format)
 bun run firefox:dev        # Vite dev server for Firefox
 bun run firefox:zip        # Build and create firefox/build/...xpi
 ```

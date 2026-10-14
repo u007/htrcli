@@ -17,7 +17,8 @@ bun run test:watch   # Watch mode
 
 # Extension (Firefox)
 bun run firefox:build      # tsc -p firefox/tsconfig.json + Vite build → firefox/build/
-bun run firefox:typecheck  # Type-check Firefox workspace only
+bun run firefox:typecheck  # bun check . (lint + format)
+bun run typecheck          # bun check . (lint + format)
 bun run firefox:zip        # Build + package as .xpi
 
 # htrcli (Go CLI in htrcli/) — native-messaging daemon (sole backend for remote control)

@@ -42,27 +42,12 @@ The same source code ships as a **Chrome extension** (Manifest V3) and a **Firef
    - Select the `build/` directory from this project
    - The extension icon should appear in your toolbar
 
-5. **(Optional) Enable remote control via htrcli**
-   First install the Go CLI:
+5. **(Optional) Enable remote control via htrcli** — see **[htrcli: Installation & Setup](#htrcli-installation-and-setup-remote-control)** below for full steps:
    ```bash
    make htrcli-install
-   ```
-   Then register the native messaging host and start the daemon:
-   ```bash
    htrcli install --browser chrome --extension-id <your-extension-id>
    htrcli serve
    ```
-
-### htrcli (Quick Install)
-
-```bash
-go install github.com/.../htrcli@latest  # or use make htrcli-install
-htrcli install --browser chrome --extension-id <extension-id>
-htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
-htrcli serve   # starts daemon on port 3845
-```
-
-See [htrcli/README.md](./htrcli/README.md) for full documentation.
 
 ### Firefox (Build & Load Locally)
 
@@ -108,6 +93,123 @@ See [`firefox/README.md`](./firefox/README.md) for the full architecture, the po
 4. **Export**
    - Choose from JSON, Markdown, or ZIP formats
    - Review and download your documentation
+
+
+## htrcli Installation and Setup (Remote Control)
+
+htrcli is the self-contained Go daemon that provides the remote-control backend on port 3845 and relays commands to the extension over Native Messaging. It is optional -- recordings and local use work without it.
+
+### Prerequisites
+
+- [Go](https://go.dev/) 1.22 or newer (`go version`)
+- (For session recordings via `htrcli record`) ffmpeg >= 6 on PATH -- `brew install ffmpeg`. Session recordings (`htrcli recordings ...`) need **no** ffmpeg and work on Chrome and Firefox.
+- The extension already built and loaded above, with its **Extension ID** (Chrome: open `chrome://extensions/` -> click **Details** on the HTR card -> copy the ID; Firefox add-ons use the fixed ID below).
+
+### 1. Build htrcli
+
+From the project root:
+
+```bash
+# Build only  -> htrcli/bin/htrcli
+make htrcli-build
+
+# Build + install globally (puts htrcli on PATH; recommended)
+make htrcli-install
+```
+
+Or build/install manually:
+```bash
+cd htrcli
+make build                  # -> htrcli/bin/htrcli
+./bin/htrcli --version      # bare version; `make build` stamps `git describe`
+
+# Global install (lands in $GOPATH/bin or $GOBIN -- ensure that dir is on PATH)
+go install github.com/u007/htrcli/cmd/htrcli@latest
+```
+
+### 2. Register the native-messaging host
+
+Chrome (use the Extension ID from `chrome://extensions/`):
+```bash
+htrcli install --browser chrome --extension-id <chrome-extension-id>
+```
+
+Firefox (uses the fixed add-on ID):
+```bash
+htrcli install --browser firefox --extension-id htrncontrol@mercstudio.com
+```
+
+This writes `com.htrcontrol.host.json` to the browser's Native Messaging host directory (macOS Chrome: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/`), pointing at your `htrcli` binary and allowing your extension to connect.
+
+Undo a registration with:
+```bash
+htrcli install --browser chrome --uninstall
+# or: htrcli install --browser firefox --uninstall
+```
+
+Then **reload the extension** (`chrome://extensions/` -> Reload, or `about:debugging` -> Reload) so it re-reads the host registration.
+
+### 3. Configure authentication (recommended)
+
+The daemon binds `:3845`. Set a bearer token before starting:
+```bash
+htrcli config set-token <your-secret-token>
+```
+Or override per-run:
+```bash
+HTR_BEARER_TOKEN="your-secret-token" htrcli serve
+```
+Other env vars:
+```bash
+# IP whitelist only (no bearer token):
+HTR_ENABLE_BEARER_TOKEN=false htrcli serve
+
+# Add IPs to the whitelist:
+HTR_ALLOWED_IPS="127.0.0.1,192.168.1.100" htrcli serve
+```
+
+### 4. Start the daemon
+
+```bash
+htrcli serve
+```
+
+This binds the HTTP API on `:3845` plus a Unix socket that the extension's Native Messaging relay connects to. **Only one process may hold `:3845`.**
+
+### 5. Configure the CLI client and verify
+
+(Only `set-server` / `set-token` here are needed if they were not already configured above — step 3 sets the token for the daemon.)
+
+```bash
+htrcli config set-server http://127.0.0.1:3845
+htrcli config set-token <same-token-as-above>   # skip if already set in step 3
+htrcli health
+```
+
+`htrcli health` should report a connected extension. If not:
+- Confirm the extension was reloaded after `htrcli install`.
+- Confirm `htrcli serve` is running and the extension shows as connected (look for `[NativeHost]` logs in the background console / side panel).
+
+Chrome and Firefox may both be registered and connected to the same daemon at once; `htrcli tabs list` shows tabs from both.
+
+### 6. Drive the browser
+
+```bash
+htrcli tabs list
+htrcli open https://example.com
+htrcli snapshot -i
+htrcli click @e3
+htrcli screenshot page.png
+```
+
+For captured page console output:
+```bash
+htrcli console read --since 0
+htrcli console watch --since 0 --timeout 10000
+```
+
+See [htrcli/README.md](./htrcli/README.md) and [GUIDE.md](./GUIDE.md) for the full reference (network capture, CDP mode, command list). For general remote-control architecture and API endpoints, see [Remote Control](#remote-control) below.
+
 
 ## Remote Control
 
