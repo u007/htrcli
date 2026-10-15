@@ -47,6 +47,10 @@
 	display: flex;
 	flex-direction: column;
 	gap: 3px;
+	/* Cap the list so many tabs scroll here instead of squeezing the
+	   Timeline and ExportPanel out of the fixed-height side panel. */
+	max-height: 40vh;
+	overflow-y: auto;
 }
 
 .ct-empty {

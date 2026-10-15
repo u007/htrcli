@@ -28,6 +28,7 @@
 
 ### Fixed
 
+- **Connected Tabs list is responsive in the side panel on Chrome and Firefox**: with many tabs the list grew to its full height and squeezed the Timeline out, pushing the Export panel past the bottom of the fixed-height panel. `.ct-list` now caps at `40vh` and scrolls internally, so the rest of the panel keeps its space (`src/sidepanel/components/ConnectedTabs.css`)
 - **`htrcli tabs new` / `tabs close` always timed out (30s) on both Chrome and Firefox**: the daemon wrote tab-less background commands with `TabID: 0`, but `NativeMessage.TabID` was `json:"tabId,omitempty"`, so the key was dropped from the wire. The extension routes tab-less `openTab`/`closeTab` with `tabId === 0`; it received `undefined`, fell through to the per-tab content-script path for a tab that does not exist, and never answered. Recording commands were unaffected because they do not check `tabId`. `tabId` is no longer omitempty, and the existing test now asserts the literal `"tabId":0` on the wire (`htrcli/internal/host/native.go`, `htrcli/internal/host/daemon_background_internal_test.go`)
 - **CDP selector drags always failed with `Unknown action: undefined`**: the page-side drag resolver called the DOM bundle with capitalised command keys (`{ID, Action, Target}`) while the bundle destructures `{action, target}`. Keys are lowercase now, and the batched-resolve test pins the call shape (`htrcli/internal/cdp/input.go`; `TestDragResolvesBothEndpointsInOnePass`, integration `TestCDPDrag`)
 - **CDP drag fit-scroll re-check inspected stale points**: after the one fit-scroll, the "still outside the viewport" check looked at the endpoints captured BEFORE the scroll, so every drag that needed a fit-scroll failed even when the scroll had worked. The check now re-derives the prepared points from the re-read positions (`htrcli/internal/cdp/input.go`)
@@ -88,6 +89,7 @@
 - **Trusted input coverage**: Chrome trusted-input dispatch expanded to `keydown`/`keyup`/`mousedown`/`mouseup`/`mousemove`/`drag` via CDP; Firefox synthetic path documented as pointer/mouse-only (no native HTML5 `DataTransfer` DnD) (`htrcli/README.md`, `skills/htrcli/SKILL.md`)
 - **Version bump** to `0.4.8` (`package.json`)
 - **Version bump** to `0.5.2` (`package.json`)
+- **Version bump** to `0.5.3` (`package.json`)
 
 ## 0.4.6 [2026.08.05]
 

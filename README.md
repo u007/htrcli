@@ -4,6 +4,8 @@ A browser extension that records user interactions (clicks, inputs, navigation) 
 
 The same source code ships as a **Chrome extension** (Manifest V3) and a **Firefox extension** (Manifest V3 with `sidebar_action`). See [`firefox/`](./firefox/) for the Firefox build.
 
+⭐ If HTR NControl helps you, please **star this repo** on GitHub and **rate the add-on** on [addons.mozilla.org](https://addons.mozilla.org/en-US/firefox/addon/htr-ncontrol/). It helps others find it.
+
 ## Features
 
 - 📸 **Screenshot Capture** - Automatically captures screenshots during interactions
@@ -17,37 +19,30 @@ The same source code ships as a **Chrome extension** (Manifest V3) and a **Firef
 
 ## Installation
 
-### Build & Load Locally
+### Firefox (addons.mozilla.org)
 
-1. **Clone the repository**
+1. Open [HTR NControl on addons.mozilla.org](https://addons.mozilla.org/en-US/firefox/addon/htr-ncontrol/).
+2. Click **Add to Firefox** and confirm the permission prompt.
+3. Click the toolbar icon to open the sidebar.
+
+### Chrome (Build & Load)
+
+1. **Clone, install, and build**
    ```bash
    git clone https://github.com/AStevensTaylor/htrncontrol.git
    cd htrncontrol
-   ```
-
-2. **Install dependencies**
-   ```bash
    bun install
+   bun run build
    ```
 
-3. **Start the dev server** (with hot reload)
-   ```bash
-   bun run dev
-   ```
+2. **Load it in Chrome**
+   - Open `chrome://extensions/` and turn on **Developer mode** (top right)
+   - Click **Load unpacked** and select the `build/` folder
+   - The extension icon appears in your toolbar
 
-4. **Load in Chrome**
-   - Open `chrome://extensions/`
-   - Enable **Developer mode** (toggle in top right)
-   - Click **Load unpacked**
-   - Select the `build/` directory from this project
-   - The extension icon should appear in your toolbar
+3. **After changing code**, run `bun run build` again and click the reload icon on the extension's card.
 
-5. **(Optional) Enable remote control via htrcli** — see **[htrcli: Installation & Setup](#htrcli-installation-and-setup-remote-control)** below for full steps:
-   ```bash
-   make htrcli-install
-   htrcli install --browser chrome --extension-id <your-extension-id>
-   htrcli serve
-   ```
+Remote control with htrcli is optional. See [htrcli: Installation & Setup](#htrcli-installation-and-setup-remote-control) below.
 
 ### Firefox (Build & Load Locally)
 
@@ -69,13 +64,6 @@ Firefox uses the same `bun` toolchain with a separate `firefox/` workspace that 
    This writes `firefox/htrncontrol-firefox.xpi`, ready for [addons.mozilla.org](https://addons.mozilla.org) upload.
 
 See [`firefox/README.md`](./firefox/README.md) for the full architecture, the polyfill strategy, and how the Chrome and Firefox builds share one source tree.
-
-### From Release
-
-1. Download the latest `.crx` file from [Releases](https://github.com/AStevensTaylor/htrncontrol/releases)
-2. Open `chrome://extensions/`
-3. Enable "Developer mode"
-4. Drag and drop the `.crx` file onto the extensions page
 
 ## Usage
 
