@@ -31,17 +31,22 @@ each probe costs a round trip.
 2. **Tab.** `--cdp` without `--tab` drives the **first page target**, which may be someone else's tab, and
    `open` replaces its page. If more than one tab exists, run `htrcli --cdp tabs list` once and pass
    `--tab <id>` on every command. Never navigate a tab you did not open or were not given.
-3. **Look once, then act.** One `htrcli --cdp snapshot` (or one `eval` that lists
+3. **Navigate by clicking, not by URL.** After entering the site, follow its links and buttons the way a user
+   would: `find` the link/button, `click` it, then verify the page. Do not `open` a URL you constructed or guessed
+   from the site's structure. Use `open` only for the entry URL you were given, or when no on-page path exists
+   (and say so). Clicking runs the site's own navigation (SPA routing, referrer, state set along the way); a typed
+   URL can 404 or skip steps the site expects.
+4. **Look once, then act.** One `htrcli --cdp snapshot` (or one `eval` that lists
    `tag/type/name/id/label/required` of every `input,select,textarea,button`) tells you the whole form. Do not
    re-inspect between fields unless the page changed.
-4. **Batch.** Do not issue one tool call per field. Put all steps for a form in **one bash script** (or use
+5. **Batch.** Do not issue one tool call per field. Put all steps for a form in **one bash script** (or use
    `fill-form`, below), finish with a single read-back, and fix only what the read-back shows wrong.
-5. **Scrolling is automatic.** An element that is rendered but below the fold is scrolled into view before
+6. **Scrolling is automatic.** An element that is rendered but below the fold is scrolled into view before
    `fill`/`click`/`check`/... act. "not visible" now means hidden/collapsed/zero-size (open its step, accordion or
    menu first), not "off screen". `scroll` itself is not available over `--cdp`.
-6. **Pick the right verb for the widget** (table below), and **verify**: read values back, submit **once**, then
+7. **Pick the right verb for the widget** (table below), and **verify**: read values back, submit **once**, then
    confirm from the outcome (confirmation text/URL, or `network wait`, see below).
-7. **Never** fill a field you were not given data for, solve a CAPTCHA, enter card details, or submit when told
+8. **Never** fill a field you were not given data for, solve a CAPTCHA, enter card details, or submit when told
    not to. Hidden/off-screen inputs (honeypots) stay empty.
 
 ### Over `--cdp`: what is and is not available
@@ -239,7 +244,7 @@ htrcli config set-chrome-path /path/to/chrome   # if not auto-detected
 ## The core loop
 
 ```bash
-htrcli open <url>              # 1. Navigate to a page (waits for page load)
+htrcli open <url>              # 1. Enter the site at the URL you were given (waits for page load)
 htrcli find "input[name=q]"    # 2. Locate the element you want to act on
 htrcli click "input[name=q]"   # 3. Act on it (auto-waits for actionability)
 htrcli find "input[name=q]"    # 4. Re-inspect after any page change
@@ -548,7 +553,7 @@ firefox`.
 ## Navigation
 
 ```bash
-htrcli open https://example.com          # navigate to URL
+htrcli open https://example.com          # entry point only; within the site, click links instead (quick rule 3)
 htrcli back [steps]                      # browser back — 1 step, or N steps (e.g. back 3)
 htrcli forward [steps]                   # browser forward — 1 step, or N steps
 htrcli reload                            # reload page
