@@ -33,6 +33,7 @@ let injected: DebuggerImpl | null = null;
 export function __setDebuggerImplForTests(impl: DebuggerImpl | null): void {
 	injected = impl;
 	refcounts.clear();
+	attaching.clear();
 	subscribers.clear();
 	sharedListenerAttached = false;
 }
@@ -43,6 +44,7 @@ function impl(): DebuggerImpl {
 }
 
 const refcounts = new Map<number, number>();
+const attaching = new Map<number, Promise<void>>();
 const subscribers = new Set<EventCb>();
 let sharedListenerAttached = false;
 
@@ -65,13 +67,43 @@ function ensureSharedListener(): void {
 // Attach the debugger to a tab, refcounted: the real attach happens only on
 // the first holder. Throws verbatim if the real attach fails (DevTools open /
 // another client attached) rather than silently continuing.
+//
+// Two concurrent callers must not both attempt a real attach: the loser gets
+// "Another debugger is already attached", and its caller's compensating
+// detachShared would then release the WINNER's hold and kill a live debugger.
+// The hold is therefore reserved synchronously and concurrent callers share
+// one in-flight promise. A failed attach rolls the reservation back, so a
+// caller that detaches in its catch block is a no-op rather than a release of
+// somebody else's refcount.
 export async function attachShared(tabId: number): Promise<void> {
-	const current = refcounts.get(tabId) ?? 0;
-	if (current === 0) {
-		ensureSharedListener();
-		await impl().attach({ tabId }, "1.3");
+	const pending = attaching.get(tabId);
+	if (pending) {
+		await pending;
+		refcounts.set(tabId, (refcounts.get(tabId) ?? 0) + 1);
+		return;
 	}
-	refcounts.set(tabId, current + 1);
+	const current = refcounts.get(tabId) ?? 0;
+	if (current > 0) {
+		refcounts.set(tabId, current + 1);
+		return;
+	}
+	// Reserve before awaiting so a concurrent caller sees the hold.
+	refcounts.set(tabId, 1);
+	const inflight = (async () => {
+		ensureSharedListener();
+		try {
+			await impl().attach({ tabId }, "1.3");
+		} catch (err) {
+			refcounts.delete(tabId);
+			throw err;
+		}
+	})();
+	attaching.set(tabId, inflight);
+	try {
+		await inflight;
+	} finally {
+		attaching.delete(tabId);
+	}
 }
 
 // Release one hold on a tab's attach; the real detach happens only when the

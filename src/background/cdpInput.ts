@@ -19,6 +19,7 @@
 
 import type { Command, CommandResult } from "../types/commands";
 import { resolveKey } from "../utils/keyMap";
+import { attachShared, detachShared } from "./debuggerManager";
 
 /** Actions dispatched as trusted CDP input on Chrome. */
 export const CDP_INPUT_ACTIONS = new Set<Command["action"]>([
@@ -121,7 +122,7 @@ async function runWithDebugger(
 	}
 	const target = { tabId };
 	try {
-		await chrome.debugger.attach(target, "1.3");
+		await attachShared(target.tabId);
 	} catch (err) {
 		throw new Error(
 			`Failed to attach debugger for trusted input (is DevTools open on this tab, or another debugger client attached?): ${
@@ -132,7 +133,8 @@ async function runWithDebugger(
 	try {
 		await fn(defaultSend(tabId));
 	} finally {
-		await chrome.debugger.detach(target);
+		// detachShared already catches and logs a failed detach.
+		await detachShared(target.tabId);
 	}
 }
 

@@ -182,7 +182,7 @@
 			if (sv)
 				return {
 					text: this.text(sv),
-					from: this.describe(sv) + " in " + this.describe(scope),
+					from: `${this.describe(sv)} in ${this.describe(scope)}`,
 				};
 			const mv = Array.from(
 				scope.querySelectorAll(
@@ -192,18 +192,18 @@
 			if (mv.length)
 				return {
 					text: mv.map((m) => this.text(m)).join(", "),
-					from: "multi-value labels in " + this.describe(scope),
+					from: `multi-value labels in ${this.describe(scope)}`,
 				};
 			return {
 				text: "",
-				from: "no selected-value element in " + this.describe(scope),
+				from: `no selected-value element in ${this.describe(scope)}`,
 			};
 		}
 		if (input.tagName === "INPUT" && input.value)
-			return { text: input.value, from: "value of " + this.describe(input) };
+			return { text: input.value, from: `value of ${this.describe(input)}` };
 		return {
 			text: input.getAttribute("aria-valuetext") || "",
-			from: "aria-valuetext of " + this.describe(input),
+			from: `aria-valuetext of ${this.describe(input)}`,
 		};
 	},
 

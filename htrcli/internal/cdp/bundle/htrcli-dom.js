@@ -622,6 +622,304 @@
       evaluate();
     });
   }
+  const DEFAULT_MAX_STEPS = 200;
+  const DEFAULT_STEP_DELAY_MS = 120;
+  function isScrollable(el) {
+    const anyEl = el;
+    if (typeof anyEl.scrollHeight !== "number") return false;
+    if (anyEl.scrollHeight <= anyEl.clientHeight) return false;
+    const style = window.getComputedStyle(anyEl);
+    const overflowY = style.overflowY;
+    return overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay";
+  }
+  const MAX_ANCESTOR_WALK = 13;
+  function findScrollContainer(first) {
+    if (first) {
+      let node = first;
+      for (let i = 0; i < MAX_ANCESTOR_WALK && node; i++) {
+        if (isScrollable(node)) return node;
+        node = node.parentElement;
+      }
+    }
+    const doc = document.scrollingElement ?? document.documentElement;
+    if (doc && doc.scrollHeight > doc.clientHeight) return doc;
+    return null;
+  }
+  function elementKey(el) {
+    var _a, _b, _c;
+    const anyEl = el;
+    const keyAttr = ((_a = anyEl.getAttribute) == null ? void 0 : _a.call(anyEl, "data-item-id")) ?? ((_b = anyEl.getAttribute) == null ? void 0 : _b.call(anyEl, "data-msg-id")) ?? ((_c = anyEl.getAttribute) == null ? void 0 : _c.call(anyEl, "data-id")) ?? "";
+    if (keyAttr) return { key: `k:${keyAttr}`, strategy: "key" };
+    const text = (el.textContent ?? "").trim().slice(0, 120);
+    if (text) return { key: `t:${text}`, strategy: "text" };
+    return { key: null, strategy: "index" };
+  }
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  async function collectAll(target, options = {}) {
+    const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS;
+    const stepDelayMs = options.stepDelayMs ?? DEFAULT_STEP_DELAY_MS;
+    const maxItems = options.maxItems ?? 0;
+    const onRow = options.onRow;
+    const seen = /* @__PURE__ */ new Map();
+    const nodes = [];
+    const nodeIds = /* @__PURE__ */ new WeakMap();
+    let nodeCount = 0;
+    const nodeKey = (el) => {
+      const existing = nodeIds.get(el);
+      if (existing !== void 0) return existing;
+      nodeCount++;
+      const created = `n:${nodeCount}`;
+      nodeIds.set(el, created);
+      return created;
+    };
+    let truncatedBy = null;
+    let steps = 0;
+    let scrolled = false;
+    let keyStrategy = "key";
+    const harvest = () => {
+      const elements2 = findAllElements(target);
+      for (const el of elements2) {
+        if (maxItems > 0 && seen.size >= maxItems) {
+          truncatedBy = "maxItems";
+          break;
+        }
+        const identity = elementKey(el);
+        const key = identity.key === null ? nodeKey(el) : identity.key;
+        if (identity.strategy === "index") {
+          keyStrategy = "index";
+        } else if (identity.strategy === "text" && keyStrategy === "key") {
+          keyStrategy = "text";
+        }
+        if (seen.has(key)) continue;
+        const info = getElementInfo(el);
+        onRow == null ? void 0 : onRow(el, info);
+        seen.set(key, info);
+        nodes.push(el);
+      }
+      return elements2.length;
+    };
+    harvest();
+    const container = findScrollContainer(findAllElements(target)[0]);
+    if (!container) {
+      return {
+        elements: [...seen.values()],
+        nodes,
+        steps: 0,
+        truncated: false,
+        truncatedBy: null,
+        scrolled: false,
+        keyStrategy
+      };
+    }
+    const anyContainer = container;
+    let previousScrollTop = anyContainer.scrollTop;
+    let previousHeight = anyContainer.scrollHeight;
+    let unchanged = 0;
+    const originalScrollTop = previousScrollTop;
+    try {
+      for (; steps < maxSteps; steps++) {
+        if (maxItems > 0 && seen.size >= maxItems) {
+          truncatedBy = "maxItems";
+          break;
+        }
+        const before = seen.size;
+        anyContainer.scrollTop = anyContainer.scrollTop + anyContainer.clientHeight;
+        await sleep(stepDelayMs);
+        harvest();
+        const currentScrollTop = anyContainer.scrollTop;
+        const currentHeight = anyContainer.scrollHeight;
+        scrolled = true;
+        if (seen.size === before && currentScrollTop === previousScrollTop && currentHeight === previousHeight) {
+          unchanged++;
+          if (unchanged >= 2) break;
+        } else {
+          unchanged = 0;
+        }
+        previousScrollTop = currentScrollTop;
+        previousHeight = currentHeight;
+      }
+    } finally {
+      if (!onRow) anyContainer.scrollTop = originalScrollTop;
+    }
+    if (truncatedBy === null && steps >= maxSteps && unchanged === 0) {
+      truncatedBy = "maxSteps";
+    }
+    const elements = [...seen.values()];
+    return {
+      elements,
+      nodes,
+      steps,
+      truncated: truncatedBy !== null,
+      truncatedBy,
+      scrolled,
+      keyStrategy
+    };
+  }
+  function textOf(el) {
+    if (!el) return "";
+    return (el.textContent ?? "").trim();
+  }
+  function firstTable(root) {
+    if (root instanceof HTMLTableElement) return root;
+    const found = root.querySelector("table");
+    return found instanceof HTMLTableElement ? found : null;
+  }
+  function extractTable(root) {
+    const table = firstTable(root);
+    if (!table) {
+      return { columns: [], rows: [], rowCount: 0 };
+    }
+    let headerCells = [];
+    let headerRow = null;
+    const thead = table.querySelector("thead");
+    if (thead) {
+      const tr = thead.querySelector("tr");
+      if (tr) {
+        headerCells = Array.from(tr.querySelectorAll("th, td"));
+        headerRow = tr;
+      }
+    }
+    if (headerCells.length === 0) {
+      const firstTr = table.querySelector("tr");
+      if (firstTr) {
+        headerCells = Array.from(firstTr.querySelectorAll("th, td"));
+        headerRow = firstTr;
+      }
+    }
+    const seenNames = /* @__PURE__ */ new Map();
+    const columns = headerCells.map((c, i) => {
+      const base = textOf(c) || `col${i + 1}`;
+      const seen = seenNames.get(base) ?? 0;
+      seenNames.set(base, seen + 1);
+      return seen === 0 ? base : `${base}_${seen + 1}`;
+    });
+    const bodyRows = [];
+    const tbody = table.querySelector("tbody");
+    if (tbody) {
+      for (const tr of Array.from(tbody.querySelectorAll("tr"))) {
+        if (tr === headerRow) continue;
+        bodyRows.push(tr);
+      }
+    } else {
+      for (const tr of Array.from(table.querySelectorAll("tr"))) {
+        if (tr === headerRow) continue;
+        if (thead == null ? void 0 : thead.contains(tr)) continue;
+        bodyRows.push(tr);
+      }
+    }
+    const rows = [];
+    for (const tr of bodyRows) {
+      const cells = Array.from(tr.querySelectorAll("td, th"));
+      if (cells.length === 0) continue;
+      const row = {};
+      cells.forEach((cell, i) => {
+        const col = columns[i] ?? `col${i + 1}`;
+        row[col] = textOf(cell);
+      });
+      rows.push(row);
+    }
+    return { columns, rows, rowCount: rows.length };
+  }
+  const CONTAINER_TAGS = /* @__PURE__ */ new Set([
+    "ul",
+    "ol",
+    "table",
+    "tbody",
+    "thead",
+    "dl",
+    "select"
+  ]);
+  function isContainerElement(el) {
+    return CONTAINER_TAGS.has(el.tagName.toLowerCase());
+  }
+  function extractListFrom(roots, fields, options) {
+    let items = [];
+    if (options == null ? void 0 : options.container) {
+      items = roots.flatMap((root) => listItemsOf(root));
+    } else if (roots.length > 1) {
+      items = roots;
+    } else if (roots.length === 1) {
+      items = isContainerElement(roots[0]) ? listItemsOf(roots[0]) : [roots[0]];
+    }
+    const out = [];
+    for (const item of items) {
+      if (fields && Object.keys(fields).length > 0) {
+        const row = {};
+        for (const [name, sel] of Object.entries(fields)) {
+          row[name] = readFieldValue(item, sel, name);
+        }
+        out.push(row);
+      } else {
+        out.push({ text: textOf(item) });
+      }
+    }
+    return { items: out, count: out.length };
+  }
+  function readFieldValue(item, sel, name) {
+    try {
+      return readFieldValueUnsafe(item, sel);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `invalid selector for field "${name}": ${sel} (${detail})`,
+        {
+          cause: err
+        }
+      );
+    }
+  }
+  function readFieldValueUnsafe(item, sel) {
+    const attr = parseAttributeField(sel);
+    if (attr) {
+      const el = findFieldElement(item, attr.selector);
+      if (!el) return "";
+      return el.getAttribute(attr.attribute) ?? "";
+    }
+    const pureAttr = parsePureAttributeSelector(sel);
+    if (pureAttr) {
+      const el = findFieldElement(item, "");
+      const found2 = el ? el.querySelector(sel) : null;
+      const target = found2 ?? ((el == null ? void 0 : el.matches(sel)) ? el : null);
+      return target ? target.getAttribute(pureAttr) ?? "" : "";
+    }
+    const found = item.querySelector(sel);
+    if (found) return textOf(found);
+    if (item.matches(sel)) return textOf(item);
+    return "";
+  }
+  function parseAttributeField(sel) {
+    if (!sel.startsWith("@")) return null;
+    const rest = sel.slice(1);
+    const at = rest.lastIndexOf("@");
+    if (at === -1) {
+      return { selector: "", attribute: rest };
+    }
+    return { selector: rest.slice(0, at), attribute: rest.slice(at + 1) };
+  }
+  function parsePureAttributeSelector(sel) {
+    const m = /^\[([A-Za-z0-9_:.-]+)\]$/.exec(sel);
+    return m ? m[1] : null;
+  }
+  function findFieldElement(item, selector) {
+    if (selector === "") return item;
+    return item.querySelector(selector);
+  }
+  function listItemsOf(root) {
+    if (root instanceof HTMLUListElement || root instanceof HTMLOListElement) {
+      const lis2 = Array.from(root.children).filter(
+        (c) => c instanceof HTMLLIElement
+      );
+      if (lis2.length > 0) return lis2;
+      return Array.from(root.children);
+    }
+    const lis = root.querySelectorAll(":scope > li");
+    if (lis.length > 0) {
+      return Array.from(lis);
+    }
+    return Array.from(root.children);
+  }
   const PRESENTATION_ROLES = /* @__PURE__ */ new Set(["none", "presentation"]);
   const HEADING_TAGS = /* @__PURE__ */ new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
   const LANDMARK_TAGS = /* @__PURE__ */ new Map([
@@ -963,6 +1261,12 @@
         return handleFind(requireTarget(target, action), options);
       case "findAll":
         return handleFindAll(requireTarget(target, action), options);
+      case "collectAll":
+        return handleCollectAll(requireTarget(target, action), options);
+      case "extractTable":
+        return handleExtractTable(requireTarget(target, action));
+      case "extractList":
+        return handleExtractList(requireTarget(target, action), options);
       case "wait":
         return handleWait(
           requireTarget(target, action),
@@ -1198,6 +1502,48 @@
       return info;
     });
   }
+  async function handleCollectAll(target, options) {
+    const result = await collectAll(target, {
+      maxSteps: typeof (options == null ? void 0 : options.maxSteps) === "number" ? options.maxSteps : void 0,
+      stepDelayMs: typeof (options == null ? void 0 : options.stepDelayMs) === "number" ? options.stepDelayMs : void 0,
+      maxItems: typeof (options == null ? void 0 : options.maxItems) === "number" ? options.maxItems : void 0,
+      // Mint each ref at HARVEST time, while the row's node is still live.
+      // Minting after the loop gave every row a detached node, or (with a
+      // recycling virtualizer) the same node for several different rows.
+      onRow: (options == null ? void 0 : options.assignRef) ? (el, info) => {
+        info.ref = assignRef(el);
+      } : void 0
+    });
+    return {
+      elements: result.elements,
+      steps: result.steps,
+      truncated: result.truncated,
+      truncatedBy: result.truncatedBy,
+      scrolled: result.scrolled,
+      keyStrategy: result.keyStrategy
+    };
+  }
+  async function handleExtractTable(target) {
+    const root = findAllElements(target)[0];
+    if (!root) {
+      throw new Error(
+        `Element not found: ${target.selector ?? target.xpath ?? ""}`
+      );
+    }
+    return extractTable(root);
+  }
+  async function handleExtractList(target, options) {
+    const roots = findAllElements(target);
+    if (roots.length === 0) {
+      throw new Error(
+        `Element not found: ${target.selector ?? target.xpath ?? ""}`
+      );
+    }
+    const fields = (options == null ? void 0 : options.fields) && typeof options.fields === "object" ? options.fields : void 0;
+    return extractListFrom(roots, fields, {
+      container: (options == null ? void 0 : options.container) === true
+    });
+  }
   async function handleWait(target, timeout) {
     const timeoutMs = timeout ?? 5e3;
     const element = await waitForElement(target, timeoutMs, {
@@ -1430,8 +1776,21 @@
       element.dispatchEvent(new Event("input", { bubbles: true }));
       element.dispatchEvent(new Event("change", { bubbles: true }));
       element.dispatchEvent(new Event("blur", { bubbles: true }));
+    } else if (element instanceof HTMLElement && element.isContentEditable) {
+      element.focus();
+      selectElementContents(element);
+      if (value === "") {
+        document.execCommand("delete");
+      } else {
+        document.execCommand("insertText", false, value);
+      }
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      element.dispatchEvent(new Event("blur", { bubbles: true }));
     } else {
-      throw new Error("Element is not a form input");
+      throw new Error(
+        "Element is not a form input and is not contenteditable — use `type` for a rich-text surface"
+      );
     }
   }
   async function handleType(target, value, timeoutMs = 5e3) {
@@ -1483,9 +1842,33 @@
       }
       element.dispatchEvent(new Event("change", { bubbles: true }));
       element.dispatchEvent(new Event("blur", { bubbles: true }));
+    } else if (element instanceof HTMLElement && element.isContentEditable) {
+      element.focus();
+      placeCaretAtEnd(element);
+      document.execCommand("insertText", false, value);
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      element.dispatchEvent(new Event("blur", { bubbles: true }));
     } else {
       throw new Error("Element is not a text input");
     }
+  }
+  function placeCaretAtEnd(element) {
+    const selection = document.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+  function selectElementContents(element) {
+    const selection = document.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    selection.removeAllRanges();
+    selection.addRange(range);
   }
   async function handleClear(target, timeoutMs = 5e3) {
     const element = await waitForScrollableActionableElement(target, {
@@ -1542,9 +1925,35 @@
         element.checked = checked;
       }
       element.dispatchEvent(new Event("change", { bubbles: true }));
-    } else {
-      throw new Error("Element is not a checkbox/radio input");
+      return;
     }
+    if (isAriaCheckbox(element)) {
+      await setAriaCheckbox(element, checked);
+      return;
+    }
+    throw new Error("Element is not a checkbox/radio input");
+  }
+  function isAriaCheckbox(element) {
+    var _a;
+    return ((_a = element.getAttribute("role")) == null ? void 0 : _a.toLowerCase()) === "checkbox" && element instanceof HTMLElement;
+  }
+  async function setAriaCheckbox(element, checked) {
+    const target = checked ? "true" : "false";
+    const readState = () => element.getAttribute("aria-checked") ?? "false";
+    if (readState() === target) return;
+    const maxClicks = 2;
+    for (let attempt = 0; attempt < maxClicks; attempt++) {
+      element.focus();
+      element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 0));
+      if (readState() === target) {
+        element.dispatchEvent(new Event("change", { bubbles: true }));
+        return;
+      }
+    }
+    throw new Error(
+      `ARIA checkbox did not reach aria-checked="${target}" after ${maxClicks} clicks (still "${readState()}")`
+    );
   }
   async function handlePressKey(target, key, timeoutMs = 5e3) {
     const element = target ? await waitForActionableElement(target, {
@@ -1962,6 +2371,7 @@
     });
     element.scrollIntoView({ behavior: "instant", block: "center" });
     element.focus();
+    if (element.isContentEditable) placeCaretAtEnd(element);
     return { focused: document.activeElement === element };
   }
   async function handleSelectText(target, timeoutMs = 5e3) {

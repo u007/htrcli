@@ -28,9 +28,19 @@ const (
 // formKitSpec installs formkit.js once per realm as window.__htrcliFormKit;
 // callKit then invokes methods by name instead of re-shipping the source on
 // every call (pick polls every 100 ms, fill-form calls it per field).
+//
+// The source is wrapped in parentheses, so its trailing semicolon has to go:
+// "(...)" followed by ";" is a syntax error, and the realm would reject the
+// whole install with "Unexpected token ';'".
 var formKitSpec = pageBundle{name: "form kit", install: func() string {
-	return "window.__htrcliFormKit = (\n" + formKit + "\n)"
+	return "window.__htrcliFormKit = (\n" + trimTrailingSemicolon(formKit) + "\n)"
 }}
+
+// trimTrailingSemicolon removes the trailing semicolon (and the whitespace
+// after it) from a JavaScript expression.
+func trimTrailingSemicolon(src string) string {
+	return strings.TrimRight(strings.TrimSpace(src), ";")
+}
 
 const callKitFn = `(m, a) => typeof window.__htrcliFormKit === "object" ? window.__htrcliFormKit[m](...a) : {__htrcliNeedBundle: true}`
 

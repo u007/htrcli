@@ -1,4 +1,4 @@
-.PHONY: build install serve close \
+.PHONY: build install serve close bench-smoke bench-office bench-tasks \
 		htrcli-build htrcli-build-all htrcli-build-linux htrcli-install htrcli-clean \
 		ext-build ext-dev ext-zip firefox-build firefox-install firefox-zip
 
@@ -46,6 +46,50 @@ htrcli-clean:
 # Run the gated CDP end-to-end integration test (requires a real Chrome).
 htrcli-test-integration:
 	cd $(HTRCLI_DIR) && go test -tags integration ./internal/cdp/ -run TestCDPEndToEnd -v
+
+# Run the offline benchmark smoke scenario (requires a real Chrome).
+#
+# The scenario drives the local fixture page over the CDP transport, so it
+# needs no authenticated session. The report is written under
+# docs/benchmarks/results/.
+bench-smoke: htrcli-build
+	cd $(HTRCLI_DIR) && BENCH_FIXTURE="$(CURDIR)/docs/benchmarks/fixtures/smoke.html" \
+		./bin/htrcli bench run \
+		../docs/benchmarks/scenarios/s01-offline-smoke.json \
+		--transport cdp \
+		--out ../docs/benchmarks/results/smoke-$$$$.json
+
+# Run the office-app fixture scenarios (requires a real Chrome).
+#
+# These drive the LOCAL fixture pages in docs/benchmarks/fixtures/ — no
+# authenticated session and no real Google data is touched.
+bench-office: htrcli-build
+	cd $(HTRCLI_DIR) && \
+		BENCH_FIXTURE_GMAIL="$(CURDIR)/docs/benchmarks/fixtures/gmail.html" \
+		BENCH_FIXTURE_CALENDAR="$(CURDIR)/docs/benchmarks/fixtures/calendar.html" \
+		BENCH_FIXTURE_DOCS="$(CURDIR)/docs/benchmarks/fixtures/docs.html" \
+		BENCH_FIXTURE_SHEETS="$(CURDIR)/docs/benchmarks/fixtures/sheets.html" \
+		./bin/htrcli bench run \
+		../docs/benchmarks/scenarios/s02-gmail-fixture.json \
+		--transport cdp \
+		--out ../docs/benchmarks/results/office-gmail-$$$$.json
+	cd $(HTRCLI_DIR) && \
+		BENCH_FIXTURE_CALENDAR="$(CURDIR)/docs/benchmarks/fixtures/calendar.html" \
+		BENCH_FIXTURE_DOCS="$(CURDIR)/docs/benchmarks/fixtures/docs.html" \
+		BENCH_FIXTURE_SHEETS="$(CURDIR)/docs/benchmarks/fixtures/sheets.html" \
+		./bin/htrcli bench run \
+		../docs/benchmarks/scenarios/s03-office-fixtures.json \
+		--transport cdp \
+		--out ../docs/benchmarks/results/office-apps-$$$$.json
+
+# Run the tasks/reminder fixture scenarios (requires a real Chrome).
+bench-tasks: htrcli-build
+	cd $(HTRCLI_DIR) && \
+		BENCH_FIXTURE_TASKS="$(CURDIR)/docs/benchmarks/fixtures/tasks.html" \
+		./bin/htrcli bench run \
+		../docs/benchmarks/scenarios/s04-tasks-fixture.json \
+		--transport cdp \
+		--out ../docs/benchmarks/results/tasks-$$$$.json
 
 # ── Extension ──────────────────────────────────────────────────────────
 

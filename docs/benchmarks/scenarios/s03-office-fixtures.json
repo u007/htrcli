@@ -1,0 +1,119 @@
+{
+	"scenarios": [
+		{
+			"id": "S04",
+			"ref": "B03",
+			"app": "Calendar-like fixture (local)",
+			"goal": "Create an event: fill the title, type the date/time, pick a guest from the combobox, read everything back.",
+			"steps": [
+				{
+					"note": "open the calendar fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_CALENDAR}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the form",
+					"argv": ["wait", "--selector", "#title", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "fill the title",
+					"argv": ["fill", "#title", "Team sync"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "type the date (a datepicker must be typed, not filled)",
+					"argv": ["type", "#date", "10/22/2026"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "read the date back",
+					"argv": ["value", "#date"],
+					"expect": { "exit": 0, "stdoutContains": "10/22/2026" }
+				},
+				{
+					"note": "pick the guest from the combobox",
+					"argv": ["pick", "#guest-input", "Dana Example"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "read the guest back",
+					"argv": ["value", "#guest-input"],
+					"expect": { "exit": 0, "stdoutContains": "Dana Example" }
+				}
+			]
+		},
+		{
+			"id": "S05",
+			"ref": "B05",
+			"app": "Docs-like fixture (local)",
+			"goal": "Edit a document: type into the contenteditable surface without destroying the existing content.",
+			"steps": [
+				{
+					"note": "open the docs fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_DOCS}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the editing surface",
+					"argv": ["wait", "--selector", "#doc-surface", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "type into the surface",
+					"argv": ["type", "#doc-surface", "Added paragraph."],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the existing heading must survive",
+					"argv": ["text", "#doc-surface"],
+					"expect": { "exit": 0, "stdoutContains": "Existing heading" }
+				},
+				{
+					"note": "the new text must be present",
+					"argv": ["text", "#doc-surface"],
+					"expect": { "exit": 0, "stdoutContains": "Added paragraph." }
+				}
+			]
+		},
+		{
+			"id": "S06",
+			"ref": "B06",
+			"app": "Sheets-like fixture (local)",
+			"goal": "Enter data: fill a cell (replace semantics) and read the grid back as a table.",
+			"steps": [
+				{
+					"note": "open the sheets fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_SHEETS}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the grid",
+					"argv": ["wait", "--selector", "#grid", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "fill cell A1",
+					"argv": ["fill", "[data-col=\"A\"][data-row=\"1\"]", "Widget"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "read cell A1 back",
+					"argv": ["text", "[data-col=\"A\"][data-row=\"1\"]"],
+					"expect": { "exit": 0, "stdoutContains": "Widget" }
+				},
+				{
+					"note": "the grid has 3 rows",
+					"argv": ["extract", "table", "#grid"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "rowCount", "equals": "3" }
+					}
+				}
+			]
+		}
+	]
+}

@@ -1,0 +1,93 @@
+{
+	"scenarios": [
+		{
+			"id": "S02",
+			"ref": "B01",
+			"app": "Gmail-like fixture (local)",
+			"goal": "Find emails: collect the virtualized list, then extract sender/subject/date per row.",
+			"steps": [
+				{
+					"note": "open the gmail fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_GMAIL}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the thread list",
+					"argv": ["wait", "--selector", "#thread-list", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "collect every row of the virtualized list",
+					"argv": ["collect", "#thread-list .row"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the extracted rows must carry sender, subject and date",
+					"argv": [
+						"extract",
+						"list",
+						"#thread-list .row",
+						"--fields",
+						"sender:.sender,subject:.subject,date:.date"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "3" }
+					}
+				},
+				{
+					"note": "the first row's sender must be the fixture's first sender",
+					"argv": [
+						"extract",
+						"list",
+						"#thread-list .row",
+						"--fields",
+						"sender:.sender,subject:.subject,date:.date"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.0.sender",
+							"equals": "alice@example.com"
+						}
+					}
+				}
+			]
+		},
+		{
+			"id": "S03",
+			"ref": "B02",
+			"app": "Gmail-like fixture (local)",
+			"goal": "Reply: type into the contenteditable reply box without destroying the signature, then read it back.",
+			"steps": [
+				{
+					"note": "open the gmail fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_GMAIL}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the reply box",
+					"argv": ["wait", "--selector", "#compose-body", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "type the reply (must APPEND, not replace)",
+					"argv": ["type", "#compose-body", "Thanks — see the attached."],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the signature must survive",
+					"argv": ["text", "#compose-body"],
+					"expect": { "exit": 0, "stdoutContains": "Sent from my device" }
+				},
+				{
+					"note": "the reply body must be present",
+					"argv": ["text", "#compose-body"],
+					"expect": { "exit": 0, "stdoutContains": "Thanks" }
+				}
+			]
+		}
+	]
+}

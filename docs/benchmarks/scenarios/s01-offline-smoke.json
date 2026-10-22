@@ -1,0 +1,57 @@
+{
+	"scenarios": [
+		{
+			"id": "S01",
+			"ref": "SMOKE",
+			"app": "local fixture",
+			"goal": "Offline smoke test: open a local page, wait for it, fill a field, read a table and extract a list. Needs no authenticated session.",
+			"steps": [
+				{
+					"note": "open the fixture page",
+					"argv": ["open", "file://${BENCH_FIXTURE}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the table to exist",
+					"argv": ["wait", "--selector", "#results", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "type into the search box",
+					"argv": ["fill", "#query", "alice"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "read the value back",
+					"argv": ["value", "#query"],
+					"expect": { "exit": 0, "stdoutContains": "alice" }
+				},
+				{
+					"note": "extract the table",
+					"argv": ["extract", "table", "#results"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "rowCount", "equals": "2" }
+					}
+				},
+				{
+					"note": "extract the first row's name",
+					"argv": ["extract", "table", "#results"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "rows.0.Name", "equals": "Alice" }
+					}
+				},
+				{
+					"note": "extract the list items",
+					"argv": ["extract", "list", "#items li"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "3" }
+					}
+				}
+			]
+		}
+	]
+}

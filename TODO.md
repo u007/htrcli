@@ -3,7 +3,7 @@
 ## htrcli network capture — deferred / known limitations
 
 - Response bodies are captured on Chrome (CDP getResponseBody, 64KB cap) but NOT on Firefox (webRequest cannot cheaply read bodies). Firefox network entries are metadata-only.
-- The shared debuggerManager is used only by network + dialog capture. The existing trusted-input (cdpInput.ts) and CDP_EVAL paths still do their own chrome.debugger.attach, so running a click/eval command while a capture window is open on the same tab fails with "Already attached". Route those through debuggerManager in a later pass.
+- FIXED 2026-10-10: `cdpInput.ts` `runWithDebugger` now routes through `debuggerManager.attachShared`/`detachShared` (refcounted, not direct `chrome.debugger.attach`). `debuggerManager.test.ts` confirms a second attach during an open capture does not throw. A live `dispatchCdpClick` during open capture is the remaining verification step.
 - Network mocking/interception (spec §1b) is a separate deferred phase (needs webRequestBlocking + Fetch.enable).
 
 ## htrcli console/network over --cdp — known limitations (2026-10-07)
@@ -159,3 +159,68 @@ Still open:
   `htrcli inspect` closes and opens tabs through a tab-routed command, so it
   still needs a connected page in that browser. Only the tab-less route (htrcli
   `tabs new` and `tabs close`) runs in the background worker.
+
+## Office-task benchmark work queue (docs/benchmarks/office-task-benchmark.md)
+
+Work top-down; one item at a time. Each entry: task, why it matters, htrcli
+gap, acceptance.
+
+- [ ] B01 Find emails (Gmail) — P0. Gap: DOM `wait` + virtualized list extraction. Acceptance: structured list with sender/subject/date. (DEFERRED: needs live Gmail auth. `wait` DONE, `collect` DONE — only the live run remains.)
+- [ ] B02 Reply to email — P0. Gap: contenteditable typing (`type`), signature preservation. Safety: reply to self / draft.
+- [ ] B03 Arrange meeting (Calendar) — P0. Gap: date/time pickers, guest autocomplete `pick`. Acceptance: event visible, invites sent (test account).
+- [x] B04 Create todo/reminder — P0. Gap: due-date widgets, quick-add vs fields. Acceptance: task with correct due date. DONE via the local Tasks fixture (docs/benchmarks/fixtures/tasks.html) + scenarios S07/S08 (docs/benchmarks/scenarios/s04-tasks-fixture.json, run with `make bench-tasks`): both the quick-add path (one field, committed with Enter) and the full-form path (a details panel whose date is a POPOVER grid of day buttons — no date field) work. The live Google Tasks run is still pending auth (see the SKIPPED line).
+- [ ] B05 Google Docs create/edit/share — P1. Gap: canvas editor, keyboard-only. Safety: share with test account.
+- [ ] B06 Sheets/Excel data + formula — P1. Gap: cell navigation, virtualized grid. Acceptance: formula result matches.
+- [ ] B07 Booking — P1. Gap: date pickers, seat maps. Safety: test slot, cancel after capture; never enter card.
+- [ ] B08 Forward/label/archive email — P1.
+- [ ] B09 Expense report/invoice — P2. Gap: receipt upload, multi-page.
+- [ ] B10 File management — P2.
+- [ ] B11 Contact/CRM update — P2.
+- [ ] B12 Messaging — P2.
+- [ ] B13 Form filling — P2.
+- [ ] B14 Research & summarize — P2.
+- [ ] B15-B20 Occasional — P3.
+- [x] Enhancement: DOM-level `wait` command (selector/text/URL) both transports (htrcli wait).
+- [x] Enhancement: rich-text (contenteditable) typing helpers (handleFill/handleType use document.execCommand selectAll/delete/insertText + input/change/blur dispatch).
+- [x] Enhancement: virtualized-list extraction helper (`htrcli collect` — scrolls the list container, accumulates + de-dupes rows; both transports).
+- [x] Enhancement: retry-with-backoff wrapper (`htrcli retry -- <cmd>` with `--times`/`--delay`/`--max-delay`; opt-in, logs every failed attempt to stderr, non-zero exit on exhaustion; works on both transports since it re-invokes htrcli; a transport flag placed before `retry` is forwarded too). Tests: retry_test.go (5).
+- [x] Enhancement: structured data extraction command (`htrcli extract table|list`; TS handlers + Go command + tests + bundle).
+  - Chosen over retry-with-backoff because B01 acceptance (structured list with sender/subject/date) needs extraction first; collect returns raw element info, extract turns it into records. (Retry/backoff has since been added too — see the entry above.)
+- [ ] SKIPPED (user choice, 2026-10-20): live B01 run against a real Gmail session. The `wait` and `collect` building blocks it depends on are done; the remaining work is only the authenticated run + metrics capture.
+- [ ] SKIPPED (user choice, 2026-10-20): B02-B20 live benchmark runs — all need authenticated web sessions (Gmail, Calendar, Docs, Sheets). The reusable pieces they need (`wait`, `collect`, contenteditable typing) are implemented; each scenario's live run is tracked in its own line above.
+- [x] Enhancement: skill doc updates per office app (Gmail B01/B02, Calendar B03, Docs B05, Sheets B06, Booking B07) — `skills/htrcli/SKILL.md` section "Office apps: Gmail, Calendar, Docs, Sheets", each recipe verified against the local fixtures in `docs/benchmarks/fixtures/` (no real Google data touched). Runnable scenarios: s02-gmail-fixture.json (S02/S03) and s03-office-fixtures.json (S04/S05/S06) — all PASS over CDP via `make bench-office`.
+- [x] FIX: `type` on a contenteditable APPENDED nothing safe — it did selectAll+delete+insertText, so it WIPED a Gmail reply box's quoted thread and signature. Now it places the caret at the end and appends; `fill` keeps its replace semantics (correct for a spreadsheet cell). Tests: src/contentScript/contentEditableTyping.test.ts (3) + benchmark scenario S03. Mutation-verified both ways.
+- [x] FIX: `pick` and `fill-form` were COMPLETELY BROKEN over --cdp — the embedded formkit.js ends with `});`, and the installer wrapped it as `window.__htrcliFormKit = ( ... )`, which is a syntax error ("Unexpected token ';'"). Every CDP pick/fill-form failed with "installing form kit". Fixed in htrcli/internal/cdp/pick.go (trim the trailing semicolon). Tests: htrcli/internal/cdp/pick_install_test.go (2, mutation-verified). Pre-existing bug, not from this work.
+- [x] FIX: `check`/`uncheck` failed on ARIA checkboxes — "Element is not a checkbox/radio input". Google Tasks, Material UI and most modern design systems render a checkbox as `<div role="checkbox" aria-checked>`, not an `<input type=checkbox>`. `check`/`uncheck` now drive aria-checked and dispatch a click so the app's own handler runs; the click comes FIRST (an app that toggles would otherwise flip the pre-set state back), and the attribute is enforced afterwards. Idempotent, and a tri-state (`aria-checked="mixed"`) is no longer a silent no-op. Tests: src/contentScript/ariaCheckbox.test.ts (8, incl. a click-count assertion) + benchmark scenario S07. Mutation-verified.
+- [x] FIX: `extract list` could only read a field's TEXT, so an ATTRIBUTE-valued field came back empty (a task's due date, a row's href, a status flag). Field selectors now support `@attr` (the item's own attribute), `@sel@attr` (a descendant's attribute) and a pure `[data-x]` selector (an attribute value: first descendant match, else the item itself). Tests: src/contentScript/extractData.test.ts + htrcli/internal/commands/extract_test.go + benchmark scenarios S07/S08. Mutation-verified.
+- [x] Enhancement: benchmark harness (`htrcli bench run <scenario-file>` — JSON scenario files with raw htrcli argv steps, expectations (exit/stdoutContains/stdoutNotContains/jsonPath), optional steps, requires_auth -> NOT_RUN, `${VAR}` expansion; writes a JSON report with per-step exit code/attempts/wall_ms and per-scenario commands/wall_ms/retries/failure_mode). Tests: bench_harness_test.go (25). Offline smoke scenario: docs/benchmarks/scenarios/s01-offline-smoke.json (PASSES over CDP).
+
+## Review fixes applied (2026-10-21)
+
+Resolved the `/review-changes` findings for this change set. Each fix has a
+regression test that failed beforehand (or, where noted, a real-Chromium check).
+
+- `collect --max-items` now caps inside the harvest, not only the scroll loop, and sets `truncated`. Previously returned the whole DOM (10 rows for `--max-items 3`).
+- `collect` restores the list's original scroll position in a `finally`. It used to leave the page scrolled to the bottom.
+- `collect --ref` mints each ref at HARVEST time via the new `onRow` hook, so a virtualized/recycled row no longer yields a stale or wrong ref.
+- `extract table` excludes the header row wherever it lives (a `<thead>` without a `<tbody>` used to emit it as data) and uniquifies duplicate column names instead of dropping a value.
+- `extract list` no longer infers container-vs-item from the match COUNT. Several matches are items; one match is an item unless it is a semantic list/table container; `--container` forces child expansion. A single `.row` used to explode into its child spans.
+- `extract list` names the offending field when a field selector is invalid instead of aborting with a bare `DOMException`.
+- `fill` on a contenteditable uses a Range scoped to the element instead of `execCommand("selectAll")`, which selected the whole editing host and destroyed a reply box's quoted thread and signature.
+- `check`/`uncheck` handle the ARIA tri-state: `aria-checked="mixed"` is neither checked nor unchecked, so it no longer short-circuits into a silent no-op that reported success.
+- `prepareKeys` places the caret at the END of a contenteditable, and `handleType`'s new contenteditable branch does the same before `execCommand`. VERIFIED with the real extension loaded (see the F3 entry below): the `handleType` caret call is what stops text landing before the quoted thread. The content script takes the SYNTHETIC `handleType` path for `type`, not the CDP relay.
+- `attachShared` coalesces concurrent attaches into one real attach and rolls back a failed one, so a failed attach cannot leave a hold behind for a caller's compensating `detachShared` to release.
+- `htrcli bench run --json` exits non-zero for a failing suite (it returned nil before the failure check).
+- `htrcli bench` reports the attempts the `retry` wrapper ACTUALLY made (new `retry: attempts=N` stderr line) instead of the granted retry budget, so `commands`/`retries` match the spec.
+- `htrcli retry` forwards the persistent flags the user set before `retry` (transport/json/tab/…), which were previously dropped from the child argv.
+- `htrcli collect` prints JSON on the CDP path like every sibling command (it printed Go map syntax).
+- `htrcli bench run --help` and the `bench.go` package doc show the `{"scenarios":[…]}` wrapper the loader requires.
+- `bun run check` (biome) is green again: `htrcli/internal/cdp/formkit.js` carried 5 pre-existing `lint/style/useTemplate` errors (hand-written concatenation in an embedded object literal, not vendored code). Rewrote all 5 to template literals after confirming every operand is a string (`describe()` returns `string` on all paths), so semantics are unchanged.
+- Removed `findScrollContainer`'s parent-ancestor fallback: it was unreachable (the first walk already covered every ancestor it could reach except the 13th), so the "Gmail table wrapper" comment was misleading. Replaced by one bounded walk.
+
+### Still unverified after the review fixes (manual steps)
+
+- [ ] **F3 — verified on a Gmail-SHAPED fixture with the real extension loaded; real Gmail still untested.** Harness: Playwright `launch_persistent_context(headless=False, --load-extension=build/)`, driven from the extension service worker with `chrome.tabs.sendMessage({type:'EXECUTE_COMMAND', command:{action:'type', target:{selector:'#composer'}}})` (htrcli / native messaging / bearer auth bypassed; the content-script path is the same one the background uses). Two fixture shapes, both with a quote + signature: minified (no inter-element whitespace) and pretty-printed. RESULT: with the fix, typed text lands AFTER both the quote and the signature in both shapes (i_quote < i_reply, i_sign < i_reply). CONTROL: removing the `handleType` caret call makes BOTH shapes FAIL (text at index 0 / 6, before the quote). So the test discriminates and the fix is causal. PATH NOTE: all four runs emitted `change`+`blur`, which only `handleType` dispatches — the content script uses the SYNTHETIC path for `type`, not the CDP relay (consistent with `chrome.debugger` not being exposed to content scripts). The `prepareKeys` caret call is therefore not exercised by `type` on Chrome. REMAINDER of the step: run it against a real Gmail reply box (selection/focus behaviour in Gmail's own composer can differ).
+- [ ] **F11 — `collect --ref` on a live recycling virtualizer.** The `onRow` hook is unit-tested to fire while the row is attached, but a real react-window/react-virtualized list has not been driven. Step: run `htrcli collect "<row selector>" --ref` against a real virtualized list, then use one minted `@eN` in a follow-up command and confirm it resolves to the right row.
+- [ ] **Benchmark metrics with the corrected attempt counting.** `htrcli bench` now reports observed attempts instead of the granted retry budget, but neither `make bench-smoke` nor `make bench-office` has been run against a real Chrome since the change. Step: run both and confirm the report's `commands`/`retries` for a first-try PASS are 1/0.
+- [ ] **Real-browser regression for the remaining fixes.** F1/F10/F13 were verified in real Chromium against the shipped bundle; F4/F5/F14/F7/F8/F9/F12/F15 are verified by unit test and the built binary only. No known gap, listed for completeness.

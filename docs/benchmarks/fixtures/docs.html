@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Docs-like fixture (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; }
+  /* Docs-like: the editing surface is a contenteditable, not an <input>. */
+  #doc-surface { min-height: 200px; border: 1px solid #ddd; padding: 8px; }
+  #doc-surface h1 { font-size: 20px; }
+  #share-state { padding: 4px; }
+</style>
+</head>
+<body>
+  <h1>Doc (fixture)</h1>
+
+  <div id="doc-surface" contenteditable="true" role="textbox" aria-label="Document body">
+    <h1>Existing heading</h1>
+    <p>Existing paragraph.</p>
+  </div>
+
+  <button id="share">Share</button>
+  <div id="share-state" role="status">not shared</div>
+</body>
+</html>

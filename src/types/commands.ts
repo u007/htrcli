@@ -110,6 +110,11 @@ export type CommandAction =
 	// ─── Finding / Inspection ───────────────────────────────────────
 	| "find"
 	| "findAll"
+	/** Collect every match across a virtualized list: scrolls the list's
+	 *  scroll container and accumulates rows, de-duped by a stable key. */
+	| "collectAll"
+	| "extractTable"
+	| "extractList"
 	| "wait"
 	| "isVisible"
 	| "isEnabled"

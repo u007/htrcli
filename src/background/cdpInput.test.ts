@@ -13,6 +13,7 @@ import {
 	dispatchCdpMouseUp,
 	dispatchCdpType,
 } from "./cdpInput";
+import { __setDebuggerImplForTests } from "./debuggerManager";
 
 /**
  * Test seam: a CDP `send` stub that records every dispatched event so we can
@@ -286,6 +287,10 @@ describe("CDP input dispatch — error handling", () => {
 
 	it("detaches after successful dispatch, sender rejection, and never after attach failure", async () => {
 		const originalChrome = (globalThis as Record<string, unknown>).chrome;
+		// The shared debuggerManager holds a test seam for the injected
+		// chrome.debugger. Clear it so this test's own `globalThis.chrome`
+		// mock is the one the manager uses.
+		__setDebuggerImplForTests(null);
 		const detachCalls: number[] = [];
 		const debuggerMock = {
 			attach: async (_target: unknown, _version: string) => undefined,
@@ -297,6 +302,13 @@ describe("CDP input dispatch — error handling", () => {
 				_method: string,
 				_params: Record<string, unknown>,
 			) => undefined,
+			// The shared debuggerManager attaches a single onEvent listener on
+			// the first attach, so the mock must expose the same surface the
+			// real chrome.debugger does.
+			onEvent: {
+				addListener: (_cb: unknown) => undefined,
+				removeListener: (_cb: unknown) => undefined,
+			},
 		};
 		Object.defineProperty(globalThis, "chrome", {
 			configurable: true,

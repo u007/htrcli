@@ -19,6 +19,7 @@ import type {
 } from "../types/commands";
 import { AIA_API_KEY } from "../utils/aiaConfig";
 import { resolveKey } from "../utils/keyMap";
+import { collectAll, type TruncationCause } from "./collectList";
 import {
 	findAllElements,
 	findElement,
@@ -27,6 +28,7 @@ import {
 	waitForElement,
 	waitForScrollableActionableElement,
 } from "./elementFinder";
+import { extractListFrom, extractTable } from "./extractData";
 import { assignRef } from "./refRegistry";
 import { getSnapshot } from "./snapshot";
 import { generateXPath } from "./xpathGenerator";
@@ -196,6 +198,12 @@ async function executeAction(command: Command): Promise<unknown> {
 			return handleFind(requireTarget(target, action), options);
 		case "findAll":
 			return handleFindAll(requireTarget(target, action), options);
+		case "collectAll":
+			return handleCollectAll(requireTarget(target, action), options);
+		case "extractTable":
+			return handleExtractTable(requireTarget(target, action));
+		case "extractList":
+			return handleExtractList(requireTarget(target, action), options);
 		case "wait":
 			return handleWait(
 				requireTarget(target, action),
@@ -482,6 +490,89 @@ function handleFindAll(
 		const info = getElementInfo(el);
 		if (options?.assignRef) info.ref = assignRef(el);
 		return info;
+	});
+}
+
+/**
+ * Collect every match in a virtualized list. Scrolls the list's scroll
+ * container until the rows stop changing, de-duping rows by a stable key.
+ */
+async function handleCollectAll(
+	target: TargetSelector,
+	options?: Command["options"],
+): Promise<{
+	elements: RemoteElementInfo[];
+	steps: number;
+	truncated: boolean;
+	truncatedBy: TruncationCause | null;
+	scrolled: boolean;
+	keyStrategy: string;
+}> {
+	const result = await collectAll(target, {
+		maxSteps:
+			typeof options?.maxSteps === "number" ? options.maxSteps : undefined,
+		stepDelayMs:
+			typeof options?.stepDelayMs === "number"
+				? options.stepDelayMs
+				: undefined,
+		maxItems:
+			typeof options?.maxItems === "number" ? options.maxItems : undefined,
+		// Mint each ref at HARVEST time, while the row's node is still live.
+		// Minting after the loop gave every row a detached node, or (with a
+		// recycling virtualizer) the same node for several different rows.
+		onRow: options?.assignRef
+			? (el, info) => {
+					info.ref = assignRef(el);
+				}
+			: undefined,
+	});
+	// `nodes` holds live DOM references, which cannot cross the message
+	// boundary. Strip it before the result is serialized.
+	return {
+		elements: result.elements,
+		steps: result.steps,
+		truncated: result.truncated,
+		truncatedBy: result.truncatedBy,
+		scrolled: result.scrolled,
+		keyStrategy: result.keyStrategy,
+	};
+}
+
+async function handleExtractTable(target: TargetSelector): Promise<{
+	columns: string[];
+	rows: Record<string, string>[];
+	rowCount: number;
+}> {
+	const root = findAllElements(target)[0];
+	if (!root) {
+		throw new Error(
+			`Element not found: ${target.selector ?? target.xpath ?? ""}`,
+		);
+	}
+	return extractTable(root);
+}
+
+async function handleExtractList(
+	target: TargetSelector,
+	options?: Command["options"],
+): Promise<{
+	items: Record<string, string>[];
+	count: number;
+}> {
+	// Every match is kept: a selector that names the ITEMS ("#items li")
+	// must not collapse to its first match and then look for children.
+	const roots = findAllElements(target);
+	if (roots.length === 0) {
+		throw new Error(
+			`Element not found: ${target.selector ?? target.xpath ?? ""}`,
+		);
+	}
+	const fields =
+		options?.fields && typeof options.fields === "object"
+			? (options.fields as Record<string, string>)
+			: undefined;
+	return extractListFrom(roots, fields, {
+		container: options?.container === true,
 	});
 }
 
@@ -782,7 +873,11 @@ async function handleFill(
 	const element = (await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
-	})) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+	})) as
+		| HTMLInputElement
+		| HTMLTextAreaElement
+		| HTMLSelectElement
+		| HTMLElement;
 
 	if (
 		element instanceof HTMLInputElement ||
@@ -814,8 +909,31 @@ async function handleFill(
 		element.dispatchEvent(new Event("input", { bubbles: true }));
 		element.dispatchEvent(new Event("change", { bubbles: true }));
 		element.dispatchEvent(new Event("blur", { bubbles: true }));
+	} else if (
+		element instanceof HTMLElement &&
+		(element as HTMLElement).isContentEditable
+	) {
+		// `fill` REPLACES the content — correct for a spreadsheet cell.
+		// Scope the replacement to THIS element: execCommand("selectAll")
+		// selects the whole EDITING HOST, so a descendant target (a paragraph
+		// inside a Gmail reply box) would destroy the quoted thread and the
+		// signature around it.
+		(element as HTMLElement).focus();
+		selectElementContents(element as HTMLElement);
+		// Chromium treats insertText with an empty string as a no-op, so an
+		// empty fill deletes the selected contents instead.
+		if (value === "") {
+			document.execCommand("delete");
+		} else {
+			document.execCommand("insertText", false, value);
+		}
+		element.dispatchEvent(new Event("input", { bubbles: true }));
+		element.dispatchEvent(new Event("change", { bubbles: true }));
+		element.dispatchEvent(new Event("blur", { bubbles: true }));
 	} else {
-		throw new Error("Element is not a form input");
+		throw new Error(
+			"Element is not a form input and is not contenteditable — use `type` for a rich-text surface",
+		);
 	}
 }
 
@@ -827,7 +945,7 @@ async function handleType(
 	const element = (await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
-	})) as HTMLInputElement | HTMLTextAreaElement;
+	})) as HTMLInputElement | HTMLTextAreaElement | HTMLElement;
 
 	if (
 		element instanceof HTMLInputElement ||
@@ -885,9 +1003,47 @@ async function handleType(
 		// Dispatch change event
 		element.dispatchEvent(new Event("change", { bubbles: true }));
 		element.dispatchEvent(new Event("blur", { bubbles: true }));
+	} else if (
+		element instanceof HTMLElement &&
+		(element as HTMLElement).isContentEditable
+	) {
+		// A contenteditable APPENDS, like real keystrokes. It must not wipe
+		// the content that was already there: a Gmail reply box holds the
+		// quoted thread and the signature, and replacing them destroys the
+		// message. Use `fill` (or `clear` first) when replacing is intended.
+		(element as HTMLElement).focus();
+		placeCaretAtEnd(element);
+		document.execCommand("insertText", false, value);
+		element.dispatchEvent(new Event("input", { bubbles: true }));
+		element.dispatchEvent(new Event("change", { bubbles: true }));
+		element.dispatchEvent(new Event("blur", { bubbles: true }));
 	} else {
 		throw new Error("Element is not a text input");
 	}
+}
+
+// placeCaretAtEnd moves the caret to the end of a contenteditable element so
+// inserted text lands AFTER the existing content. Rich editors (Gmail's
+// reply box, Docs, Draft, Quill) keep their quoted text and signature there.
+function placeCaretAtEnd(element: HTMLElement): void {
+	const selection = document.getSelection();
+	if (!selection) return;
+	const range = document.createRange();
+	range.selectNodeContents(element);
+	range.collapse(false);
+	selection.removeAllRanges();
+	selection.addRange(range);
+}
+
+// selectElementContents selects ONLY this element's own contents, leaving any
+// sibling content of the surrounding editing host untouched.
+function selectElementContents(element: HTMLElement): void {
+	const selection = document.getSelection();
+	if (!selection) return;
+	const range = document.createRange();
+	range.selectNodeContents(element);
+	selection.removeAllRanges();
+	selection.addRange(range);
 }
 
 async function handleClear(
@@ -964,9 +1120,72 @@ async function handleCheck(
 			element.checked = checked;
 		}
 		element.dispatchEvent(new Event("change", { bubbles: true }));
-	} else {
-		throw new Error("Element is not a checkbox/radio input");
+		return;
 	}
+
+	// An ARIA checkbox: a DIV (or any element) with role="checkbox" and
+	// aria-checked. Google Tasks, Material UI and most modern design systems
+	// render checkboxes this way — there is no <input> to set.
+	if (isAriaCheckbox(element)) {
+		await setAriaCheckbox(element, checked);
+		return;
+	}
+
+	throw new Error("Element is not a checkbox/radio input");
+}
+
+/**
+ * True when the element is an ARIA checkbox: role="checkbox" with an
+ * aria-checked state (or the role alone — a missing aria-checked means
+ * "not checked" by the ARIA default).
+ */
+function isAriaCheckbox(element: Element): boolean {
+	return (
+		element.getAttribute("role")?.toLowerCase() === "checkbox" &&
+		element instanceof HTMLElement
+	);
+}
+
+/**
+ * Drive an ARIA checkbox to the wanted state.
+ *
+ * The click comes FIRST: an app's own handler usually toggles aria-checked
+ * itself, so pre-setting the attribute would make the handler flip it back
+ * (false -> true -> false). aria-checked is never written directly, because
+ * the app owns its state and a forced value would leave the app and the DOM
+ * disagreeing. After each click the state is read back after a macrotask,
+ * since frameworks may commit it late. If the first click left the box in the
+ * wrong state, one more click is tried. If it is still wrong, this throws with
+ * the expected and actual values instead of reporting success.
+ *
+ * The click is dispatched ONLY when the state actually has to change: a
+ * handler that toggles would otherwise flip an already-correct box.
+ */
+async function setAriaCheckbox(
+	element: HTMLElement,
+	checked: boolean,
+): Promise<void> {
+	const target = checked ? "true" : "false";
+	// A tri-state box ("mixed") is neither checked nor unchecked, so it must
+	// NOT short-circuit. Reading only `=== "true"` treated "mixed" as
+	// unchecked, which made `uncheck` a silent no-op that still reported
+	// success and left the box in the wrong state.
+	const readState = (): string =>
+		element.getAttribute("aria-checked") ?? "false";
+	if (readState() === target) return;
+	const maxClicks = 2;
+	for (let attempt = 0; attempt < maxClicks; attempt++) {
+		element.focus();
+		element.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		await new Promise((r) => setTimeout(r, 0));
+		if (readState() === target) {
+			element.dispatchEvent(new Event("change", { bubbles: true }));
+			return;
+		}
+	}
+	throw new Error(
+		`ARIA checkbox did not reach aria-checked="${target}" after ${maxClicks} clicks (still "${readState()}")`,
+	);
 }
 
 async function handlePressKey(
@@ -1521,6 +1740,10 @@ async function handlePrepareKeys(
 
 	element.scrollIntoView({ behavior: "instant", block: "center" });
 	element.focus();
+	// After focus() a contenteditable's caret sits at offset 0, so a CDP `type`
+	// — which inserts at the caret — would write BEFORE a reply box's quoted
+	// thread. A real keystroke appends; match that.
+	if (element.isContentEditable) placeCaretAtEnd(element);
 	return { focused: document.activeElement === element };
 }
 

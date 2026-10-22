@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tasks-like fixture (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 12px; }
+  .task { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #eee; }
+  .task .title { flex: 1; }
+  .task .due { color: #555; }
+  .check { width: 18px; height: 18px; border: 1px solid #999; border-radius: 50%; cursor: pointer; }
+  [role="checkbox"][aria-checked="true"] { background: #1a73e8; }
+  #quick-add { width: 360px; padding: 6px; }
+  .day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; width: 210px; }
+  .day-grid button { padding: 4px; }
+  #popover { border: 1px solid #ccc; padding: 6px; margin-top: 6px; }
+  #notes, #task-title { width: 300px; }
+</style>
+</head>
+<body>
+  <h1>Tasks (fixture)</h1>
+
+  <!-- QUICK-ADD PATH. One field; the whole task is typed, including the date
+       and time. "Send the report 10/22/2026 5pm" becomes a task with a due
+       date. The relative words "today"/"tomorrow" are also accepted and are
+       resolved against a FROZEN "today" (2026-10-21) so assertions stay
+       deterministic. -->
+  <input id="quick-add" type="text" placeholder="Add a task">
+
+  <!-- FULL-FORM PATH. Hidden until "Details" is clicked — a disclosure, like
+       Google Tasks' per-task details panel. -->
+  <button id="show-details" type="button">Details</button>
+  <div id="details-panel" hidden>
+    <textarea id="task-title" placeholder="Title"></textarea>
+    <textarea id="notes" placeholder="Notes"></textarea>
+
+    <!-- THE DATE PICKER IS A POPOVER GRID, NOT A FIELD. There is no
+         <input type=date> and no text field for the date: the date is chosen
+         by clicking a day button, exactly like Google Tasks. -->
+    <button id="date-trigger" type="button" data-due="">Set date</button>
+    <div id="popover" hidden>
+      <div class="day-grid" id="day-grid">
+        <button type="button" data-day="2026-10-20">20</button>
+        <button type="button" data-day="2026-10-21">21</button>
+        <button type="button" data-day="2026-10-22">22</button>
+        <button type="button" data-day="2026-10-23">23</button>
+      </div>
+    </div>
+
+    <button id="save" type="button">Save</button>
+  </div>
+
+  <!-- The task list. A created task carries its state in data-* attributes
+       so a scenario can assert on it. -->
+  <ul id="task-list">
+    <li class="task" data-id="t1" data-title="Existing task" data-due="" data-notes="">
+      <!-- A DIV acting as a checkbox: the ARIA role, not an <input>. This is
+           the shape Google Tasks (and Material UI's button-checkbox) uses. -->
+      <div role="checkbox" aria-checked="false" class="check" tabindex="0"></div>
+      <span class="title">Existing task</span>
+    </li>
+  </ul>
+
+  <div id="status" role="status"></div>
+
+  <script>
+    // Behave like a real task app:
+    //  - quick-add parses a trailing date (and optional time)
+    //  - the date popover opens on the trigger and a day click sets the date
+    //  - "Details" reveals the full form; Save creates the task
+    //  - the aria-checkbox DIV toggles on click
+    (() => {
+      var FROZEN_TODAY = "2026-10-21";
+      var list = document.getElementById("task-list");
+      var status = document.getElementById("status");
+      var trigger = document.getElementById("date-trigger");
+      var popover = document.getElementById("popover");
+      var seq = 1;
+
+      function addTask(title, due, notes, done) {
+        var li = document.createElement("li");
+        li.className = "task";
+        li.setAttribute("data-id", `t${++seq}`);
+        li.setAttribute("data-title", title);
+        li.setAttribute("data-due", due || "");
+        li.setAttribute("data-notes", notes || "");
+        var box = document.createElement("div");
+        box.setAttribute("role", "checkbox");
+        box.setAttribute("aria-checked", done ? "true" : "false");
+        box.className = "check";
+        box.tabIndex = 0;
+        var span = document.createElement("span");
+        span.className = "title";
+        span.textContent = title;
+        li.appendChild(box);
+        li.appendChild(span);
+        list.appendChild(li);
+        return li;
+      }
+
+      // The aria-checkbox DIV: clicking toggles aria-checked.
+      list.addEventListener("click", (ev) => {
+        var box = ev.target.closest('[role="checkbox"]');
+        if (!box) return;
+        var on = box.getAttribute("aria-checked") === "true";
+        box.setAttribute("aria-checked", on ? "false" : "true");
+        status.textContent = `checked=${box.getAttribute("aria-checked")}`;
+      });
+
+      // Parse "Title 10/22/2026 5pm" / "Title tomorrow 5pm" / "Title 10/22/2026".
+      function parseQuickAdd(raw) {
+        var m = raw.match(/^(.*?)\s+(\d{1,2}\/\d{1,2}\/\d{4}|today|tomorrow)(?:\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?))?$/i);
+        if (!m) return { title: raw, due: "", time: "" };
+        var title = m[1].trim();
+        var date = m[2];
+        var time = (m[3] || "").trim();
+        var parts;
+        var month;
+        var day;
+        if (/today/i.test(date)) date = FROZEN_TODAY;
+        else if (/tomorrow/i.test(date)) date = "2026-10-22";
+        else {
+          parts = date.split("/");
+          month = parts[0].length === 1 ? `0${parts[0]}` : parts[0];
+          day = parts[1].length === 1 ? `0${parts[1]}` : parts[1];
+          date = `${parts[2]}-${month}-${day}`;
+        }
+        return { title: title, due: date, time: time };
+      }
+
+      document.getElementById("quick-add").addEventListener("keydown", function (ev) {
+        if (ev.key !== "Enter") return;
+        var raw = this.value.trim();
+        if (!raw) return;
+        var p = parseQuickAdd(raw);
+        if (!p.title) {
+          status.textContent = "error: title required";
+          return;
+        }
+        var li = addTask(p.title, p.due, p.time, false);
+        this.value = "";
+        status.textContent = `added=${li.getAttribute("data-id")}`;
+      });
+
+      // "Details" reveals the full form.
+      document.getElementById("show-details").addEventListener("click", () => {
+        document.getElementById("details-panel").hidden = false;
+        status.textContent = "details=open";
+      });
+
+      // The date popover.
+      trigger.addEventListener("click", () => {
+        popover.hidden = false;
+        status.textContent = "popover=open";
+      });
+      document.getElementById("day-grid").addEventListener("click", (ev) => {
+        var b = ev.target.closest("button[data-day]");
+        if (!b) return;
+        trigger.setAttribute("data-due", b.getAttribute("data-day"));
+        trigger.textContent = b.getAttribute("data-day");
+        popover.hidden = true;
+        status.textContent = `due=${b.getAttribute("data-day")}`;
+      });
+
+      document.getElementById("save").addEventListener("click", () => {
+        var title = document.getElementById("task-title").value.trim();
+        if (!title) {
+          status.textContent = "error: title required";
+          return;
+        }
+        var li = addTask(
+          title,
+          trigger.getAttribute("data-due"),
+          document.getElementById("notes").value.trim(),
+          false
+        );
+        status.textContent = `added=${li.getAttribute("data-id")}`;
+      });
+    })();
+  </script>
+</body>
+</html>

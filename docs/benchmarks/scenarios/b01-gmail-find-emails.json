@@ -1,0 +1,53 @@
+{
+	"scenarios": [
+		{
+			"id": "B01",
+			"ref": "B01",
+			"app": "Gmail web",
+			"goal": "Search unread mail from a sender/subject and return a structured list (sender, subject, date, snippet).",
+			"requires_auth": true,
+			"steps": [
+				{
+					"note": "open the inbox",
+					"argv": [
+						"open",
+						"https://mail.google.com/mail/u/0/#search/is%3Aunread"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "wait for the message list to render",
+					"argv": [
+						"wait",
+						"--selector",
+						"div[role='main'] table, div[role='main']",
+						"--timeout",
+						"15000"
+					],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "collect every row (Gmail virtualizes the list)",
+					"argv": ["collect", "div[role='main'] tr"],
+					"expect": { "exit": 0 },
+					"retry": 1
+				},
+				{
+					"note": "the extracted rows must carry sender, subject and date",
+					"argv": [
+						"extract",
+						"list",
+						"div[role='main'] tr",
+						"--fields",
+						"sender:.yW .span,subject:.yP .span,date:.xW .span"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "exists": true }
+					}
+				}
+			]
+		}
+	]
+}

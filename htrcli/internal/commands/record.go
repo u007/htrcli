@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -167,15 +166,14 @@ var recordStartCmd = &cobra.Command{
 		}
 		port := GetCDPPort()
 
-		exe, err := os.Executable()
-		if err != nil {
-			return fmt.Errorf("resolving htrcli path: %w", err)
-		}
 		runArgs := []string{"record", "_run", "--frames-dir", framesDir, "--rec-port", strconv.Itoa(port)}
 		if target := GetTabTarget(); target != "" {
 			runArgs = append(runArgs, "--rec-tab", target)
 		}
-		child := exec.Command(exe, runArgs...)
+		child, err := selfCommand(runArgs)
+		if err != nil {
+			return err
+		}
 		recordConfigureDetachedProcess(child) // detach where the platform supports it
 		if err := child.Start(); err != nil {
 			if rmErr := recordRemoveAll(framesDir); rmErr != nil {

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gmail-like fixture (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; }
+  .row { display: flex; gap: 8px; padding: 6px 12px; border-bottom: 1px solid #eee; }
+  .sender { width: 160px; }
+  .subject { flex: 1; }
+  .date { width: 90px; text-align: right; }
+  .scroll { height: 200px; overflow-y: auto; }
+  #compose-body { min-height: 80px; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+  <h1>Inbox (fixture)</h1>
+
+  <!-- A virtualized list: only the visible rows exist in the DOM. -->
+  <div class="scroll" id="thread-list">
+    <div class="row" data-idx="1"><span class="sender">alice@example.com</span><span class="subject">Quarterly report</span><span class="date">Oct 18</span></div>
+    <div class="row" data-idx="2"><span class="sender">bob@example.com</span><span class="subject">Lunch on Friday?</span><span class="date">Oct 17</span></div>
+    <div class="row" data-idx="3"><span class="sender">carol@example.com</span><span class="subject">Invoice 2211</span><span class="date">Oct 16</span></div>
+  </div>
+
+  <!-- A reply box: contenteditable, like Gmail's. It already holds the
+       signature, so a scenario can prove that typing does not wipe it. -->
+  <div id="compose-body" contenteditable="true" role="textbox" aria-label="Message body">
+    <p><br></p>
+    <p>-- <br>Sent from my device</p>
+  </div>
+
+  <button id="send">Send</button>
+  <div id="toast" role="status" hidden>Message sent</div>
+</body>
+</html>

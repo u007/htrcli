@@ -37,7 +37,21 @@ htrcli serve          # run daemon: HTTP :3845 + Unix socket relay (Chrome+Firef
 
 # Utility
 make close           # Kill process on :3845
+make bench-smoke     # Run the offline benchmark scenario (needs a real Chrome)
 ```
+
+### Benchmark harness
+
+`htrcli bench run <scenario-file>` runs JSON scenario files and writes a
+report under `docs/benchmarks/results/`. A scenario is a list of steps, each a
+raw htrcli argv plus expectations (`exit`, `stdoutContains`,
+`stdoutNotContains`, `jsonPath`). `retry: N` reuses the `retry` subcommand so
+the backoff policy lives in one place; `requires_auth: true` is reported as
+NOT_RUN, never as PASS.
+
+Scenarios live in `docs/benchmarks/scenarios/`, the spec in
+`docs/benchmarks/office-task-benchmark.md`, and the fixture page in
+`docs/benchmarks/fixtures/`. Runner code: `htrcli/internal/commands/bench*.go`.
 
 Single test file: `bun test src/path/to/file.test.ts`
 
@@ -77,11 +91,13 @@ registers only its own tabs. Two routes reach a relay:
 
 Built with Vite + `@crxjs/vite-plugin` (Chrome only). Entry points defined in `src/manifest.ts`:
 
-- **`src/background/index.ts`** — Service worker. Orchestrates recording sessions, captures screenshots via `chrome.tabs.captureVisibleTab`, manages state. Registers the recorder with `setRecordingDeps` so the `recording*` native commands can reach it.
+- **`src/background/index.ts`** — Service worker. Orchestrates recording sessions, captures screenshots via `chrome.tabs.captureVisibleTab`, manages state. Registers the recorder with `setRecordingDeps` so the `recording*` native commands can reach it. Note: the shared `debuggerManager` (refcounted attach for network/dialog capture) is used by both capture features, and `cdpInput.ts` now routes through it via `attachShared`/`detachShared` (concurrent attaches are coalesced into one real attach). `CDP_EVAL` and the `chrome.debugger.attach` calls in `index.ts`/`networkMock.ts` still attach directly.
 - **`src/background/recordingCommands.ts`** — Pure dispatch logic for the `recordingStart|Stop|Status|List|Get|Delete` actions (htrcli `recordings …`). Browser-agnostic: no `chrome.debugger`, so it works on Chrome and Firefox. Side effects are injected via `RecordingCommandDeps`.
 - **`src/popup/Popup.tsx`** — Toolbar popup: manual Start/Stop, optional title, audio toggle, recent recordings.
 - **`src/contentScript/index.ts`** — Injected into every `http/https` page. Submodules handle:
   - `clickHandler.ts` / `inputHandler.ts` — Track interactions
+  - `collectList.ts` — Virtualized-list extraction (scroll + accumulate + de-dupe)
+  - `extractData.ts` — Structured table/list extraction
   - `commandExecutor.ts` — Execute remote control commands (click, fill, navigate, eval…)
   - `connectionManager.ts` — Manages native messaging lifecycle
   - `elementFinder.ts` / `selectorGenerator.ts` / `xpathGenerator.ts` — DOM query helpers

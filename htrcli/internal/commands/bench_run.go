@@ -1,0 +1,358 @@
+package commands
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// BenchStepResult is the outcome of one step.
+type BenchStepResult struct {
+	// Index is the 1-based step number.
+	Index int `json:"index"`
+	// Argv is the argv that was executed (with the retry prefix applied).
+	Argv []string `json:"argv"`
+	// Note is the scenario's label for the step.
+	Note string `json:"note,omitempty"`
+	// OK reports whether the step met its expectations.
+	OK bool `json:"ok"`
+	// Optional marks a step whose failure only downgrades the verdict.
+	Optional bool `json:"optional,omitempty"`
+	// ExitCode is the child's exit code.
+	ExitCode int `json:"exit_code"`
+	// Attempts is how many times the step ran (1 when no retry).
+	Attempts int `json:"attempts"`
+	// WallMS is the step's total wall-clock time in milliseconds.
+	WallMS int64 `json:"wall_ms"`
+	// Failure describes why the step failed.
+	Failure string `json:"failure,omitempty"`
+	// Stdout is the child's stdout (truncated to keep the report readable).
+	Stdout string `json:"stdout,omitempty"`
+	// Stderr is the child's stderr (truncated).
+	Stderr string `json:"stderr,omitempty"`
+}
+
+// BenchScenarioResult is the outcome of one scenario.
+type BenchScenarioResult struct {
+	ID      string `json:"id"`
+	Ref     string `json:"ref,omitempty"`
+	App     string `json:"app,omitempty"`
+	Goal    string `json:"goal,omitempty"`
+	Verdict string `json:"verdict"`
+	// Commands is the number of htrcli invocations the scenario made.
+	Commands int `json:"commands"`
+	// WallMS is the scenario's total wall-clock time in milliseconds.
+	WallMS int64 `json:"wall_ms"`
+	// Retries is the number of retried attempts across all steps.
+	Retries int `json:"retries"`
+	// FailureMode is a short description of the first failure.
+	FailureMode string            `json:"failure_mode,omitempty"`
+	Steps       []BenchStepResult `json:"steps"`
+}
+
+// BenchReport is the whole run.
+type BenchReport struct {
+	// StartedAt is the RFC3339 timestamp of the run's start.
+	StartedAt string `json:"started_at"`
+	// Transport is the transport the steps used ("ext" or "cdp").
+	Transport string `json:"transport"`
+	// Scenarios are the per-scenario results, in scenario-file order.
+	Scenarios []BenchScenarioResult `json:"scenarios"`
+	// Summary counts verdicts.
+	Summary BenchSummary `json:"summary"`
+}
+
+// BenchSummary counts the verdicts of a run.
+type BenchSummary struct {
+	Total   int `json:"total"`
+	Pass    int `json:"pass"`
+	Partial int `json:"partial"`
+	Fail    int `json:"fail"`
+	NotRun  int `json:"not_run"`
+	// WallMS is the whole run's wall-clock time.
+	WallMS int64 `json:"wall_ms"`
+}
+
+// benchRunner executes one scenario. It is a function so the tests can
+// substitute a fake without a browser.
+type benchRunner func(step BenchStep) BenchStepResult
+
+// runBenchScenario executes a scenario's steps and scores it.
+//
+// A scenario marked requires_auth is reported as NOT_RUN without executing
+// anything: an unauthenticated run must never look like a pass.
+func runBenchScenario(s BenchScenario, run benchRunner) BenchScenarioResult {
+	res := BenchScenarioResult{
+		ID:    s.ID,
+		Ref:   s.Ref,
+		App:   s.App,
+		Goal:  s.Goal,
+		Steps: make([]BenchStepResult, 0, len(s.Steps)),
+	}
+	if s.RequiresAuth {
+		res.Verdict = VerdictNotRun
+		res.FailureMode = "requires an authenticated session"
+		return res
+	}
+
+	start := time.Now()
+	anyOptionalFailed := false
+	for i, step := range s.Steps {
+		sr := run(step)
+		sr.Index = i + 1
+		sr.Note = step.Note
+		sr.Optional = step.Optional
+		if sr.Attempts < 1 {
+			sr.Attempts = 1
+		}
+		// Do NOT overwrite sr.Attempts with the retry BUDGET: the runner
+		// reports the attempts it actually observed, and a step that passed on
+		// the first try made exactly one invocation.
+		res.Steps = append(res.Steps, sr)
+		res.Commands += sr.Attempts
+		res.Retries += sr.Attempts - 1
+		res.WallMS += sr.WallMS
+		if !sr.OK {
+			if step.Optional {
+				anyOptionalFailed = true
+			} else {
+				res.Verdict = VerdictFail
+				if res.FailureMode == "" {
+					res.FailureMode = fmt.Sprintf("step %d failed: %s", i+1, sr.Failure)
+				}
+			}
+		}
+	}
+	if res.WallMS == 0 {
+		res.WallMS = time.Since(start).Milliseconds()
+	}
+	if res.Verdict == "" {
+		if anyOptionalFailed {
+			res.Verdict = VerdictPartial
+			res.FailureMode = "an optional step failed"
+		} else {
+			res.Verdict = VerdictPass
+		}
+	}
+	return res
+}
+
+// benchArgv builds the argv for a step, applying the retry prefix.
+//
+// Retry reuses the `retry` subcommand (it owns the backoff policy); the
+// harness never implements a second loop. `retry --times N` means N retries
+// AFTER the first attempt, so the total attempts are N+1.
+func benchArgv(step BenchStep) []string {
+	argv := expandBenchVars(step.Argv)
+	if step.Retry <= 0 {
+		return argv
+	}
+	prefixed := []string{"retry", "--times", fmt.Sprintf("%d", step.Retry), "--"}
+	return append(prefixed, argv...)
+}
+
+// expandBenchVars replaces ${VAR} in each argument with the environment
+// variable of that name.
+//
+// A scenario can therefore stay machine-independent: the fixture path, the
+// target URL or a test account can come from the environment. An unset
+// variable is left as-is (the literal ${VAR}), so a missing value shows up as
+// an obvious step failure rather than a silent empty string.
+func expandBenchVars(argv []string) []string {
+	out := make([]string, len(argv))
+	for i, a := range argv {
+		out[i] = os.Expand(a, func(name string) string {
+			if v, ok := os.LookupEnv(name); ok {
+				return v
+			}
+			return "${" + name + "}"
+		})
+	}
+	return out
+}
+
+// benchStepRunnerFor returns the runner that executes a step over the given
+// transport.
+//
+// The transport flag is injected into each step's argv, so a scenario file
+// does not have to repeat it and a run can be replayed over the other
+// transport by flipping one flag. A step that already names a transport flag
+// keeps its own value.
+func benchStepRunnerFor(transport string) benchRunner {
+	return func(step BenchStep) BenchStepResult {
+		return runBenchStepWithTransport(step, transport)
+	}
+}
+
+// benchHasTransportFlag reports whether an argv already selects a transport.
+func benchHasTransportFlag(argv []string) bool {
+	for _, a := range argv {
+		switch a {
+		case "--cdp", "--transport", "--transport=cdp", "--transport=ext":
+			return true
+		}
+	}
+	return false
+}
+
+// injectBenchTransport prefixes a step's argv with the transport flag when the
+// step does not already select one.
+func injectBenchTransport(argv []string, transport string) []string {
+	if transport == "" || benchHasTransportFlag(argv) {
+		return argv
+	}
+	out := make([]string, 0, len(argv)+1)
+	out = append(out, "--transport="+transport)
+	return append(out, argv...)
+}
+
+// runBenchStepWithTransport executes one step over the given transport and
+// evaluates its expectations.
+func runBenchStepWithTransport(step BenchStep, transport string) BenchStepResult {
+	step.Argv = injectBenchTransport(step.Argv, transport)
+	return runBenchStep(step)
+}
+
+// runBenchStep executes one step for real and evaluates its expectations.
+func runBenchStep(step BenchStep) BenchStepResult {
+	argv := benchArgv(step)
+	run := runSelf(argv)
+	res := BenchStepResult{
+		Argv:     argv,
+		ExitCode: run.ExitCode,
+		Attempts: 1,
+		WallMS:   run.Duration.Milliseconds(),
+		Stdout:   truncateForReport(run.Stdout),
+		Stderr:   truncateForReport(run.Stderr),
+	}
+	if step.Retry > 0 {
+		// The retry wrapper performs the attempts and reports how many it
+		// actually made on stderr. Prefer that observed count; fall back to
+		// the budget only if the line is missing (e.g. the child failed to
+		// start).
+		res.Attempts = step.Retry + 1
+		if observed, ok := parseRetryAttempts(run.Stderr); ok {
+			res.Attempts = observed
+		}
+	}
+	if err := evaluateBenchExpect(step.Expect, run); err != nil {
+		res.Failure = err.Error()
+		return res
+	}
+	res.OK = true
+	return res
+}
+
+// evaluateBenchExpect checks a step's expectations against its output.
+//
+// It returns nil when every present expectation holds.
+func evaluateBenchExpect(expect *BenchExpect, run selfRun) error {
+	if expect == nil {
+		if run.ExitCode != 0 {
+			return fmt.Errorf("exit code %d (expected 0): %s", run.ExitCode, firstLine(run.Stderr))
+		}
+		return nil
+	}
+	if expect.Exit != run.ExitCode {
+		return fmt.Errorf("exit code %d, want %d: %s", run.ExitCode, expect.Exit, firstLine(run.Stderr))
+	}
+	if expect.StdoutContains != "" && !strings.Contains(run.Stdout, expect.StdoutContains) {
+		return fmt.Errorf("stdout does not contain %q", expect.StdoutContains)
+	}
+	if expect.StdoutNotContains != "" && strings.Contains(run.Stdout, expect.StdoutNotContains) {
+		return fmt.Errorf("stdout contains %q", expect.StdoutNotContains)
+	}
+	if expect.JSONPath != nil {
+		if err := evaluateJSONPath(expect.JSONPath, run.Stdout); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// evaluateJSONPath asserts on a value inside the step's JSON stdout.
+func evaluateJSONPath(expect *JSONPathExpect, stdout string) error {
+	var doc any
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		return fmt.Errorf("stdout is not JSON: %w", err)
+	}
+	val, ok := lookupJSONPath(doc, expect.Path)
+	if !ok {
+		return fmt.Errorf("json path %q not found", expect.Path)
+	}
+	if expect.Exists {
+		return nil
+	}
+	got := normalizeJSONValue(val)
+	if got != expect.Equals {
+		return fmt.Errorf("json path %q = %q, want %q", expect.Path, got, expect.Equals)
+	}
+	return nil
+}
+
+// firstLine returns the first non-empty line of s (for error messages).
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// benchReportMaxStream bounds how much of a step's output lands in a report.
+const benchReportMaxStream = 4000
+
+// truncateForReport bounds a captured stream so one chatty step cannot blow
+// up the report file.
+func truncateForReport(s string) string {
+	if len(s) <= benchReportMaxStream {
+		return s
+	}
+	return s[:benchReportMaxStream] + fmt.Sprintf("\n... (truncated, %d bytes total)", len(s))
+}
+
+// summarizeBenchReport counts the verdicts of a report.
+func summarizeBenchReport(results []BenchScenarioResult, wallMS int64) BenchSummary {
+	sum := BenchSummary{Total: len(results), WallMS: wallMS}
+	for _, r := range results {
+		switch r.Verdict {
+		case VerdictPass:
+			sum.Pass++
+		case VerdictPartial:
+			sum.Partial++
+		case VerdictFail:
+			sum.Fail++
+		case VerdictNotRun:
+			sum.NotRun++
+		}
+	}
+	return sum
+}
+
+// parseRetryAttempts reads the machine-readable attempt count the `retry`
+// wrapper prints ("retry: attempts=N"). The LAST occurrence wins, so a
+// multi-line stderr still resolves to the final count.
+func parseRetryAttempts(stderr string) (int, bool) {
+	const marker = "retry: attempts="
+	idx := strings.LastIndex(stderr, marker)
+	if idx < 0 {
+		return 0, false
+	}
+	rest := stderr[idx+len(marker):]
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest[:end])
+	if err != nil || n < 1 {
+		return 0, false
+	}
+	return n, true
+}

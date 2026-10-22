@@ -63,6 +63,7 @@ each probe costs a round trip.
 | native `<select>` | `pick "<sel>" "<option text or value>"` (verifies; plain `select` silently selects nothing for a label it can't match) |
 | custom dropdown / react-select / autocomplete (role=combobox) | `pick "<sel>" "<full option text>"`: opens, types, waits for the options, clicks the best match, and checks the widget shows it. Never `fill`/`click` the tiny input. |
 | checkbox / radio | `check "<sel>"` / `uncheck "<sel>"` (idempotent; `click` toggles). Target by `input[value=x]` or `label=...`, not position. |
+| contenteditable (rich text: Gmail reply box, Docs body) | `type "<sel>" "<value>"` — **appends** at the caret end; it never wipes the quoted text or the signature. `fill` **replaces** the whole content (correct for a spreadsheet cell, wrong for a reply box). |
 | JS datepicker text input | `type "<sel>" "03/14/2026"` (trusted keystrokes; `fill` leaves the widget's own state empty and it reverts), in the widget's format; then click elsewhere and read the value back |
 | calendar popup (grid of day buttons) | click the trigger, click next/prev until the month label matches, click the day |
 | range / colour input | `eval` set `.value` and dispatch `input`+`change` events (bubbles), then read back |
@@ -464,6 +465,74 @@ htrcli page | grep Ready                 # should show "complete"
 htrcli eval 'document.readyState'        # "loading" | "interactive" | "complete"
 ```
 
+## Retrying flaky commands
+
+Some pages are slow or intermittently fail (a click races a re-render, a list
+is still loading). `retry` runs another htrcli subcommand and re-runs it with
+exponential backoff on a non-zero exit. It is **opt-in** — normal commands
+never retry — and every failed attempt is printed to stderr, so a failure is
+never silent. The command exits non-zero when all attempts fail.
+
+```bash
+htrcli retry --times 3 --delay 500 -- wait --selector ".results-table" --timeout 8000
+htrcli retry --times 5 --delay 250 --max-delay 5000 -- extract table "table"
+htrcli retry --times 3 -- --transport cdp wait --selector ".results-table"   # transport AFTER `--`
+```
+
+- `--times N` — retries after the first attempt (default 3; total attempts = N+1)
+- `--delay MS` — initial backoff (default 500ms; doubles each attempt)
+- `--max-delay MS` — cap on the backoff (default 10000ms)
+
+**Put a transport selector AFTER the `--`.** `htrcli --transport cdp retry -- …` also works (the parent forwards the flags it was given), but the after-`--` form is the one that always has.
+
+**`retry` re-runs the WHOLE subcommand**, so it must not wrap a non-idempotent
+action: a `click` on submit, `fill-form`, `tabs new`/`tabs close`, or a send can
+fire twice. Retry only reads and waits (`wait`, `text`, `find`, `collect`,
+`extract`, `page`). Use it for genuinely transient failures only; if a selector
+is wrong, retrying just delays the error — fix the selector instead.
+
+## Benchmarking
+
+`htrcli bench run <scenario-file>` runs a JSON scenario file and writes a
+report. It is how the office-task benchmark
+(`docs/benchmarks/office-task-benchmark.md`) is executed.
+
+```bash
+htrcli bench run docs/benchmarks/scenarios/b01-gmail-find-emails.json --transport cdp
+htrcli bench run scenario.json --out /tmp/report.json
+```
+
+A scenario is a list of steps, each a raw htrcli argv plus its expectations:
+
+```json
+{
+  "scenarios": [
+    {
+      "id": "B01",
+      "requires_auth": true,
+      "steps": [
+        {"argv": ["open", "https://mail.google.com/"],
+         "expect": {"exit": 0},
+         "retry": 2}
+      ]
+    }
+  ]
+}
+```
+
+- `expect` may assert `exit` (default 0), `stdoutContains`,
+  `stdoutNotContains` and `jsonPath` (`{"path": "rows.0.Name",
+  "equals": "Alice"}`).
+- `retry: N` reuses the `retry` subcommand, so the backoff policy lives in
+  one place.
+- `optional: true` downgrades a failing step to PARTIAL.
+- `requires_auth: true` is reported as NOT_RUN, never as PASS.
+- `${VAR}` in an argv expands from the environment.
+
+Verdicts: PASS / PARTIAL / FAIL / NOT_RUN. The report holds the per-step
+exit code, attempts, wall time and output, plus the per-scenario
+`commands`/`wall_ms`/`retries`/`failure_mode` metrics.
+
 ## Screenshots
 
 ### Viewport (default)
@@ -508,7 +577,16 @@ htrcli screenshot --json | jq -r '.data.screenshot' | base64 -d > img.png
 
 ```bash
 htrcli find <selector>              # Element info (tag, text, selector, xpath, visibility, bounding box)
-htrcli findAll <selector>           # All matching elements
+htrcli findAll <selector>           # All matching elements (viewport only!)
+htrcli collect <selector>            # Every match in a VIRTUALIZED list (scrolls + accumulates)
+htrcli collect <selector> --max-items 100        # Stop after N rows
+htrcli collect <selector> --max-steps 200        # Scroll-step ceiling (default 200)
+htrcli collect <selector> --step-delay 120       # ms between scroll steps (default 120)
+htrcli collect <selector> --ref      # Mint refs for every collected row, at harvest time
+htrcli extract table <selector>     # HTML table -> {columns, rows}
+htrcli extract list <selector>       # List of items -> {items}
+htrcli extract list <selector> --fields "name:.name,age:.age"
+htrcli extract list <selector> --fields "title:.title,due:@data-due"   # @attr = an attribute
 htrcli find <selector> --ref        # Mint a persistent ref (@eN) for later use
 htrcli findAll <selector> --ref     # Mint refs for every match
 htrcli text <selector>              # Text content
@@ -517,6 +595,28 @@ htrcli attr <selector> <attr>       # Attribute value (e.g. href, src)
 htrcli html <selector>              # innerHTML
 htrcli snapshot                     # Accessibility snapshot tree with refs
 ```
+
+**Virtualized lists:** `findAll` only sees the rows currently in the DOM. Long
+lists (Gmail threads, Drive rows, chat messages, Sheets) recycle row elements,
+so `findAll` returns a truncated slice. Use `collect`, which finds the list's
+scroll container, scrolls it step by step and accumulates every row it sees:
+
+```bash
+htrcli collect "tr.zA" --json    # every Gmail row
+```
+
+It reports `steps`, `truncated`, `truncatedBy`, `scrolled` and `keyStrategy`:
+
+| `keyStrategy` | meaning | risk |
+|---|---|---|
+| `key` | rows carry `data-id` / `data-item-id` / `data-msg-id` | none — reliable |
+| `text` | rows have no id; de-duplicated by text | rows with identical text may be merged |
+| `index` | rows have neither id nor text | node-identity de-duplication — may duplicate or drop rows |
+
+`truncatedBy` says what stopped collection early: `maxItems` (the `--max-items`
+cap) or `maxSteps` (the step limit, raise `--max-steps`). It is `null` when the
+list was read to its end. The caveats are printed as warnings on stderr in the
+default output, so check them before trusting a row count.
 
 ## Tab management
 
@@ -883,6 +983,180 @@ htrcli command '{"action":"findAll","target":{"selector":"a"}}'
 htrcli command '{"action":"wait","target":{"selector":".loaded"},"options":{"timeout":5000}}'
 ```
 
+## Office apps: Gmail, Calendar, Docs, Sheets, Tasks
+
+These recipes were verified against the local fixtures in
+`docs/benchmarks/fixtures/` (same DOM shapes as the real apps, no real data).
+**Run them against a test account only** — a send, an invite, a share or a
+cell edit is a real write.
+
+Run the fixtures yourself:
+
+```bash
+make bench-smoke                              # the harness smoke scenario
+htrcli --cdp open "file://$PWD/docs/benchmarks/fixtures/gmail.html"
+```
+
+### Gmail — find emails (B01)
+
+Gmail virtualizes the message list: only the visible rows exist in the DOM, so
+`findAll` returns a partial slice. Use `collect` (scrolls and accumulates),
+then `extract` to turn rows into records.
+
+```bash
+htrcli --cdp open "https://mail.google.com/mail/u/0/#search/is%3Aunread"
+htrcli --cdp wait --selector "div[role='main']" --timeout 15000
+htrcli --cdp collect "div[role='main'] tr"          # every row, scrolls the list
+htrcli --cdp extract list "div[role='main'] tr" \
+  --fields "sender:.yW .span,subject:.yP .span,date:.xW .span"
+```
+
+`extract list` returns `{"count": N, "items": [{sender, subject, date}]}`.
+A selector that names the ROWS (`.row`, `tr`) returns one item per match; a
+selector that names the CONTAINER (`ul#items`) returns the container's
+children. Both are supported — do not pick the first match and assume the
+rest.
+
+`collect` prints a warning when it de-duplicates by text (`keyStrategy`), which
+means identical-looking rows may have been merged. Prefer a stable field
+(`data-id`, a link href) when the list has one.
+
+### Gmail — reply (B02)
+
+The reply box is a **contenteditable** that already holds the quoted thread
+and your signature.
+
+- `type` **appends** (it places the caret at the end). It never wipes the
+  signature or the quoted text.
+- `fill` **replaces** the whole content — never use it on a reply box.
+
+```bash
+htrcli --cdp click "div[role='textbox']"          # focus the reply box
+htrcli --cdp type "div[role='textbox']" "Thanks — see the attached."
+htrcli --cdp text "div[role='textbox']"           # READ BACK before sending
+```
+
+Always read the box back before sending. If the text does not contain your
+body **and** the signature, stop and fix it — do not send.
+
+### Calendar — create an event (B03)
+
+Date and time fields are **JS datepickers**: `fill` sets the text but leaves
+the widget's own state empty and it reverts. Use `type` and read back.
+
+Guest autocomplete is a combobox: use `pick` with the full option text, never
+`fill` on the small input.
+
+```bash
+htrcli --cdp fill "#title" "Team sync"
+htrcli --cdp type "#date" "10/22/2026"              # widget's own format
+htrcli --cdp type "#time" "09:30"
+htrcli --cdp value "#date"                          # read back
+htrcli --cdp pick "#guest-input" "Dana Example"     # combobox
+htrcli --cdp value "#guest-input"                   # read back
+```
+
+The day picker is a grid of buttons: click the trigger, click next/prev until
+the month label matches, then click the day. There is no `pick` for a date
+grid.
+
+### Docs — edit and share (B05)
+
+The editing surface is a contenteditable, not an `<input>`: `fill` is not the
+verb. Type into the surface, and use `press` for formatting (headings, lists).
+
+```bash
+htrcli --cdp click "#doc-surface"                   # focus the document body
+htrcli --cdp type "#doc-surface" "New paragraph."
+htrcli --cdp press "Enter"
+htrcli --cdp text "#doc-surface"                    # read back
+```
+
+Share opens a dialog: fill the people field, then confirm the dialog reports
+the new permission. `pick` is the verb for a share-to combobox.
+
+### Sheets — data entry and formulas (B06)
+
+Cells are contenteditable. `fill` replaces a cell's content (correct for a
+cell); `type` appends (wrong for a cell).
+
+```bash
+htrcli --cdp click '[data-col="A"][data-row="1"]'
+htrcli --cdp fill '[data-col="A"][data-row="1"]' "Widget"
+htrcli --cdp fill '[data-col="B"][data-row="1"]' "12"
+htrcli --cdp text '[data-col="A"][data-row="1"]'   # read back
+```
+
+Cell navigation is keyboard-driven: `press "Tab"` moves right, `press "Enter"`
+moves down. Read the grid back as a table when you need the values:
+
+```bash
+htrcli --cdp extract table "#grid"
+```
+
+A formula cell is typed like any other cell (`=SUM(A1:A9)`); the computed
+value is what the grid shows after the sheet recalculates — read it back
+before trusting it.
+
+### Tasks — todo lists and reminders (B04)
+
+Google Tasks has **two ways** to add a task, and they need different verbs.
+
+**Quick-add**: one field. The whole task, including its date, is typed into
+it and committed with `Enter`.
+
+```bash
+htrcli --cdp type "#quick-add" "Send the report 10/22/2026 5pm"
+htrcli --cdp press "Enter"          # commit — the field is not submitted by typing
+```
+
+**Full form**: a details panel, and the date is chosen from a **popover grid
+of day buttons** — there is no date field to type into. Click the trigger,
+then click the day.
+
+```bash
+htrcli --cdp click "#show-details"   # reveal the panel
+htrcli --cdp fill "#task-title" "Book the room"
+htrcli --cdp click "#date-trigger"   # open the date popover
+htrcli --cdp click "#day-grid button[data-day='2026-10-23']"
+htrcli --cdp attr "#date-trigger" "data-due"   # read the chosen date back
+htrcli --cdp click "#save"
+```
+
+**The checkbox is an ARIA checkbox**, not an `<input type=checkbox>`: it is a
+`<div role="checkbox" aria-checked="false">`. `check` / `uncheck` drive
+`aria-checked` and dispatch a click so the app's own handler runs. They are
+idempotent — the state ends up as asked either way.
+
+```bash
+htrcli --cdp check   "#task-list [role=checkbox]"
+htrcli --cdp uncheck "#task-list [role=checkbox]"
+htrcli --cdp attr    "#task-list [role=checkbox]" "aria-checked"   # read back
+```
+
+A task's state usually lives in **attributes**, not in text, so `extract list`
+must be told to read attributes:
+
+```bash
+# "@data-due"      the item's OWN attribute
+# "@.link@href"    a DESCENDANT's attribute (selector@attribute)
+# "[data-due]"     an attribute value — a descendant match, else the item itself
+# ".title"         a descendant's TEXT
+htrcli --cdp extract list "#task-list .task" \
+  --fields "title:.title,due:@data-due"
+```
+
+A pure attribute selector (`[data-due]`) returns the attribute's **value**,
+not the matched element's text. A plain selector (`.title`) returns the
+descendant's text; a descendant wins over the item itself.
+
+### Booking (B07)
+
+Date pickers, seat maps and payment. Fill the search form, read the available
+slots back, pick one, and **stop before any card entry** — a benchmark run
+must never enter payment details. Book a clearly-labelled test slot and
+cancel it after capturing the confirmation number.
+
 ## Common workflows
 
 ### Log in to a site
@@ -1072,7 +1346,9 @@ after the page loads.
 | `htrcli scroll <dir> [px]` | Scroll page |
 | `htrcli clear <sel>` | Clear input field |
 | `htrcli find <sel>` | Find element info |
-| `htrcli findAll <sel>` | Find all elements matching selector |
+| `htrcli findAll <sel>` | Find all elements matching selector (viewport only) |
+| `htrcli collect <sel>` | Collect every match in a virtualized list (scrolls) |
+| `htrcli extract table\|list <sel>` | Extract structured data (table rows / list items); `--fields "name:sel,due:@attr"`; `--container` when the selector names a wrapper |
 | `htrcli text <sel>` | Get text content |
 | `htrcli value <sel>` | Get input value |
 | `htrcli attr <sel> <attr>` | Get attribute |
@@ -1088,6 +1364,9 @@ after the page loads.
 | `htrcli network read` | Read buffered network requests |
 | `htrcli network watch` | Stream network entries until timeout |
 | `htrcli network wait` | Block until a matching request completes |
+| `htrcli wait` | Block until a DOM condition holds (--selector/--text/--url) |
+| `htrcli retry -- <cmd>` | Run a subcommand with exponential-backoff retries (opt-in, loud) |
+| `htrcli bench run <file>` | Run a benchmark scenario file and write a JSON report |
 | `htrcli network mock` | Mock responses for matching requests |
 | `htrcli network block` | Block (fail) matching requests |
 | `htrcli network unmock` | Remove mock/block rules |

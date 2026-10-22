@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheets-like fixture (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; }
+  table { border-collapse: collapse; }
+  td, th { border: 1px solid #bbb; width: 110px; height: 22px; }
+  .cell { padding: 2px 4px; }
+</style>
+</head>
+<body>
+  <h1>Sheet (fixture)</h1>
+
+  <!-- A grid: one <td> per cell, in row order. Cells are contenteditable
+       like a real spreadsheet grid. -->
+  <table id="grid">
+    <tbody>
+      <tr><td><div class="cell" contenteditable="true" data-col="A" data-row="1"></div></td><td><div class="cell" contenteditable="true" data-col="B" data-row="1"></div></td><td><div class="cell" contenteditable="true" data-col="C" data-row="1"></div></td></tr>
+      <tr><td><div class="cell" contenteditable="true" data-col="A" data-row="2"></div></td><td><div class="cell" contenteditable="true" data-col="B" data-row="2"></div></td><td><div class="cell" contenteditable="true" data-col="C" data-row="2"></div></td></tr>
+      <tr><td><div class="cell" contenteditable="true" data-col="A" data-row="3"></div></td><td><div class="cell" contenteditable="true" data-col="B" data-row="3"></div></td><td><div class="cell" contenteditable="true" data-col="C" data-row="3"></div></td></tr>
+    </tbody>
+  </table>
+  <div id="formula-result" role="status">sum=0</div>
+</body>
+</html>

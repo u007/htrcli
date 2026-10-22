@@ -1,0 +1,216 @@
+{
+	"scenarios": [
+		{
+			"id": "S07",
+			"ref": "B04",
+			"app": "Tasks-like fixture (local)",
+			"goal": "Create a todo/reminder via QUICK-ADD: type the task and its date in one field, press Enter, and assert the created task's due date.",
+			"steps": [
+				{
+					"note": "open the tasks fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_TASKS}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "wait for the quick-add field",
+					"argv": ["wait", "--selector", "#quick-add", "--timeout", "10000"],
+					"expect": {
+						"exit": 0
+					},
+					"retry": 2
+				},
+				{
+					"note": "type the task with its date in one field",
+					"argv": ["type", "#quick-add", "Send the report 10/22/2026 5pm"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "press Enter to commit the quick-add",
+					"argv": ["press", "Enter"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the task was created",
+					"argv": [
+						"extract",
+						"list",
+						"#task-list .task",
+						"--fields",
+						"title:.title,due:@data-due"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "the new task's title must be the text before the date",
+					"argv": [
+						"extract",
+						"list",
+						"#task-list .task",
+						"--fields",
+						"title:.title,due:@data-due"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.1.title",
+							"equals": "Send the report"
+						}
+					}
+				},
+				{
+					"note": "the new task's due date must be 2026-10-22",
+					"argv": [
+						"extract",
+						"list",
+						"#task-list .task",
+						"--fields",
+						"title:.title,due:@data-due"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.1.due",
+							"equals": "2026-10-22"
+						}
+					}
+				},
+				{
+					"note": "tick the task off with its ARIA checkbox (a role=checkbox DIV, not an <input>)",
+					"argv": ["check", "#task-list .task:nth-child(2) [role=checkbox]"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the ARIA checkbox must now be checked",
+					"argv": [
+						"attr",
+						"#task-list .task:nth-child(2) [role=checkbox]",
+						"aria-checked"
+					],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "true"
+					}
+				}
+			]
+		},
+		{
+			"id": "S08",
+			"ref": "B04",
+			"app": "Tasks-like fixture (local)",
+			"goal": "Create a todo via the FULL FORM: reveal the details panel, set the date through the popover date grid (no text field exists), save, and assert the due date.",
+			"steps": [
+				{
+					"note": "open the tasks fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_TASKS}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "wait for the details trigger",
+					"argv": ["wait", "--selector", "#show-details", "--timeout", "10000"],
+					"expect": {
+						"exit": 0
+					},
+					"retry": 2
+				},
+				{
+					"note": "reveal the full form",
+					"argv": ["click", "#show-details"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the panel is now visible",
+					"argv": ["wait", "--selector", "#task-title", "--timeout", "5000"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "fill the title",
+					"argv": ["fill", "#task-title", "Book the room"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "open the date popover",
+					"argv": ["click", "#date-trigger"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the day grid must be open",
+					"argv": [
+						"wait",
+						"--selector",
+						"#day-grid button[data-day='2026-10-23']",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "click the day button",
+					"argv": ["click", "#day-grid button[data-day='2026-10-23']"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "read the chosen date back from the trigger",
+					"argv": ["attr", "#date-trigger", "data-due"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "2026-10-23"
+					}
+				},
+				{
+					"note": "save the task",
+					"argv": ["click", "#save"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the saved task must carry the chosen due date",
+					"argv": [
+						"extract",
+						"list",
+						"#task-list .task",
+						"--fields",
+						"title:.title,due:@data-due"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.1.due",
+							"equals": "2026-10-23"
+						}
+					}
+				}
+			]
+		}
+	]
+}
