@@ -27,10 +27,13 @@ describe("extractTable", () => {
 		]);
 	});
 
-	it("falls back to the first tr for headers when there is no thead", () => {
+	it("does not infer a header from a td-only first row when there is no thead", () => {
+		// A row of <td>s is DATA. Treating it as a header silently drops that
+		// row's values and turns its first cell into a column name — the exact
+		// data loss the Sheets grid fixture hit (benchmark scenario S06).
 		// Explicit <tbody>: browsers wrap bare <tr> rows in a tbody, so the
-		// header row lands inside the tbody branch. happy-dom does not insert
-		// the tbody itself, so the fixture must include it.
+		// row lands inside the tbody branch. happy-dom does not insert the
+		// tbody itself, so the fixture must include it.
 		document.body.innerHTML = `
 			<table id="t">
 				<tbody>
@@ -42,8 +45,12 @@ describe("extractTable", () => {
 		if (!_el) throw new Error("missing element");
 		const root = _el;
 		const r = extractTable(root);
-		expect(r.columns).toEqual(["Name", "Age"]);
-		expect(r.rows).toEqual([{ Name: "Carol", Age: "40" }]);
+		expect(r.columns).toEqual(["col1", "col2"]);
+		expect(r.rowCount).toBe(2);
+		expect(r.rows).toEqual([
+			{ col1: "Name", col2: "Age" },
+			{ col1: "Carol", col2: "40" },
+		]);
 	});
 
 	it("names unnamed columns colN", () => {
@@ -289,6 +296,64 @@ describe("extractTable header and duplicate columns", () => {
 		const r = extractTable(root);
 		expect(r.columns).toEqual(["Amount", "Amount_2"]);
 		expect(Object.values(r.rows[0])).toEqual(["100", "200"]);
+	});
+
+	it("treats a first row of th cells as the header even without a thead", () => {
+		// <th> is the explicit HTML signal for a header cell, so a tbody whose
+		// first row is all <th> keeps its header semantics.
+		document.body.innerHTML = `
+			<table id="t">
+				<tbody>
+					<tr><th>Name</th><th>Age</th></tr>
+					<tr><td>Carol</td><td>40</td></tr>
+				</tbody>
+			</table>`;
+		const root = document.getElementById("t");
+		if (!root) throw new Error("missing table");
+		const r = extractTable(root);
+		expect(r.columns).toEqual(["Name", "Age"]);
+		expect(r.rowCount).toBe(1);
+		expect(r.rows).toEqual([{ Name: "Carol", Age: "40" }]);
+	});
+
+	it("keeps every row of a td-only grid (a spreadsheet has no header row)", () => {
+		// The Sheets fixture shape: a grid of contenteditable cells, no thead,
+		// no th. The first row's value must survive as DATA, not become a
+		// column name. Regression guard for benchmark scenario S06.
+		document.body.innerHTML = `
+			<table id="grid">
+				<tbody>
+					<tr><td><div contenteditable="true" data-col="A" data-row="1">Widget</div></td><td><div contenteditable="true" data-col="B" data-row="1"></div></td></tr>
+					<tr><td><div contenteditable="true" data-col="A" data-row="2"></div></td><td><div contenteditable="true" data-col="B" data-row="2"></div></td></tr>
+					<tr><td><div contenteditable="true" data-col="A" data-row="3"></div></td><td><div contenteditable="true" data-col="B" data-row="3"></div></td></tr>
+				</tbody>
+			</table>`;
+		const root = document.getElementById("grid");
+		if (!root) throw new Error("missing table");
+		const r = extractTable(root);
+		expect(r.columns).toEqual(["col1", "col2"]);
+		expect(r.rowCount).toBe(3);
+		expect(r.rows[0]).toEqual({ col1: "Widget", col2: "" });
+	});
+
+	it("returns no columns and no rows for an empty table", () => {
+		document.body.innerHTML = `<table id="t"><tbody></tbody></table>`;
+		const root = document.getElementById("t");
+		if (!root) throw new Error("missing table");
+		const r = extractTable(root);
+		expect(r.columns).toEqual([]);
+		expect(r.rows).toEqual([]);
+		expect(r.rowCount).toBe(0);
+	});
+
+	it("returns no columns and no rows for a table whose only row is empty", () => {
+		document.body.innerHTML = `<table id="t"><tbody><tr></tr></tbody></table>`;
+		const root = document.getElementById("t");
+		if (!root) throw new Error("missing table");
+		const r = extractTable(root);
+		expect(r.columns).toEqual([]);
+		expect(r.rows).toEqual([]);
+		expect(r.rowCount).toBe(0);
 	});
 });
 

@@ -47,6 +47,7 @@
 - **`--frame` recovers from more stale-context errors**: a frame navigation that surfaces as "Execution context was destroyed" or "Cannot find default execution context" re-resolves the frame context once, as "Cannot find context with specified id" already did (`htrcli/internal/cdp/frame.go`)
 - **`--cdp network watch` records a redirect hop whose request began before attach**: the hop is reported from the redirect response instead of being lost (`htrcli/internal/cdp/netlog.go`)
 - **`--cdp pick` no longer reads options from the whole page**: when a combobox has no `aria-controls`/`aria-owns` link and no open listbox in its container, `pick` fails with a clear error instead of matching options elsewhere (`htrcli/internal/cdp/formkit.js`)
+- **`extract table` header inference never drops a data row** (`extractData.ts`): a row of `<td>` cells is now always DATA — previously the first row was silently consumed as an implied header, turning its first cell into a column name and losing its values. Only a `<thead>` row or an all-`<th>` first row is a header row; a table with no header names its columns `col1`, `col2`, … from the widest data row. Caught by the offline Sheets benchmark scenario S06 (`extract table "#grid"` on `docs/benchmarks/fixtures/sheets.html`, expected `rowCount: 3`, was `2`), which now PASSES; the smoke scenario S01 (which has a real `<thead>`) and Docs/Calendar remain unaffected. (`extractData.ts`, `extractData.test.ts`, `htrcli/internal/cdp/bundle/htrcli-dom.js`)
 
 ### Changed
 

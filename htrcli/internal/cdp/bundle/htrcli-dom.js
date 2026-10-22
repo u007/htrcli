@@ -782,19 +782,18 @@
       }
     }
     if (headerCells.length === 0) {
-      const firstTr = table.querySelector("tr");
-      if (firstTr) {
-        headerCells = Array.from(firstTr.querySelectorAll("th, td"));
+      const firstTr = Array.from(table.querySelectorAll("tr")).find(
+        (tr) => !(thead == null ? void 0 : thead.contains(tr))
+      );
+      const cells = firstTr ? Array.from(firstTr.querySelectorAll("td, th")) : [];
+      if (firstTr && cells.length > 0 && cells.every((c) => {
+        var _a;
+        return ((_a = c.tagName) == null ? void 0 : _a.toUpperCase()) === "TH";
+      })) {
+        headerCells = cells;
         headerRow = firstTr;
       }
     }
-    const seenNames = /* @__PURE__ */ new Map();
-    const columns = headerCells.map((c, i) => {
-      const base = textOf(c) || `col${i + 1}`;
-      const seen = seenNames.get(base) ?? 0;
-      seenNames.set(base, seen + 1);
-      return seen === 0 ? base : `${base}_${seen + 1}`;
-    });
     const bodyRows = [];
     const tbody = table.querySelector("tbody");
     if (tbody) {
@@ -808,6 +807,22 @@
         if (thead == null ? void 0 : thead.contains(tr)) continue;
         bodyRows.push(tr);
       }
+    }
+    const seenNames = /* @__PURE__ */ new Map();
+    let columns;
+    if (headerCells.length > 0) {
+      columns = headerCells.map((c, i) => {
+        const base = textOf(c) || `col${i + 1}`;
+        const seen = seenNames.get(base) ?? 0;
+        seenNames.set(base, seen + 1);
+        return seen === 0 ? base : `${base}_${seen + 1}`;
+      });
+    } else {
+      const width = bodyRows.reduce(
+        (max, tr) => Math.max(max, tr.querySelectorAll("td, th").length),
+        0
+      );
+      columns = Array.from({ length: width }, (_, i) => `col${i + 1}`);
     }
     const rows = [];
     for (const tr of bodyRows) {

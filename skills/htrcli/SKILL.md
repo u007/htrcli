@@ -1094,6 +1094,13 @@ moves down. Read the grid back as a table when you need the values:
 htrcli --cdp extract table "#grid"
 ```
 
+`extract table` never drops a data row: only a `<thead>` row or an all-`<th>`
+first row is treated as a header row. A grid made of `<td>` cells — like this
+Sheets fixture — has no implied header, so every row comes back as data and
+columns are named `col1`, `col2`, … from the widest row. (Previously a
+`<td>`-only first row was silently consumed as column headers, losing its
+values; benchmark scenario S06 now guards this.)
+
 A formula cell is typed like any other cell (`=SUM(A1:A9)`); the computed
 value is what the grid shows after the sheet recalculates — read it back
 before trusting it.

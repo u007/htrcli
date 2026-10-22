@@ -40,8 +40,11 @@ export function extractTable(root: Element): ExtractedTable {
 	if (!table) {
 		return { columns: [], rows: [], rowCount: 0 };
 	}
-	// Header: prefer <thead>; otherwise the first <tr>. Remember WHICH row
-	// supplied the header so it can be excluded from the data rows.
+	// Header: a <thead>'s first row, or — only when the table has no usable
+	// <thead> — a first row whose cells are ALL <th>. A row of <td>s is DATA:
+	// treating it as a header silently drops that row's values and turns its
+	// first cell into a column name. Remember WHICH row supplied the header
+	// so it can be excluded from the data rows.
 	let headerCells: Element[] = [];
 	let headerRow: Element | null = null;
 	const thead = table.querySelector("thead");
@@ -53,21 +56,23 @@ export function extractTable(root: Element): ExtractedTable {
 		}
 	}
 	if (headerCells.length === 0) {
-		const firstTr = table.querySelector("tr");
-		if (firstTr) {
-			headerCells = Array.from(firstTr.querySelectorAll("th, td"));
+		// Look at the first row OUTSIDE the thead: a <thead> that is present
+		// but empty must not shadow a header row in the body.
+		const firstTr = Array.from(table.querySelectorAll("tr")).find(
+			(tr) => !thead?.contains(tr),
+		);
+		const cells = firstTr ? Array.from(firstTr.querySelectorAll("td, th")) : [];
+		// <th> is the explicit HTML signal for a header cell. Only a row made
+		// entirely of <th> is a header row; a <td> row is data.
+		if (
+			firstTr &&
+			cells.length > 0 &&
+			cells.every((c) => c.tagName?.toUpperCase() === "TH")
+		) {
+			headerCells = cells;
 			headerRow = firstTr;
 		}
 	}
-	// Duplicate header names would overwrite each other in the row object and
-	// silently drop a column's value, so make them unique.
-	const seenNames = new Map<string, number>();
-	const columns = headerCells.map((c, i) => {
-		const base = textOf(c) || `col${i + 1}`;
-		const seen = seenNames.get(base) ?? 0;
-		seenNames.set(base, seen + 1);
-		return seen === 0 ? base : `${base}_${seen + 1}`;
-	});
 
 	const bodyRows: Element[] = [];
 	const tbody = table.querySelector("tbody");
@@ -87,6 +92,26 @@ export function extractTable(root: Element): ExtractedTable {
 			if (thead?.contains(tr)) continue;
 			bodyRows.push(tr);
 		}
+	}
+
+	// Duplicate header names would overwrite each other in the row object and
+	// silently drop a column's value, so make them unique.
+	const seenNames = new Map<string, number>();
+	let columns: string[];
+	if (headerCells.length > 0) {
+		columns = headerCells.map((c, i) => {
+			const base = textOf(c) || `col${i + 1}`;
+			const seen = seenNames.get(base) ?? 0;
+			seenNames.set(base, seen + 1);
+			return seen === 0 ? base : `${base}_${seen + 1}`;
+		});
+	} else {
+		// No header row: the column COUNT comes from the widest data row.
+		const width = bodyRows.reduce(
+			(max, tr) => Math.max(max, tr.querySelectorAll("td, th").length),
+			0,
+		);
+		columns = Array.from({ length: width }, (_, i) => `col${i + 1}`);
 	}
 
 	const rows: Record<string, string>[] = [];
