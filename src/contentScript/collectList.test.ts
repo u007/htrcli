@@ -268,6 +268,58 @@ describe("collectAll onRow hook", () => {
 		expect(liveAtCallTime.length).toBeGreaterThan(0);
 		expect(liveAtCallTime.every(Boolean)).toBe(true);
 	});
+
+	it("harvested nodes detach after scrolling a recycling virtualizer (refs go stale)", async () => {
+		// A virtualized list that recycles its nodes on scroll. After collectAll
+		// scrolls to the bottom, every node it harvested is detached — a ref minted
+		// at harvest time no longer resolves in a follow-up command. Callers must
+		// re-harvest or find --ref on the currently-visible row.
+		document.body.innerHTML =
+			'<div id="scroller" style="overflow-y:auto"><div id="rows"></div></div>';
+		const scroller = document.getElementById("scroller");
+		const rows = document.getElementById("rows");
+		if (!scroller || !rows) throw new Error("missing fixtures");
+		makeScrollable(scroller, 4000, 500);
+		const WINDOW = 2;
+		const TOTAL = 8;
+		let firstVisible = 0;
+		const render = () => {
+			rows.innerHTML = "";
+			for (let i = 0; i < WINDOW; i++) {
+				const index = firstVisible + i;
+				if (index >= TOTAL) break;
+				const row = document.createElement("div");
+				row.className = "row";
+				row.setAttribute("data-id", `row-${index}`);
+				row.textContent = `row ${index}`;
+				rows.appendChild(row);
+			}
+		};
+		render();
+		Object.defineProperty(scroller, "scrollTop", {
+			configurable: true,
+			get: () => firstVisible * 100,
+			set: (v: number) => {
+				firstVisible = Math.min(Math.floor(v / 100), TOTAL - WINDOW);
+				render();
+			},
+		});
+
+		const harvested: Element[] = [];
+		await collectAll(
+			{ selector: ".row" },
+			{
+				stepDelayMs: 0,
+				maxSteps: 10,
+				onRow: (el) => harvested.push(el),
+			},
+		);
+
+		expect(harvested.length).toBeGreaterThan(0);
+		// Every harvested node was detached by the scroll loop: refs built from
+		// them are stale. A follow-up  would report 'stale ref'.
+		expect(harvested.every((el) => !el.isConnected)).toBe(true);
+	});
 });
 
 // ── Regression: F17 (findScrollContainer must handle a table wrapper) ─
