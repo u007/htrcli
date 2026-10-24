@@ -1,0 +1,362 @@
+{
+	"scenarios": [
+		{
+			"id": "S17",
+			"ref": "B12a",
+			"app": "Messaging fixture (local)",
+			"goal": "Reply inside a message thread: the reply attaches to the parent that was opened, leaves the channel history untouched, and survives a channel switch.",
+			"steps": [
+				{
+					"note": "open the messaging fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_MESSAGING}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the message list",
+					"argv": [
+						"wait",
+						"--selector",
+						"#messages .message",
+						"--timeout",
+						"10000"
+					],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "m1 starts with no replies",
+					"argv": [
+						"--json",
+						"attr",
+						"#messages .message[data-message-id='m1']",
+						"data-reply-count"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "0" } }
+				},
+				{
+					"note": "m2 starts with two replies from other people",
+					"argv": [
+						"--json",
+						"attr",
+						"#messages .message[data-message-id='m2']",
+						"data-reply-count"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "2" } }
+				},
+				{
+					"note": "the channel history holds three messages before the thread work",
+					"argv": [
+						"extract",
+						"list",
+						"#messages .message",
+						"--fields",
+						"body:.body"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "3" }
+					}
+				},
+				{
+					"note": "open m2's thread",
+					"argv": ["click", "#messages .message[data-message-id='m2'] .reply"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the thread panel is bound to m2, not to the channel",
+					"argv": ["--json", "attr", "#thread-panel", "data-parent"],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "m2" } }
+				},
+				{
+					"note": "the panel names the parent message it will reply to",
+					"argv": ["--json", "text", "#thread-parent"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "bob: Budget draft is in the shared drive"
+						}
+					}
+				},
+				{
+					"note": "the two seeded replies are listed",
+					"argv": [
+						"extract",
+						"list",
+						"#thread-replies .thread-reply",
+						"--fields",
+						"author:@data-author,body:.body"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "2" }
+					}
+				},
+				{
+					"note": "the newest seeded reply carries its own body (oldest first)",
+					"argv": [
+						"extract",
+						"list",
+						"#thread-replies .thread-reply",
+						"--fields",
+						"body:.body"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.1.body",
+							"equals": "Thanks, filed the VAT line"
+						}
+					}
+				},
+				{
+					"note": "type a reply into the THREAD composer (a second contenteditable on the page)",
+					"argv": [
+						"fill",
+						"#thread-input",
+						"Numbers reconcile — approving"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "Enter sends the reply",
+					"argv": ["press", "Enter"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the thread now holds three replies",
+					"argv": [
+						"extract",
+						"list",
+						"#thread-replies .thread-reply",
+						"--fields",
+						"author:@data-author,body:.body"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "3" }
+					}
+				},
+				{
+					"note": "the reply is attributed to you",
+					"argv": [
+						"extract",
+						"list",
+						"#thread-replies .thread-reply",
+						"--fields",
+						"author:@data-author"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "items.2.author", "equals": "you" }
+					}
+				},
+				{
+					"note": "and it kept the exact text",
+					"argv": [
+						"extract",
+						"list",
+						"#thread-replies .thread-reply",
+						"--fields",
+						"body:.body"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.2.body",
+							"equals": "Numbers reconcile — approving"
+						}
+					}
+				},
+				{
+					"note": "THE core assertion: the channel history still has three messages",
+					"argv": [
+						"extract",
+						"list",
+						"#messages .message",
+						"--fields",
+						"body:.body"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "3" }
+					}
+				},
+				{
+					"note": "the reply text never entered the channel history",
+					"argv": [
+						"extract",
+						"list",
+						"#messages .message",
+						"--fields",
+						"body:.body"
+					],
+					"expect": {
+						"exit": 0,
+						"stdoutNotContains": "Numbers reconcile"
+					}
+				},
+				{
+					"note": "m2's reply badge moved 2 -> 3",
+					"argv": [
+						"--json",
+						"attr",
+						"#messages .message[data-message-id='m2']",
+						"data-reply-count"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "3" } }
+				},
+				{
+					"note": "m1 still has none — the reply did not leak to a neighbouring message",
+					"argv": [
+						"--json",
+						"attr",
+						"#messages .message[data-message-id='m1']",
+						"data-reply-count"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "0" } }
+				},
+				{
+					"note": "switch to #random",
+					"argv": ["click", ".channel[data-channel='random']"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "#general's messages are gone",
+					"argv": [
+						"wait",
+						"--gone",
+						"--selector",
+						"#messages .message[data-message-id='m1']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "switch back to #general",
+					"argv": ["click", ".channel[data-channel='general']"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the reply count survived the round trip (model-backed, not DOM-only)",
+					"argv": [
+						"--json",
+						"attr",
+						"#messages .message[data-message-id='m2']",
+						"data-reply-count"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "3" } }
+				},
+				{
+					"note": "reopen m2's thread",
+					"argv": ["click", "#messages .message[data-message-id='m2'] .reply"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the sent reply is still the newest entry",
+					"argv": [
+						"extract",
+						"list",
+						"#thread-replies .thread-reply",
+						"--fields",
+						"body:.body"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.2.body",
+							"equals": "Numbers reconcile — approving"
+						}
+					}
+				},
+				{
+					"note": "now open a DIFFERENT parent's thread",
+					"argv": ["click", "#messages .message[data-message-id='m1'] .reply"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the panel rebound to m1",
+					"argv": ["--json", "attr", "#thread-panel", "data-parent"],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "m1" } }
+				},
+				{
+					"note": "m1's thread starts empty (extract list errors on zero matches by design, so emptiness is asserted with :empty)",
+					"argv": [
+						"wait",
+						"--selector",
+						"#thread-replies:empty",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "reply on the second parent",
+					"argv": ["fill", "#thread-input", "Standup moved to 9:45"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "send it",
+					"argv": ["press", "Enter"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "m1 now has one reply",
+					"argv": [
+						"--json",
+						"attr",
+						"#messages .message[data-message-id='m1']",
+						"data-reply-count"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "1" } }
+				},
+				{
+					"note": "and m2 is untouched at three — replies attach per parent",
+					"argv": [
+						"--json",
+						"attr",
+						"#messages .message[data-message-id='m2']",
+						"data-reply-count"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "3" } }
+				},
+				{
+					"note": "the channel history is STILL three messages after two replies",
+					"argv": [
+						"extract",
+						"list",
+						"#messages .message",
+						"--fields",
+						"body:.body"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "3" }
+					}
+				},
+				{
+					"note": "close the thread",
+					"argv": ["click", "#thread-close"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the panel is hidden again",
+					"argv": [
+						"wait",
+						"--selector",
+						"#thread-panel[hidden]",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the channel is still usable after thread work — #composer was never touched",
+					"argv": ["--json", "text", "#composer"],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "" } }
+				}
+			]
+		}
+	]
+}

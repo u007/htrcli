@@ -20,6 +20,14 @@
   #composer:empty::before { content: attr(data-placeholder); color: #999; }
   #search-count { font-size: 12px; color: #555; }
   #toast { margin-top: 8px; padding: 6px; background: #eef; }
+  .reply { margin-left: 6px; font-size: 11px; }
+  .reply-count { margin-left: 4px; font-size: 11px; color: #555; }
+  #thread-panel { border: 1px solid #c8c8c8; margin-top: 8px; padding: 6px; background: #fafafa; }
+  #thread-parent { font-style: italic; color: #444; margin-bottom: 6px; }
+  .thread-reply { padding: 4px 0; border-bottom: 1px solid #eee; }
+  #thread-input { border: 1px solid #999; min-height: 32px; margin-top: 6px; padding: 4px; }
+  #thread-input:empty::before { content: attr(data-placeholder); color: #999; }
+  .thread-actions { margin-top: 6px; display: flex; gap: 6px; }
 </style>
 </head>
 <body>
@@ -36,6 +44,19 @@
     <input id="search" type="search" aria-label="Search messages" autocomplete="off">
     <div id="search-count" role="status"></div>
     <div id="messages"></div>
+    <!-- A thread is a DIFFERENT write target from the channel: a reply attaches
+         to one parent message and must never enter the channel history. That is
+         the whole point of B12a — a channel post and a thread reply look alike
+         in a contenteditable but land in different places. -->
+    <section id="thread-panel" hidden aria-label="Thread">
+      <div id="thread-parent"></div>
+      <div id="thread-replies"></div>
+      <div id="thread-input" contenteditable="true" role="textbox" aria-label="Reply composer" data-placeholder="Reply in thread"></div>
+      <div class="thread-actions">
+        <button id="thread-send">Reply</button>
+        <button id="thread-close">Close</button>
+      </div>
+    </section>
     <!-- The composer is contenteditable, like Slack/Teams: `fill` replaces the
          content and Enter sends (Shift+Enter inserts a newline). -->
     <div id="composer" contenteditable="true" role="textbox" aria-label="Message composer" data-placeholder="Message"></div>
@@ -76,10 +97,28 @@
     ],
   };
 
+  // Replies live OUTSIDE store[*] on purpose: if a reply were pushed into the
+  // channel array it would render as a channel message and B12a would pass by
+  // accident. Two parents start with different counts so a reply attached to
+  // the wrong parent shows up as a numeric mismatch rather than a vague one.
+  const threads = {
+    m1: [],
+    m2: [
+      { id: "t1", author: "carol", ts: "2026-03-02T09:13:00Z", body: "Already reviewed — numbers look right" },
+      { id: "t2", author: "bob", ts: "2026-03-02T09:13:30Z", body: "Thanks, filed the VAT line" },
+    ],
+    m3: [],
+    m4: [],
+    m5: [],
+    m6: [],
+    m7: [],
+  };
+
   let active = "general";
   let query = "";
   let counter = 7;
   let sent = 0;
+  let openThread = null;
 
   const messagesEl = document.getElementById("messages");
   const titleEl = document.getElementById("channel-title");
@@ -87,6 +126,10 @@
   const searchCountEl = document.getElementById("search-count");
   const composer = document.getElementById("composer");
   const toast = document.getElementById("toast");
+  const threadPanel = document.getElementById("thread-panel");
+  const threadParentEl = document.getElementById("thread-parent");
+  const threadRepliesEl = document.getElementById("thread-replies");
+  const threadInput = document.getElementById("thread-input");
 
   function showToast(text) {
     toast.textContent = text;
@@ -160,10 +203,27 @@
         reactions.appendChild(button);
       }
 
-      row.append(author, body, reactions);
+      const reply = document.createElement("button");
+      reply.className = "reply";
+      reply.dataset.messageId = message.id;
+      reply.setAttribute("aria-label", `Reply to ${message.author}`);
+      reply.textContent = "Reply";
+      reply.addEventListener("click", () => openThreadPanel(message.id));
+
+      const replies = threads[message.id] || [];
+      row.dataset.replyCount = String(replies.length);
+
+      row.append(author, body, reactions, reply);
+      if (replies.length > 0) {
+        const count = document.createElement("span");
+        count.className = "reply-count";
+        count.textContent = `${replies.length} repl${replies.length === 1 ? "y" : "ies"}`;
+        row.appendChild(count);
+      }
       messagesEl.appendChild(row);
     }
 
+    renderThread();
     titleEl.textContent = TITLES[active];
     searchCountEl.textContent = query.trim()
       ? `${visible.length} result${visible.length === 1 ? "" : "s"}`
@@ -174,6 +234,58 @@
         button.dataset.channel === active ? "true" : "false",
       );
     }
+  }
+
+  function renderThread() {
+    if (!openThread) {
+      threadPanel.hidden = true;
+      threadPanel.removeAttribute("data-parent");
+      return;
+    }
+    threadPanel.hidden = false;
+    threadPanel.dataset.parent = openThread;
+    const parent = store[active].find((message) => message.id === openThread);
+    threadParentEl.textContent = parent ? `${parent.author}: ${parent.body}` : "";
+    threadRepliesEl.replaceChildren();
+    for (const reply of threads[openThread] || []) {
+      const row = document.createElement("div");
+      row.className = "thread-reply";
+      row.dataset.messageId = reply.id;
+      row.dataset.parent = openThread;
+      row.dataset.author = reply.author;
+      const author = document.createElement("span");
+      author.className = "author";
+      author.textContent = reply.author;
+      const body = document.createElement("span");
+      body.className = "body";
+      body.textContent = reply.body;
+      row.append(author, body);
+      threadRepliesEl.appendChild(row);
+    }
+  }
+
+  function openThreadPanel(messageId) {
+    openThread = messageId;
+    threadInput.textContent = "";
+    render();
+    threadInput.focus();
+  }
+
+  function sendReply() {
+    if (!openThread) return;
+    const text = threadInput.textContent.trim();
+    if (!text) return;
+    counter += 1;
+    if (!threads[openThread]) threads[openThread] = [];
+    threads["m2"].push({
+      id: `m${counter}`,
+      author: "you",
+      ts: `2026-03-02T09:${String(3 + counter).padStart(2, "0")}:00Z`,
+      body: text,
+    });
+    threadInput.textContent = "";
+    render();
+    showToast("Reply sent to the thread");
   }
 
   function send() {
@@ -198,6 +310,8 @@
       active = button.dataset.channel;
       query = "";
       searchEl.value = "";
+      openThread = null;
+      threadInput.textContent = "";
       render();
     });
   }
@@ -214,6 +328,20 @@
   });
 
   document.getElementById("send").addEventListener("click", send);
+
+  threadInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    sendReply();
+  });
+
+  document.getElementById("thread-send").addEventListener("click", sendReply);
+
+  document.getElementById("thread-close").addEventListener("click", () => {
+    openThread = null;
+    threadInput.textContent = "";
+    render();
+  });
 
   render();
 </script>
