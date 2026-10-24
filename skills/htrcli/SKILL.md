@@ -559,6 +559,24 @@ A scenario is a list of steps, each a raw htrcli argv plus its expectations:
 - `requires_auth: true` is reported as NOT_RUN, never as PASS.
 - `${VAR}` in an argv expands from the environment.
 
+`capture` carries a value from one step into a later one — the only way to
+benchmark a task that aggregates (read a figure on page A, use it on page C):
+
+```json
+{"argv": ["extract", "list", "#metrics .metric", "--fields", "metric:.name,q4:.q4"],
+ "capture": {"revenue": "items.0.q4"}},
+{"argv": ["fill", "#summary", "Revenue closed at ${revenue}."]}
+```
+
+- The path is the same dotted form as `jsonPath`, read from the step's stdout.
+- A capture is taken only from a step whose expectations PASSED, lives for one
+  scenario, is never re-scanned (a value containing `${...}` stays literal), and
+  a path that does not resolve FAILS the step — it never becomes an empty string.
+- Captures win over environment variables of the same name.
+- `${VAR}` also expands inside `stdoutContains`, `stdoutNotContains` and
+  `jsonPath.equals`, so an expectation can reference a fixture URL without
+  hard-coding the machine's path.
+
 `jsonPath` reads the step's raw stdout, so the envelope decides the path:
 `--json text|attr|value` wraps the result as `{"data": ...}` (path `data`),
 `--json extract` nests it (`data.items.0.body`), while a bare `extract` prints

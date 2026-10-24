@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Q4 revenue report (local fixture)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 12px; }
+  .metric { display: block; padding: 4px 0; border-bottom: 1px solid #eee; }
+  .name { display: inline-block; width: 120px; font-weight: bold; }
+  .q3, .q4 { display: inline-block; width: 80px; }
+</style>
+</head>
+<body>
+  <h1>Q4 revenue report</h1>
+  <!-- The reference is opaque: a summary cannot invent it, it has to be read. -->
+  <p>Report <span id="ref" data-ref="RPT-8841">RPT-8841</span> — prepared by the finance team.</p>
+
+  <!-- The scenario extracts values from here and carries them into the summary
+       page; nothing in this page knows about that page. -->
+  <ul id="metrics">
+    <li class="metric"><span class="name">Revenue</span><span class="q3">12.4M</span><span class="q4">15.1M</span></li>
+    <li class="metric"><span class="name">Headcount</span><span class="q3">84</span><span class="q4">91</span></li>
+    <li class="metric"><span class="name">Gross margin</span><span class="q3">61%</span><span class="q4">64%</span></li>
+  </ul>
+</body>
+</html>

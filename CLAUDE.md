@@ -39,8 +39,8 @@ htrcli serve          # run daemon: HTTP :3845 + Unix socket relay (Chrome+Firef
 make close           # Kill process on :3845
 make bench-smoke     # Run one offline benchmark scenario (also: bench-office,
                      # bench-tasks, bench-form, bench-booking, bench-expense,
-                     # bench-files, bench-mail, bench-crm, bench-messaging;
-                     # all need a real Chrome on the CDP port)
+                     # bench-files, bench-mail, bench-crm, bench-messaging,
+                     # bench-research; all need a real Chrome on the CDP port)
 ```
 
 ### Benchmark harness
@@ -50,7 +50,9 @@ report under `docs/benchmarks/results/`. A scenario is a list of steps, each a
 raw htrcli argv plus expectations (`exit`, `stdoutContains`,
 `stdoutNotContains`, `jsonPath`). `retry: N` reuses the `retry` subcommand so
 the backoff policy lives in one place; `requires_auth: true` is reported as
-NOT_RUN, never as PASS.
+NOT_RUN, never as PASS. `capture: {"name": "items.0.q4"}` carries a step's
+value into a later `${name}` reference (per-scenario, only from a step that
+passed), which is how an aggregating task benchmarks more than a page visit.
 
 Scenarios live in `docs/benchmarks/scenarios/`, the spec in
 `docs/benchmarks/office-task-benchmark.md`, and the fixture page in

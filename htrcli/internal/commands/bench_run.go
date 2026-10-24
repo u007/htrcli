@@ -29,6 +29,8 @@ type BenchStepResult struct {
 	WallMS int64 `json:"wall_ms"`
 	// Failure describes why the step failed.
 	Failure string `json:"failure,omitempty"`
+	// Captured holds the values this step pulled out for later steps.
+	Captured map[string]string `json:"captured,omitempty"`
 	// Stdout is the child's stdout (truncated to keep the report readable).
 	Stdout string `json:"stdout,omitempty"`
 	// Stderr is the child's stderr (truncated).
@@ -100,13 +102,32 @@ func runBenchScenario(s BenchScenario, run benchRunner) BenchScenarioResult {
 
 	start := time.Now()
 	anyOptionalFailed := false
+	// caps lives for ONE scenario: a capture is a value read from the page in
+	// this run, so it must not leak into another scenario.
+	caps := make(map[string]string)
 	for i, step := range s.Steps {
-		sr := run(step)
+		prepared := step
+		prepared.Argv = substituteCaptures(step.Argv, caps)
+		sr := run(prepared)
 		sr.Index = i + 1
 		sr.Note = step.Note
 		sr.Optional = step.Optional
 		if sr.Attempts < 1 {
 			sr.Attempts = 1
+		}
+		// Capture only from a step whose expectations held: pulling a value
+		// out of a step that failed would seed later steps with garbage.
+		if sr.OK && len(step.Capture) > 0 {
+			captured, err := applyCaptureSpec(step.Capture, sr.Stdout)
+			if err != nil {
+				sr.OK = false
+				sr.Failure = err.Error()
+			} else {
+				sr.Captured = captured
+				for name, value := range captured {
+					caps[name] = value
+				}
+			}
 		}
 		// Do NOT overwrite sr.Attempts with the retry BUDGET: the runner
 		// reports the attempts it actually observed, and a step that passed on
@@ -138,6 +159,50 @@ func runBenchScenario(s BenchScenario, run benchRunner) BenchScenarioResult {
 		}
 	}
 	return res
+}
+
+// substituteCaptures replaces ${name} in each argv element with a value
+// captured earlier in the same scenario.
+//
+// Names with no captured value are left as the literal ${name}, so the
+// existing environment expansion still runs and an unresolved reference stays
+// visible in the failing argv instead of silently becoming an empty string.
+// A captured value is never re-scanned, so a value that itself contains
+// "${...}" is passed through verbatim.
+func substituteCaptures(argv []string, caps map[string]string) []string {
+	if len(caps) == 0 {
+		return argv
+	}
+	out := make([]string, len(argv))
+	for i, arg := range argv {
+		out[i] = os.Expand(arg, func(name string) string {
+			if v, ok := caps[name]; ok {
+				return v
+			}
+			return "${" + name + "}"
+		})
+	}
+	return out
+}
+
+// applyCaptureSpec pulls values out of a step's stdout.
+//
+// Every path must resolve: the scenario declared the value as an input to a
+// later step, so a missing path is a broken scenario rather than a soft miss.
+func applyCaptureSpec(spec map[string]string, stdout string) (map[string]string, error) {
+	var doc any
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		return nil, fmt.Errorf("capture: stdout is not JSON: %w", err)
+	}
+	captured := make(map[string]string, len(spec))
+	for name, path := range spec {
+		val, ok := lookupJSONPath(doc, path)
+		if !ok {
+			return nil, fmt.Errorf("capture %q: json path %q not found", name, path)
+		}
+		captured[name] = normalizeJSONValue(val)
+	}
+	return captured, nil
 }
 
 // benchArgv builds the argv for a step, applying the retry prefix.
@@ -238,12 +303,41 @@ func runBenchStep(step BenchStep) BenchStepResult {
 			res.Attempts = observed
 		}
 	}
-	if err := evaluateBenchExpect(step.Expect, run); err != nil {
+	if err := evaluateBenchExpect(expandBenchExpect(step.Expect), run); err != nil {
 		res.Failure = err.Error()
 		return res
 	}
 	res.OK = true
 	return res
+}
+
+// expandBenchExpect expands ${VAR} inside the expectation strings.
+//
+// Argv has always expanded environment references; expectations did not, so a
+// scenario could not assert on an environment-dependent value (a fixture's
+// absolute file:// URL) without hard-coding the machine's path.
+func expandBenchExpect(expect *BenchExpect) *BenchExpect {
+	if expect == nil {
+		return nil
+	}
+	out := *expect
+	out.StdoutContains = expandBenchValue(expect.StdoutContains)
+	out.StdoutNotContains = expandBenchValue(expect.StdoutNotContains)
+	if expect.JSONPath != nil {
+		path := *expect.JSONPath
+		path.Equals = expandBenchValue(expect.JSONPath.Equals)
+		out.JSONPath = &path
+	}
+	return &out
+}
+
+// expandBenchValue expands one string with the same unset-variable rule as
+// benchArgv: an unset ${VAR} stays literal so the mismatch is visible.
+func expandBenchValue(value string) string {
+	if value == "" || !strings.Contains(value, "${") {
+		return value
+	}
+	return expandBenchVars([]string{value})[0]
 }
 
 // evaluateBenchExpect checks a step's expectations against its output.

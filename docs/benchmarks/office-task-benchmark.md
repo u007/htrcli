@@ -201,6 +201,20 @@ scenarios, not assertions.
 - **App**: web pages
 - **Goal**: Open N pages, extract key facts, produce a summary.
 - **Pass/fail**: summary cites sources; no hallucinated facts.
+- **Likely gaps**: this is the first task whose steps must CARRY data — a fact
+  read on page A has to appear in a summary written on page C — so the harness
+  grew step-output capture (`"capture": {"name": "items.0.q4"}` on the extracting
+  step, `${name}` in a later argv; see "Running the benchmark"). "No hallucinated
+  facts" cannot be proven offline by a browser at all: the offline proxy proves
+  the WORKFLOW (read → carry → cite → save), never the truthfulness of prose.
+  OFFLINE PROXY verified via S16 (`fixtures/research-source-a.html`,
+  `research-source-b.html`, `research-summary.html`): read a Q4 figure plus an
+  **opaque** reference (RPT-8841 from A, RET-2260 from B) from two separate
+  pages, compose a summary substituting all four captured values, assert no
+  literal `${` survived, get rejected first for an empty summary and then for a
+  written summary with no source, cite both pages, save, and read back the exact
+  sentence plus a `stdoutNotContains` guard proving Q3's figure was not mistaken
+  for Q4's. A live research run still needs target sites that permit reads.
 
 ### B15 — Social media post / schedule — P3
 - **App**: social platform web
@@ -247,6 +261,7 @@ scenarios, not assertions.
 - [x] Benchmark harness: run scenario, capture pass/fail/time, write report (`htrcli bench run`).
 - [x] Attribute fields for `extract list` (`@attr`, `@sel@attr`, `[data-x]`) — a task's due date is an attribute, not text.
 - [x] ARIA checkbox support for `check`/`uncheck` (`role="checkbox"` + `aria-checked`).
+- [x] Step-output capture + `${var}` substitution (`"capture": {"name": "items.0.q4"}`), plus `${VAR}` expansion in expectation strings — the prerequisite for any scenario that aggregates across steps (B14).
 
 ## Running the benchmark
 
@@ -281,7 +296,19 @@ The harness is `htrcli bench run <scenario-file>`. A scenario file is JSON
 - `optional: true` downgrades a failing step to PARTIAL instead of FAIL.
 - `requires_auth: true` is reported as **NOT_RUN** — never as PASS.
 - `${VAR}` in an argv is replaced with that environment variable, so a
-  scenario file stays machine-independent.
+  scenario file stays machine-independent. Expectation strings
+  (`stdoutContains`, `stdoutNotContains`, `jsonPath.equals`) expand `${VAR}`
+  too, which is how a scenario asserts on a fixture's absolute `file://` URL
+  without hard-coding the machine.
+- `capture` pulls values out of a step's stdout into run-scoped variables:
+  `"capture": {"revenue": "items.0.q4"}` (dotted JSON path, same syntax as
+  `jsonPath`). Later steps in the SAME scenario use `${revenue}`. Captures are
+  per-scenario, only taken from a step whose expectations held, never
+  re-scanned (a value containing `${...}` passes through literally), a capture
+  shadows an environment variable of the same name, and a path that does not
+  resolve FAILS the step rather than seeding later steps with an empty string.
+  Without this, a task that carries a fact from one page into another (B14)
+  could only be faked with hard-coded text.
 
 Verdicts: PASS (all steps met their expectations), PARTIAL (only optional
 steps failed), FAIL (a required step failed), NOT_RUN (skipped).
@@ -312,6 +339,7 @@ a datepicker + guest combobox, a contenteditable doc surface, a cell grid).
 | S13 | `scenarios/s13-mail-actions.json` | B08 forward with typed note, custom label popup via `check`, archive proven with `wait --gone` |
 | S14 | `scenarios/s14-crm-fixture.json` | B11 filtered contact search (`wait --gone` + `clear`), phone/note/tag-chip edit, save + reopen persistence, activity log attribution |
 | S15 | `scenarios/s15-messaging-fixture.json` | B12 react (state survives re-render), contenteditable send via Enter, DM post via the Send button, search with `--gone`, channel isolation both ways |
+| S16 | `scenarios/s16-research-fixture.json` | B14 capture two pages' figures + opaque refs into `${var}`s, compose a sourced summary, reject unsourced saves, `stdoutNotContains` the wrong column |
 
 ```bash
 make bench-smoke      # S01
@@ -324,6 +352,7 @@ make bench-files      # S12
 make bench-mail       # S13
 make bench-crm        # S14
 make bench-messaging  # S15
+make bench-research   # S16
 ```
 
 Both need a Chrome on the CDP port (9555 by default in

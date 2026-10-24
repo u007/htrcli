@@ -1,0 +1,242 @@
+{
+	"scenarios": [
+		{
+			"id": "S16",
+			"ref": "B14",
+			"app": "Research sources + summary fixture (local)",
+			"goal": "Read a figure and an opaque reference from two separate pages, carry them into a summary, and prove every claim is traceable to a source.",
+			"steps": [
+				{
+					"note": "open the first source page",
+					"argv": ["open", "file://${BENCH_FIXTURE_RESEARCH_A}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the metrics list",
+					"argv": [
+						"wait",
+						"--selector",
+						"#metrics .metric",
+						"--timeout",
+						"10000"
+					],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "read the Q4 revenue column into ${a_revenue}",
+					"argv": [
+						"extract",
+						"list",
+						"#metrics .metric",
+						"--fields",
+						"metric:.name,q4:.q4"
+					],
+					"capture": { "a_revenue": "items.0.q4" },
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "items.0.metric", "equals": "Revenue" }
+					}
+				},
+				{
+					"note": "read the report reference (opaque — it cannot be guessed)",
+					"argv": ["--json", "attr", "#ref", "data-ref"],
+					"capture": { "a_ref": "data" },
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "RPT-8841" }
+					}
+				},
+				{
+					"note": "open the second source page",
+					"argv": ["open", "file://${BENCH_FIXTURE_RESEARCH_B}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for its metrics list",
+					"argv": [
+						"wait",
+						"--selector",
+						"#metrics .metric",
+						"--timeout",
+						"10000"
+					],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "read the Q4 churn figure into ${b_churn}",
+					"argv": [
+						"extract",
+						"list",
+						"#metrics .metric",
+						"--fields",
+						"metric:.name,q4:.q4"
+					],
+					"capture": { "b_churn": "items.0.q4" },
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "items.0.metric", "equals": "Churn" }
+					}
+				},
+				{
+					"note": "and its reference into ${b_ref}",
+					"argv": ["--json", "attr", "#ref", "data-ref"],
+					"capture": { "b_ref": "data" },
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "RET-2260" }
+					}
+				},
+				{
+					"note": "open the summary page",
+					"argv": ["open", "file://${BENCH_FIXTURE_RESEARCH_SUMMARY}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the summary form",
+					"argv": ["wait", "--selector", "#summary", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "an unsourced summary is rejected",
+					"argv": ["click", "#save"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the rejection is visible",
+					"argv": [
+						"wait",
+						"--selector",
+						"#error:not([hidden])",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the saved block stays hidden while the summary is unsourced (boolean attribute — assert presence, not value)",
+					"argv": ["wait", "--selector", "#saved[hidden]", "--timeout", "5000"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "compose the summary from the captured values",
+					"argv": [
+						"fill",
+						"#summary",
+						"Q4 revenue closed at ${a_revenue} (${a_ref}) while churn fell to ${b_churn} (${b_ref})."
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the substitution produced real values, not literal ${...}",
+					"argv": ["--json", "value", "#summary"],
+					"expect": { "exit": 0, "stdoutNotContains": "${" }
+				},
+				{
+					"note": "a written summary with NO source is still rejected",
+					"argv": ["click", "#save"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the rejection names the missing source",
+					"argv": ["--json", "text", "#error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "Add at least one source" }
+					}
+				},
+				{
+					"note": "cite the first source",
+					"argv": ["fill", "#source-url", "file://${BENCH_FIXTURE_RESEARCH_A}"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "add it",
+					"argv": ["click", "#add-source"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "cite the second source",
+					"argv": ["fill", "#source-url", "file://${BENCH_FIXTURE_RESEARCH_B}"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "add it",
+					"argv": ["click", "#add-source"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "both sources are listed",
+					"argv": ["--json", "attr", "#sources", "data-count"],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "2" } }
+				},
+				{
+					"note": "the first citation points at the first page",
+					"argv": ["--json", "attr", "#sources li:first-child", "data-url"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "file://${BENCH_FIXTURE_RESEARCH_A}"
+						}
+					}
+				},
+				{
+					"note": "save the sourced summary",
+					"argv": ["click", "#save"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the saved block is revealed",
+					"argv": [
+						"wait",
+						"--selector",
+						"#saved:not([hidden])",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the previous error is cleared by a successful save",
+					"argv": ["wait", "--selector", "#error[hidden]", "--timeout", "5000"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the saved summary carries both figures and both references",
+					"argv": ["--json", "text", "#saved-summary"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Q4 revenue closed at 15.1M (RPT-8841) while churn fell to 3.8% (RET-2260)."
+						}
+					}
+				},
+				{
+					"note": "the Q3 revenue figure was NOT mistaken for Q4",
+					"argv": ["--json", "text", "#saved-summary"],
+					"expect": { "exit": 0, "stdoutNotContains": "12.4M" }
+				},
+				{
+					"note": "the source count was carried through the save",
+					"argv": ["--json", "attr", "#saved-count", "data-count"],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "2" } }
+				},
+				{
+					"note": "prove the whole thing is one saved artifact, not two halves",
+					"argv": ["--json", "attr", "#saved", "data-facts"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Q4 revenue closed at 15.1M (RPT-8841) while churn fell to 3.8% (RET-2260)."
+						}
+					}
+				}
+			]
+		}
+	]
+}

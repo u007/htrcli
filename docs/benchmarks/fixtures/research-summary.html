@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Research summary (local fixture)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 12px; }
+  #summary { width: 520px; min-height: 70px; display: block; margin: 6px 0; }
+  #source-url { width: 320px; }
+  #sources li { font-family: monospace; }
+  #error { padding: 6px; background: #fdd; margin-top: 8px; }
+  #saved { margin-top: 12px; border: 1px solid #ccc; padding: 8px; }
+  #saved-summary { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <h1>Research summary</h1>
+
+  <label for="summary">Summary</label>
+  <textarea id="summary" aria-label="Summary"></textarea>
+
+  <div>
+    <input id="source-url" type="url" aria-label="Source URL" placeholder="https://…">
+    <button id="add-source">Add source</button>
+  </div>
+  <ul id="sources" data-count="0"></ul>
+
+  <button id="save">Save</button>
+  <div id="error" role="alert" hidden></div>
+
+  <section id="saved" hidden aria-label="Saved summary">
+    <div id="saved-summary"></div>
+    <div id="saved-count" data-count="0">0 sources</div>
+  </section>
+
+<script>
+  const sources = [];
+  const summaryEl = document.getElementById("summary");
+  const urlEl = document.getElementById("source-url");
+  const sourcesEl = document.getElementById("sources");
+  const errorEl = document.getElementById("error");
+  const savedEl = document.getElementById("saved");
+
+  function showError(text) {
+    errorEl.textContent = text;
+    errorEl.hidden = false;
+  }
+
+  function renderSources() {
+    sourcesEl.replaceChildren();
+    for (const url of sources) {
+      const item = document.createElement("li");
+      item.dataset.url = url;
+      item.textContent = url;
+      sourcesEl.appendChild(item);
+    }
+    sourcesEl.dataset.count = String(sources.length);
+  }
+
+  document.getElementById("add-source").addEventListener("click", () => {
+    const url = urlEl.value.trim();
+    if (!url || sources.includes(url)) return;
+    sources.push(url);
+    urlEl.value = "";
+    renderSources();
+  });
+
+  document.getElementById("save").addEventListener("click", () => {
+    const text = summaryEl.value.trim();
+    // A summary without a source is not allowed to be saved: the whole point
+    // of the task is that every claim can be traced.
+    if (!text) {
+      showError("Write a summary first");
+      return;
+    }
+    if (sources.length === 0) {
+      showError("Add at least one source");
+      return;
+    }
+    errorEl.hidden = true;
+    document.getElementById("saved-summary").textContent = text;
+    document.getElementById("saved-count").dataset.count = String(sources.length);
+    document.getElementById("saved-count").textContent = `${sources.length} sources`;
+    savedEl.dataset.facts = text;
+    savedEl.dataset.sources = String(sources.length);
+    savedEl.hidden = false;
+  });
+</script>
+</body>
+</html>

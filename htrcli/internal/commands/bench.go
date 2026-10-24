@@ -26,7 +26,10 @@ import (
 //	          "argv": ["open", "https://mail.google.com/"],
 //	          "expect": {"exit": 0},
 //	          "retry": 2,               // prefix "retry --times 2 --" to argv
-//	          "optional": false         // a failing optional step downgrades PASS to PARTIAL
+//	          "optional": false,        // a failing optional step downgrades PASS to PARTIAL
+//	          "capture": {              // pull values out of this step's JSON stdout
+//	            "revenue": "items.0.value"   // later steps may use ${revenue}
+//	          }
 //	        }
 //	      ]
 //	    }
@@ -60,6 +63,13 @@ type BenchStep struct {
 	Optional bool `json:"optional,omitempty"`
 	// Note is a human-readable label for the report.
 	Note string `json:"note,omitempty"`
+	// Capture pulls values out of this step's stdout into run-scoped
+	// variables, keyed by variable name and valued by a dotted JSON path.
+	// Later steps in the SAME scenario may then use ${name} in their argv.
+	//
+	// A capture path that does not resolve FAILS the step: an extraction the
+	// scenario depends on must never degrade into an empty string.
+	Capture map[string]string `json:"capture,omitempty"`
 }
 
 // BenchExpect holds the assertions for a step. All present fields must hold;
@@ -143,8 +153,37 @@ func validateBenchScenario(s *BenchScenario) error {
 		if step.Retry < 0 {
 			return fmt.Errorf("step %d has a negative retry count", i+1)
 		}
+		for name, path := range step.Capture {
+			if !isBenchVarName(name) {
+				return fmt.Errorf(
+					"step %d has capture %q: a capture name must match [A-Za-z_][A-Za-z0-9_]*",
+					i+1, name,
+				)
+			}
+			if path == "" {
+				return fmt.Errorf("step %d has capture %q with an empty json path", i+1, name)
+			}
+		}
 	}
 	return nil
+}
+
+// isBenchVarName reports whether name can be written as ${name} in an argv.
+func isBenchVarName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r == '_':
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // scenarioLabel is a display name for a scenario, falling back to its index.
