@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Booking site (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; }
+  .page { display: none; padding: 16px; border: 1px solid #ccc; max-width: 460px; }
+  .page.visible { display: block; }
+  .field { margin-bottom: 10px; }
+  label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 6px; font-size: 14px; box-sizing: border-box; }
+  button { padding: 8px 16px; font-size: 14px; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .error { color: #d00; font-size: 12px; margin-top: 4px; display: none; }
+  .error.show { display: block; }
+  .nav { margin-top: 12px; display: flex; gap: 8px; }
+  .day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; width: 210px; margin-top: 6px; }
+  .day-grid button { padding: 4px; }
+  .seat-map { border: 1px solid #999; padding: 8px; margin: 8px 0; }
+  .seat-row { display: flex; gap: 4px; margin-bottom: 4px; }
+  .seat { width: 28px; height: 28px; border: 1px solid #999; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+  .seat.selected { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+  .seat.taken { background: #e0e0e0; border-color: #ccc; cursor: not-allowed; }
+  #confirm { border-color: #1a73e8; }
+  #confirmation-number { font-weight: bold; color: #1a73e8; font-family: monospace; }
+  #status { margin-top: 8px; font-size: 13px; color: #555; }
+</style>
+</head>
+<body>
+  <h1>Book a Meeting Room (fixture)</h1>
+
+  <!-- PAGE 1: Search form. -->
+  <div id="page1" class="page visible">
+    <h2>Step 1 — Search</h2>
+    <div class="field">
+      <label>Room</label>
+      <select id="room">
+        <option value="">— Select a room —</option>
+        <option value="conf-a">Conference Room A</option>
+        <option value="conf-b">Conference Room B</option>
+        <option value="huddle-1">Huddle Room 1</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Date <span style="color:#d00">*</span></label>
+      <button id="date-trigger" type="button">Select date</button>
+      <div id="popover" hidden>
+        <div class="day-grid" id="day-grid">
+          <button type="button" data-day="2026-10-22">22</button>
+          <button type="button" data-day="2026-10-23">23</button>
+          <button type="button" data-day="2026-10-24">24</button>
+          <button type="button" data-day="2026-10-25">25</button>
+        </div>
+      </div>
+      <div id="date-err" class="error">Date is required</div>
+    </div>
+    <div class="field">
+      <label>Start time <span style="color:#d00">*</span></label>
+      <select id="start-time" required>
+        <option value="">— Select —</option>
+        <option value="09:00">09:00</option>
+        <option value="10:00">10:00</option>
+        <option value="11:00">11:00</option>
+        <option value="14:00">14:00</option>
+        <option value="15:00">15:00</option>
+      </select>
+    </div>
+    <div class="nav">
+      <button id="next1">Next</button>
+    </div>
+  </div>
+
+  <!-- PAGE 2: Seat selection. -->
+  <div id="page2" class="page">
+    <h2>Step 2 — Choose seats</h2>
+    <p id="room-summary"></p>
+    <div class="seat-map" id="seat-map">
+      <div class="seat-row">
+        <div class="seat taken" data-seat="A1">A1</div>
+        <div class="seat" data-seat="A2">A2</div>
+        <div class="seat" data-seat="A3">A3</div>
+        <div class="seat" data-seat="A4">A4</div>
+      </div>
+      <div class="seat-row">
+        <div class="seat" data-seat="B1">B1</div>
+        <div class="seat" data-seat="B2">B2</div>
+        <div class="seat" data-seat="B3">B3</div>
+        <div class="seat" data-seat="B4">B4</div>
+      </div>
+    </div>
+    <p id="seat-err" class="error">Please select at least one seat</p>
+    <div class="nav">
+      <button id="prev2">Back</button>
+      <button id="next2">Continue</button>
+    </div>
+  </div>
+
+  <!-- PAGE 3: Confirmation. -->
+  <div id="confirm" class="page">
+    <h2>Booking Confirmed</h2>
+    <p>Your meeting room is booked.</p>
+    <p>Confirmation number: <span id="confirmation-number">—</span></p>
+    <p>Room: <span id="conf-room">—</span></p>
+    <p>Date: <span id="conf-date">—</span></p>
+    <p>Time: <span id="conf-time">—</span></p>
+    <p>Seats: <span id="conf-seats">—</span></p>
+    <button id="cancel">Cancel booking</button>
+    <button id="new-booking">New booking</button>
+  </div>
+
+  <script>
+    (() => {
+      var pages = document.querySelectorAll(".page");
+      var counter = 0;
+      var selectedSeats = [];
+
+      function show(id) {
+        pages.forEach((p) => { p.classList.remove("visible"); });
+        document.getElementById(id).classList.add("visible");
+      }
+
+      function clearErrors(formId) {
+        document.querySelectorAll(`#${formId} .error`).forEach((e) => { e.classList.remove("show"); });
+      }
+
+      var trigger = document.getElementById("date-trigger");
+      var popover = document.getElementById("popover");
+
+      trigger.addEventListener("click", () => {
+        popover.hidden = false;
+      });
+      document.getElementById("day-grid").addEventListener("click", (ev) => {
+        var b = ev.target.closest("button[data-day]");
+        if (!b) return;
+        trigger.setAttribute("data-date", b.getAttribute("data-day"));
+        trigger.textContent = b.getAttribute("data-day");
+        popover.hidden = true;
+      });
+
+      document.getElementById("next1").addEventListener("click", () => {
+        clearErrors("page1");
+        var room = document.getElementById("room");
+        var date = trigger.getAttribute("data-date");
+        var time = document.getElementById("start-time");
+        var ok = true;
+        if (!date) { document.getElementById("date-err").classList.add("show"); ok = false; }
+        if (!required(time)) { ok = false; }
+        if (!ok) return;
+
+        document.getElementById("room-summary").textContent =
+          `${room.options[room.selectedIndex].text} — ${date} ${time.value}`;
+        show("page2");
+      });
+
+      document.getElementById("seat-map").addEventListener("click", (ev) => {
+        var seat = ev.target.closest(".seat");
+        if (!seat || seat.classList.contains("taken")) return;
+        seat.classList.toggle("selected");
+        updateSelectedSeats();
+      });
+
+      function updateSelectedSeats() {
+        selectedSeats = [];
+        document.querySelectorAll(".seat.selected").forEach((s) => { selectedSeats.push(s.getAttribute("data-seat")); });
+        document.getElementById("seat-err").classList.toggle("show", selectedSeats.length === 0);
+      }
+
+      document.getElementById("prev2").addEventListener("click", () => {
+        selectedSeats = [];
+        document.querySelectorAll(".seat.selected").forEach((s) => { s.classList.remove("selected"); });
+        show("page1");
+      });
+
+      document.getElementById("next2").addEventListener("click", () => {
+        if (selectedSeats.length === 0) {
+          document.getElementById("seat-err").classList.add("show");
+          return;
+        }
+        counter++;
+        var confNum = `BK-${String(100000 + counter).padStart(6, "0")}`;
+        document.getElementById("confirmation-number").textContent = confNum;
+        document.getElementById("confirm").setAttribute("data-confirmation", confNum);
+        document.getElementById("confirm").setAttribute("data-room", document.getElementById("room").value);
+        document.getElementById("confirm").setAttribute("data-date", trigger.getAttribute("data-date"));
+        document.getElementById("confirm").setAttribute("data-time", document.getElementById("start-time").value);
+        document.getElementById("confirm").setAttribute("data-seats", selectedSeats.join(","));
+        document.getElementById("conf-room").textContent = document.getElementById("room").options[document.getElementById("room").selectedIndex].text;
+        document.getElementById("conf-date").textContent = trigger.getAttribute("data-date");
+        document.getElementById("conf-time").textContent = document.getElementById("start-time").value;
+        document.getElementById("conf-seats").textContent = selectedSeats.join(", ");
+        show("confirm");
+      });
+
+      document.getElementById("cancel").addEventListener("click", () => {
+        document.getElementById("confirm").removeAttribute("data-confirmation");
+        document.getElementById("confirmation-number").textContent = "—";
+        show("page1");
+      });
+
+      document.getElementById("new-booking").addEventListener("click", () => {
+        document.querySelectorAll("select").forEach((s) => { s.selectedIndex = 0; });
+        trigger.setAttribute("data-date", "");
+        trigger.textContent = "Select date";
+        selectedSeats = [];
+        document.querySelectorAll(".seat.selected").forEach((s) => { s.classList.remove("selected"); });
+        document.getElementById("confirm").removeAttribute("data-confirmation");
+        show("page1");
+      });
+
+      function required(el) { return el.value !== ""; }
+    })();
+  </script>
+</body>
+</html>

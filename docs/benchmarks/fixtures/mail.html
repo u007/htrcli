@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mail actions fixture (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; padding: 6px 4px; border-bottom: 1px solid #eee; }
+  .sender { width: 160px; }
+  .subject { flex: 1; }
+  .date { width: 70px; text-align: right; }
+  .scroll { max-height: 260px; overflow-y: auto; border: 1px solid #ddd; }
+  #forward-panel { margin-top: 12px; border: 1px solid #ccc; padding: 8px; }
+  #forward-to { width: 260px; }
+  #forward-body { min-height: 50px; border: 1px solid #ccc; margin-top: 6px; }
+  #label-menu { border: 1px solid #ccc; padding: 8px; margin-top: 8px; }
+  #toast { margin-top: 8px; padding: 6px; background: #eef; }
+  #sent-log li { font-family: monospace; }
+</style>
+</head>
+<body>
+  <h1>Mail (fixture)</h1>
+
+  <div id="toast" role="status" hidden></div>
+  <div id="archive-count" data-count="0">Archived: 0</div>
+
+  <div class="scroll" id="thread-list">
+    <div class="row" data-idx="1" data-labels="" data-archived="false">
+      <span class="sender">alice@example.com</span>
+      <span class="subject">Quarterly report</span>
+      <span class="date">Oct 18</span>
+      <button class="forward" aria-label="Forward Quarterly report">Forward</button>
+      <button class="label" aria-label="Label Quarterly report">Label</button>
+      <button class="archive" aria-label="Archive Quarterly report">Archive</button>
+    </div>
+    <div class="row" data-idx="2" data-labels="" data-archived="false">
+      <span class="sender">bob@example.com</span>
+      <span class="subject">Lunch on Friday?</span>
+      <span class="date">Oct 17</span>
+      <button class="forward" aria-label="Forward Lunch on Friday?">Forward</button>
+      <button class="label" aria-label="Label Lunch on Friday?">Label</button>
+      <button class="archive" aria-label="Archive Lunch on Friday?">Archive</button>
+    </div>
+    <div class="row" data-idx="3" data-labels="" data-archived="false">
+      <span class="sender">carol@example.com</span>
+      <span class="subject">Invoice 2211</span>
+      <span class="date">Oct 16</span>
+      <button class="forward" aria-label="Forward Invoice 2211">Forward</button>
+      <button class="label" aria-label="Label Invoice 2211">Label</button>
+      <button class="archive" aria-label="Archive Invoice 2211">Archive</button>
+    </div>
+  </div>
+
+  <!-- Forward compose. The quoted original would be pre-rendered in a real
+       client; here the scenario types a note into the contenteditable. -->
+  <section id="forward-panel" hidden>
+    <input id="forward-to" type="email" aria-label="To">
+    <div id="forward-body" contenteditable="true" role="textbox" aria-label="Add a note"></div>
+    <button id="forward-send">Send</button>
+  </section>
+
+  <!-- Label menu: a custom popup (NOT a native <select>), like Gmail's. -->
+  <div id="label-menu" role="menu" hidden>
+    <label><input type="checkbox" aria-label="Important" data-label="Important"> Important</label>
+    <label><input type="checkbox" aria-label="Finance" data-label="Finance"> Finance</label>
+    <button id="label-apply">Apply</button>
+  </div>
+
+  <ul id="sent-log"></ul>
+
+<script>
+  const toast = document.getElementById("toast");
+  const archiveCount = document.getElementById("archive-count");
+  let openRow = null;
+
+  function showToast(message) {
+    toast.textContent = message;
+    toast.hidden = false;
+  }
+
+  document.querySelectorAll(".row").forEach((row) => {
+    row.querySelector(".forward").addEventListener("click", () => {
+      openRow = row;
+      document.getElementById("forward-panel").hidden = false;
+      document.getElementById("forward-to").focus();
+    });
+    row.querySelector(".label").addEventListener("click", () => {
+      openRow = row;
+      document.getElementById("label-menu").hidden = false;
+    });
+    row.querySelector(".archive").addEventListener("click", () => {
+      row.remove();
+      const next = Number(archiveCount.dataset.count) + 1;
+      archiveCount.dataset.count = String(next);
+      archiveCount.textContent = `Archived: ${next}`;
+      showToast("Conversation archived");
+    });
+  });
+
+  document.getElementById("forward-send").addEventListener("click", () => {
+    const to = document.getElementById("forward-to").value;
+    const note = document.getElementById("forward-body").textContent.trim();
+    const item = document.createElement("li");
+    item.dataset.to = to;
+    item.dataset.note = note;
+    item.textContent = `Forwarded to ${to} — ${note}`;
+    document.getElementById("sent-log").appendChild(item);
+    document.getElementById("forward-panel").hidden = true;
+    showToast("Message forwarded");
+  });
+
+  document.getElementById("label-apply").addEventListener("click", () => {
+    if (!openRow) return;
+    const picked = [...document.querySelectorAll("#label-menu input:checked")].map(
+      (input) => input.dataset.label,
+    );
+    openRow.dataset.labels = picked.join(",");
+    document.getElementById("label-menu").hidden = true;
+    document
+      .querySelectorAll("#label-menu input")
+      .forEach((input) => { input.checked = false; });
+    showToast("Label applied");
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,173 @@
+{
+	"scenarios": [
+		{
+			"id": "S12",
+			"ref": "B10",
+			"app": "Cloud drive file management (local)",
+			"goal": "Upload a file, move it into a folder, open the share dialog, read the share link, grant edit permission, and confirm an untouched file is unchanged.",
+			"steps": [
+				{
+					"note": "open the files fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_FILES}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the upload control",
+					"argv": ["wait", "--selector", "#upload", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "attach the report file (no OS file picker)",
+					"argv": ["upload", "#upload", "${BENCH_FIXTURE_REPORT}"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "wait for the uploaded row",
+					"argv": [
+						"wait",
+						"--selector",
+						"tr[data-name='report.txt']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "the uploaded file starts in My Drive",
+					"argv": [
+						"--json",
+						"attr",
+						"tr[data-name='report.txt']",
+						"data-folder"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "my-drive" }
+					}
+				},
+				{
+					"note": "the uploaded file size is the real byte count (report.txt is 72 bytes)",
+					"argv": ["--json", "attr", "tr[data-name='report.txt']", "data-size"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "72" }
+					}
+				},
+				{
+					"note": "move the file into the Projects folder (option VALUE, not label)",
+					"argv": [
+						"select",
+						"tr[data-name='report.txt'] select.folder",
+						"projects"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the move is reflected in the row",
+					"argv": [
+						"--json",
+						"attr",
+						"tr[data-name='report.txt']",
+						"data-folder"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "projects" }
+					}
+				},
+				{
+					"note": "open the share dialog for the uploaded file",
+					"argv": ["click", "tr[data-name='report.txt'] button.share"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "wait for the share dialog",
+					"argv": [
+						"wait",
+						"--selector",
+						"#share-modal.visible",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "the share link is the fixed fixture URL",
+					"argv": ["--json", "value", "#share-link"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "https://files.example/s/ABC123"
+						}
+					}
+				},
+				{
+					"note": "grant edit permission (option VALUE, not label)",
+					"argv": ["select", "#share-permission", "edit"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "close the share dialog",
+					"argv": ["click", "#share-done"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the row records the granted permission",
+					"argv": [
+						"--json",
+						"attr",
+						"tr[data-name='report.txt']",
+						"data-permission"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "edit" }
+					}
+				},
+				{
+					"note": "the row is marked shared",
+					"argv": [
+						"--json",
+						"attr",
+						"tr[data-name='report.txt']",
+						"data-shared"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "true" }
+					}
+				},
+				{
+					"note": "the untouched archive file keeps its folder",
+					"argv": [
+						"--json",
+						"attr",
+						"tr[data-name='old-notes.txt']",
+						"data-folder"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "archive" }
+					}
+				},
+				{
+					"note": "the untouched archive file stays private",
+					"argv": [
+						"--json",
+						"attr",
+						"tr[data-name='old-notes.txt']",
+						"data-permission"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "private" }
+					}
+				}
+			]
+		}
+	]
+}

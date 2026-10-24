@@ -1,4 +1,11 @@
 .PHONY: build install serve close bench-smoke bench-office bench-tasks \
+		bench-form \
+		bench-booking \
+		bench-expense \
+		bench-files \
+		bench-mail \
+		bench-crm \
+		bench-messaging \
 		htrcli-build htrcli-build-all htrcli-build-linux htrcli-install htrcli-clean \
 		ext-build ext-dev ext-zip firefox-build firefox-install firefox-zip
 
@@ -47,49 +54,56 @@ htrcli-clean:
 htrcli-test-integration:
 	cd $(HTRCLI_DIR) && go test -tags integration ./internal/cdp/ -run TestCDPEndToEnd -v
 
-# Run the offline benchmark smoke scenario (requires a real Chrome).
-#
-# The scenario drives the local fixture page over the CDP transport, so it
-# needs no authenticated session. The report is written under
-# docs/benchmarks/results/.
+# Benchmark targets run one or more scenario files over the CDP transport
+# against LOCAL fixture pages in docs/benchmarks/fixtures/ (requires a real
+# Chrome; no authenticated session and no real data is touched). Reports are
+# written under docs/benchmarks/results/.
+BENCH_FIXTURES := $(CURDIR)/docs/benchmarks/fixtures
+
+# $(1): fixture env assignments, $(2): scenario file under
+# docs/benchmarks/scenarios/, $(3): report name prefix.
+define bench_run
+	cd $(HTRCLI_DIR) && \
+		$(1) \
+		./bin/htrcli bench run \
+		../docs/benchmarks/scenarios/$(2) \
+		--transport cdp \
+		--out ../docs/benchmarks/results/$(3)-$$$$.json
+endef
+
+# Offline smoke scenario.
 bench-smoke: htrcli-build
-	cd $(HTRCLI_DIR) && BENCH_FIXTURE="$(CURDIR)/docs/benchmarks/fixtures/smoke.html" \
-		./bin/htrcli bench run \
-		../docs/benchmarks/scenarios/s01-offline-smoke.json \
-		--transport cdp \
-		--out ../docs/benchmarks/results/smoke-$$$$.json
+	$(call bench_run,BENCH_FIXTURE="$(BENCH_FIXTURES)/smoke.html",s01-offline-smoke.json,smoke)
 
-# Run the office-app fixture scenarios (requires a real Chrome).
-#
-# These drive the LOCAL fixture pages in docs/benchmarks/fixtures/ — no
-# authenticated session and no real Google data is touched.
+# Office-app fixture scenarios.
 bench-office: htrcli-build
-	cd $(HTRCLI_DIR) && \
-		BENCH_FIXTURE_GMAIL="$(CURDIR)/docs/benchmarks/fixtures/gmail.html" \
-		BENCH_FIXTURE_CALENDAR="$(CURDIR)/docs/benchmarks/fixtures/calendar.html" \
-		BENCH_FIXTURE_DOCS="$(CURDIR)/docs/benchmarks/fixtures/docs.html" \
-		BENCH_FIXTURE_SHEETS="$(CURDIR)/docs/benchmarks/fixtures/sheets.html" \
-		./bin/htrcli bench run \
-		../docs/benchmarks/scenarios/s02-gmail-fixture.json \
-		--transport cdp \
-		--out ../docs/benchmarks/results/office-gmail-$$$$.json
-	cd $(HTRCLI_DIR) && \
-		BENCH_FIXTURE_CALENDAR="$(CURDIR)/docs/benchmarks/fixtures/calendar.html" \
-		BENCH_FIXTURE_DOCS="$(CURDIR)/docs/benchmarks/fixtures/docs.html" \
-		BENCH_FIXTURE_SHEETS="$(CURDIR)/docs/benchmarks/fixtures/sheets.html" \
-		./bin/htrcli bench run \
-		../docs/benchmarks/scenarios/s03-office-fixtures.json \
-		--transport cdp \
-		--out ../docs/benchmarks/results/office-apps-$$$$.json
+	$(call bench_run,BENCH_FIXTURE_GMAIL="$(BENCH_FIXTURES)/gmail.html" BENCH_FIXTURE_CALENDAR="$(BENCH_FIXTURES)/calendar.html" BENCH_FIXTURE_DOCS="$(BENCH_FIXTURES)/docs.html" BENCH_FIXTURE_SHEETS="$(BENCH_FIXTURES)/sheets.html",s02-gmail-fixture.json,office-gmail)
+	$(call bench_run,BENCH_FIXTURE_CALENDAR="$(BENCH_FIXTURES)/calendar.html" BENCH_FIXTURE_DOCS="$(BENCH_FIXTURES)/docs.html" BENCH_FIXTURE_SHEETS="$(BENCH_FIXTURES)/sheets.html",s03-office-fixtures.json,office-apps)
 
-# Run the tasks/reminder fixture scenarios (requires a real Chrome).
+# Tasks/reminder fixture scenario.
 bench-tasks: htrcli-build
-	cd $(HTRCLI_DIR) && \
-		BENCH_FIXTURE_TASKS="$(CURDIR)/docs/benchmarks/fixtures/tasks.html" \
-		./bin/htrcli bench run \
-		../docs/benchmarks/scenarios/s04-tasks-fixture.json \
-		--transport cdp \
-		--out ../docs/benchmarks/results/tasks-$$$$.json
+	$(call bench_run,BENCH_FIXTURE_TASKS="$(BENCH_FIXTURES)/tasks.html",s04-tasks-fixture.json,tasks)
+
+bench-form: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_FORM="$(BENCH_FIXTURES)/form.html",s09-form-fixture.json,form)
+
+bench-booking: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_BOOKING="$(BENCH_FIXTURES)/booking.html",s10-booking-fixture.json,booking)
+
+bench-expense: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_EXPENSE="$(BENCH_FIXTURES)/expense.html" BENCH_FIXTURE_RECEIPT="$(BENCH_FIXTURES)/receipt.txt",s11-expense-fixture.json,expense)
+
+bench-files: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_FILES="$(BENCH_FIXTURES)/files.html" BENCH_FIXTURE_REPORT="$(BENCH_FIXTURES)/report.txt",s12-files-fixture.json,files)
+
+bench-mail: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_MAIL="$(BENCH_FIXTURES)/mail.html",s13-mail-actions.json,mail)
+
+bench-crm: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_CRM="$(BENCH_FIXTURES)/crm.html",s14-crm-fixture.json,crm)
+
+bench-messaging: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_MESSAGING="$(BENCH_FIXTURES)/messaging.html",s15-messaging-fixture.json,messaging)
 
 # ── Extension ──────────────────────────────────────────────────────────
 

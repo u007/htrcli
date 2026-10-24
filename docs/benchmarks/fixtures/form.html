@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Expense form (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; }
+  .page { display: none; padding: 16px; border: 1px solid #ccc; max-width: 420px; }
+  .page.visible { display: block; }
+  .field { margin-bottom: 10px; }
+  label { display: block; font-size: 13px; color: #555; margin-bottom: 4px; }
+  input, select { width: 100%; padding: 6px; font-size: 14px; box-sizing: border-box; }
+  button { padding: 8px 16px; font-size: 14px; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .error { color: #d00; font-size: 12px; margin-top: 4px; display: none; }
+  .error.show { display: block; }
+  .nav { margin-top: 12px; display: flex; gap: 8px; }
+  #confirm { border-color: #1a73e8; }
+  #ref { font-weight: bold; color: #1a73e8; }
+</style>
+</head>
+<body>
+  <h1>Expense Report (fixture)</h1>
+
+  <!-- PAGE 1: Personal info with required-field validation. -->
+  <div id="page1" class="page visible">
+    <h2>Step 1 — Your details</h2>
+    <div class="field">
+      <label>Full name <span style="color:#d00">*</span></label>
+      <input id="name" type="text" required>
+      <div id="name-err" class="error">Name is required</div>
+    </div>
+    <div class="field">
+      <label>Email <span style="color:#d00">*</span></label>
+      <input id="email" type="email" required>
+      <div id="email-err" class="error">Valid email is required</div>
+    </div>
+    <div class="nav">
+      <button id="next1">Next</button>
+    </div>
+  </div>
+
+  <!-- PAGE 2: Expense details + country combobox. -->
+  <div id="page2" class="page">
+    <h2>Step 2 — Expense</h2>
+    <div class="field">
+      <label>Date <span style="color:#d00">*</span></label>
+      <input id="date" type="text" placeholder="mm/dd/yyyy" required>
+      <div id="date-err" class="error">Date is required</div>
+    </div>
+    <div class="field">
+      <label>Category <span style="color:#d00">*</span></label>
+      <select id="category" required>
+        <option value="">— Select —</option>
+        <option value="travel">Travel</option>
+        <option value="meals">Meals</option>
+        <option value="supplies">Supplies</option>
+      </select>
+      <div id="category-err" class="error">Category is required</div>
+    </div>
+    <div class="field">
+      <label>Amount (USD) <span style="color:#d00">*</span></label>
+      <input id="amount" type="number" step="0.01" min="0" required>
+      <div id="amount-err" class="error">Valid amount is required</div>
+    </div>
+    <div class="field">
+      <label>Country</label>
+      <select id="country">
+        <option value="US">United States</option>
+        <option value="CA">Canada</option>
+        <option value="GB">United Kingdom</option>
+        <option value="AU">Australia</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Receipt (optional)</label>
+      <input id="receipt" type="file">
+    </div>
+    <div class="nav">
+      <button id="prev2">Back</button>
+      <button id="next2">Submit</button>
+    </div>
+  </div>
+
+  <!-- PAGE 3: Confirmation with a reference number. -->
+  <div id="confirm" class="page">
+    <h2>Submitted</h2>
+    <p>Your expense report has been submitted.</p>
+    <p>Reference: <span id="ref">—</span></p>
+    <p>Total: <span id="total">—</span></p>
+    <button id="new-report">New report</button>
+  </div>
+
+  <script>
+    // Behave like a real multi-page form with client-side validation.
+    (() => {
+      var pages = document.querySelectorAll(".page");
+      var refCounter = 0;
+
+      function show(id) {
+        pages.forEach((p) => { p.classList.remove("visible"); });;
+        document.getElementById(id).classList.add("visible");
+      }
+
+      function clearErrors(formId) {
+        document.querySelectorAll(`#${formId} .error`).forEach((e) => { e.classList.remove("show"); });
+      }
+
+      // Validation helpers.
+      function required(el) { return el.value.trim() !== ""; }
+      function validEmail(el) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(el.value.trim()); }
+      function validDate(el) { return /^\d{2}\/\d{2}\/\d{4}$/.test(el.value.trim()); }
+      function validAmount(el) { var n = parseFloat(el.value); return !Number.isNaN(n) && n > 0; }
+
+      // Page 1: name + email required.
+      document.getElementById("next1").addEventListener("click", () => {
+        clearErrors("page1");
+        var name = document.getElementById("name");
+        var email = document.getElementById("email");
+        var ok = true;
+        if (!required(name)) { document.getElementById("name-err").classList.add("show"); ok = false; }
+        if (!validEmail(email)) { document.getElementById("email-err").classList.add("show"); ok = false; }
+        if (!ok) return;
+        show("page2");
+      });
+
+      // Page 2: validate date/category/amount, then submit.
+      document.getElementById("next2").addEventListener("click", () => {
+        clearErrors("page2");
+        var date = document.getElementById("date");
+        var category = document.getElementById("category");
+        var amount = document.getElementById("amount");
+        var ok = true;
+        if (!validDate(date)) { document.getElementById("date-err").classList.add("show"); ok = false; }
+        if (!required(category)) { document.getElementById("category-err").classList.add("show"); ok = false; }
+        if (!validAmount(amount)) { document.getElementById("amount-err").classList.add("show"); ok = false; }
+        if (!ok) return;
+
+        // "Submit": produce a ref and show confirmation.
+        refCounter++;
+        var ref = `EXP-${String(100000 + refCounter).padStart(6, "0")}`;
+        var total = document.getElementById("amount").value;
+        document.getElementById("ref").textContent = ref;
+        document.getElementById("total").textContent = total;
+        document.getElementById("confirm").setAttribute("data-ref", ref);
+        show("confirm");
+      });
+
+      // Page 2 back button.
+      document.getElementById("prev2").addEventListener("click", () => {
+        clearErrors("page2");
+        show("page1");
+      });
+
+      // New report.
+      document.getElementById("new-report").addEventListener("click", () => {
+        document.querySelectorAll("input, select").forEach((el) => { el.value = ""; });
+        clearErrors("page1"); clearErrors("page2");
+        show("page1");
+      });
+    })();
+  </script>
+</body>
+</html>

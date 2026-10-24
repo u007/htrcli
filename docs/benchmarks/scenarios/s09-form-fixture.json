@@ -1,0 +1,84 @@
+{
+	"scenarios": [
+		{
+			"id": "S09",
+			"ref": "B13",
+			"app": "Expense form (local)",
+			"goal": "Fill a multi-page form end-to-end: personal info on page 1, expense details on page 2, capture the confirmation reference.",
+			"steps": [
+				{
+					"note": "open the form fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_FORM}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for page 1",
+					"argv": ["wait", "--selector", "#name", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "fill the name field",
+					"argv": ["fill", "#name", "Ada Example"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "fill the email field",
+					"argv": ["fill", "#email", "ada@example.com"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "click Next to go to page 2",
+					"argv": ["click", "#next1"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "wait for page 2 fields",
+					"argv": ["wait", "--selector", "#date", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "fill the date",
+					"argv": ["fill", "#date", "10/22/2026"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "select the category dropdown",
+					"argv": ["select", "#category", "travel"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "fill the amount",
+					"argv": ["fill", "#amount", "125.50"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "pick the country",
+					"argv": ["pick", "#country", "Canada"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "click Submit to go to confirmation",
+					"argv": ["click", "#next2"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "confirmation page shows the reference",
+					"argv": ["text", "#ref"],
+					"expect": { "exit": 0, "stdoutContains": "EXP-" }
+				},
+				{
+					"note": "confirmation shows the total",
+					"argv": ["text", "#total"],
+					"expect": { "exit": 0, "stdoutContains": "125.50" }
+				},
+				{
+					"note": "no validation error is showing",
+					"argv": ["attr", "#amount-err", "class"],
+					"expect": { "exit": 0, "stdoutNotContains": "show" }
+				}
+			]
+		}
+	]
+}

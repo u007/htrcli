@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Messaging fixture (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 12px; display: flex; gap: 16px; }
+  #sidebar { width: 180px; }
+  #sidebar button { display: block; width: 100%; text-align: left; margin-bottom: 4px; }
+  #sidebar button[aria-current="true"] { font-weight: bold; }
+  main { flex: 1; min-width: 0; }
+  #messages { border: 1px solid #ddd; min-height: 160px; padding: 6px; }
+  .message { padding: 6px 4px; border-bottom: 1px solid #f0f0f0; }
+  .author { font-weight: bold; margin-right: 6px; }
+  .reactions { margin-top: 4px; display: block; }
+  .react { margin-right: 4px; }
+  .react[aria-pressed="true"] { background: #cfe8ff; }
+  .react .count { margin-left: 4px; font-size: 11px; }
+  #composer { border: 1px solid #999; min-height: 40px; margin-top: 8px; padding: 4px; }
+  #composer:empty::before { content: attr(data-placeholder); color: #999; }
+  #search-count { font-size: 12px; color: #555; }
+  #toast { margin-top: 8px; padding: 6px; background: #eef; }
+</style>
+</head>
+<body>
+  <nav id="sidebar">
+    <button class="channel" data-channel="general">#general</button>
+    <button class="channel" data-channel="random">#random</button>
+    <button class="channel" data-channel="design">#design</button>
+    <button class="channel dm" data-channel="dm-alice">Alice Chen</button>
+    <button class="channel dm" data-channel="dm-bob">Bob Ortiz</button>
+  </nav>
+
+  <main>
+    <h1 id="channel-title">#general</h1>
+    <input id="search" type="search" aria-label="Search messages" autocomplete="off">
+    <div id="search-count" role="status"></div>
+    <div id="messages"></div>
+    <!-- The composer is contenteditable, like Slack/Teams: `fill` replaces the
+         content and Enter sends (Shift+Enter inserts a newline). -->
+    <div id="composer" contenteditable="true" role="textbox" aria-label="Message composer" data-placeholder="Message"></div>
+    <button id="send">Send</button>
+    <div id="toast" role="status" hidden></div>
+  </main>
+
+<script>
+  const EMOJI = ["👍", "🎉", "✅"];
+
+  const TITLES = {
+    general: "#general",
+    random: "#random",
+    design: "#design",
+    "dm-alice": "Alice Chen",
+    "dm-bob": "Bob Ortiz",
+  };
+
+  // Every message and every reaction lives here, so a re-render (sending,
+  // reacting, searching, switching channel) must preserve state from the model.
+  const store = {
+    general: [
+      { id: "m1", author: "alice", ts: "2026-03-02T09:10:00Z", body: "Morning everyone — standup at 9:30", reactions: {} },
+      { id: "m2", author: "bob", ts: "2026-03-02T09:12:00Z", body: "Budget draft is in the shared drive", reactions: { "👍": { count: 2, mine: false } } },
+      { id: "m3", author: "carol", ts: "2026-03-02T09:14:00Z", body: "Thanks Bob, I will review it before lunch", reactions: {} },
+    ],
+    random: [
+      { id: "m4", author: "alice", ts: "2026-03-02T09:16:00Z", body: "Anyone up for coffee at 3?", reactions: {} },
+    ],
+    design: [
+      { id: "m5", author: "dave", ts: "2026-03-02T09:18:00Z", body: "New mocks are ready for review", reactions: {} },
+    ],
+    "dm-alice": [
+      { id: "m6", author: "alice", ts: "2026-03-02T09:20:00Z", body: "Can you send me the budget numbers?", reactions: {} },
+    ],
+    "dm-bob": [
+      { id: "m7", author: "bob", ts: "2026-03-02T09:22:00Z", body: "I will be out tomorrow", reactions: {} },
+    ],
+  };
+
+  let active = "general";
+  let query = "";
+  let counter = 7;
+  let sent = 0;
+
+  const messagesEl = document.getElementById("messages");
+  const titleEl = document.getElementById("channel-title");
+  const searchEl = document.getElementById("search");
+  const searchCountEl = document.getElementById("search-count");
+  const composer = document.getElementById("composer");
+  const toast = document.getElementById("toast");
+
+  function showToast(text) {
+    toast.textContent = text;
+    toast.hidden = false;
+  }
+
+  function reactionFor(message, emoji) {
+    if (!message.reactions[emoji]) {
+      message.reactions[emoji] = { count: 0, mine: false };
+    }
+    return message.reactions[emoji];
+  }
+
+  function visibleMessages() {
+    const all = store[active];
+    const needle = query.trim().toLowerCase();
+    if (!needle) return all;
+    return all.filter(
+      (message) =>
+        message.body.toLowerCase().includes(needle) ||
+        message.author.toLowerCase().includes(needle),
+    );
+  }
+
+  function render() {
+    const visible = visibleMessages();
+    messagesEl.replaceChildren();
+
+    for (const message of visible) {
+      const row = document.createElement("div");
+      row.className = "message";
+      row.dataset.messageId = message.id;
+      row.dataset.author = message.author;
+      row.dataset.ts = message.ts;
+      row.dataset.channel = active;
+
+      const author = document.createElement("span");
+      author.className = "author";
+      author.textContent = message.author;
+
+      const body = document.createElement("span");
+      body.className = "body";
+      body.textContent = message.body;
+
+      const reactions = document.createElement("span");
+      reactions.className = "reactions";
+      for (const emoji of EMOJI) {
+        const state = reactionFor(message, emoji);
+        const button = document.createElement("button");
+        button.className = "react";
+        button.dataset.emoji = emoji;
+        button.dataset.messageId = message.id;
+        button.setAttribute("aria-label", `React ${emoji}`);
+        button.setAttribute("aria-pressed", state.mine ? "true" : "false");
+        button.textContent = emoji;
+        const count = document.createElement("span");
+        count.className = "count";
+        count.textContent = String(state.count);
+        button.appendChild(count);
+        button.addEventListener("click", () => {
+          const target = reactionFor(message, emoji);
+          if (target.mine) {
+            target.count -= 1;
+            target.mine = false;
+          } else {
+            target.count += 1;
+            target.mine = true;
+          }
+          render();
+        });
+        reactions.appendChild(button);
+      }
+
+      row.append(author, body, reactions);
+      messagesEl.appendChild(row);
+    }
+
+    titleEl.textContent = TITLES[active];
+    searchCountEl.textContent = query.trim()
+      ? `${visible.length} result${visible.length === 1 ? "" : "s"}`
+      : "";
+    for (const button of document.querySelectorAll(".channel")) {
+      button.setAttribute(
+        "aria-current",
+        button.dataset.channel === active ? "true" : "false",
+      );
+    }
+  }
+
+  function send() {
+    const text = composer.textContent.trim();
+    if (!text) return;
+    counter += 1;
+    sent += 1;
+    store[active].push({
+      id: `m${counter}`,
+      author: "you",
+      ts: `2026-03-02T09:${String(20 + sent).padStart(2, "0")}:00Z`,
+      body: text,
+      reactions: {},
+    });
+    composer.textContent = "";
+    render();
+    showToast(`Sent to ${TITLES[active]}`);
+  }
+
+  for (const button of document.querySelectorAll(".channel")) {
+    button.addEventListener("click", () => {
+      active = button.dataset.channel;
+      query = "";
+      searchEl.value = "";
+      render();
+    });
+  }
+
+  searchEl.addEventListener("input", () => {
+    query = searchEl.value;
+    render();
+  });
+
+  composer.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    send();
+  });
+
+  document.getElementById("send").addEventListener("click", send);
+
+  render();
+</script>
+</body>
+</html>

@@ -1,0 +1,151 @@
+{
+	"scenarios": [
+		{
+			"id": "S11",
+			"ref": "B09",
+			"app": "Expense report with line items (local)",
+			"goal": "Fill a multi-line expense report with a receipt upload, add a second line item, and capture the confirmation reference and total.",
+			"steps": [
+				{
+					"note": "open the expense fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_EXPENSE}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the first line",
+					"argv": ["wait", "--selector", "#date-1", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "fill line 1 date",
+					"argv": ["fill", "#date-1", "10/22/2026"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "pick line 1 category (option VALUE, not label)",
+					"argv": ["select", "#category-1", "travel"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "fill line 1 amount",
+					"argv": ["fill", "#amount-1", "125.50"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the running total reflects line 1 exactly",
+					"argv": ["--json", "text", "#total-display"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "125.50" }
+					}
+				},
+				{
+					"note": "add a second line item",
+					"argv": ["click", "#add-line"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "wait for the new line",
+					"argv": ["wait", "--selector", "#date-2", "--timeout", "5000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "fill line 2 date",
+					"argv": ["fill", "#date-2", "10/23/2026"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "pick line 2 category",
+					"argv": ["select", "#category-2", "meals"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "fill line 2 amount",
+					"argv": ["fill", "#amount-2", "42.75"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the running total adds both lines exactly",
+					"argv": ["--json", "text", "#total-display"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "168.25" }
+					}
+				},
+				{
+					"note": "attach the receipt file (no OS file picker)",
+					"argv": ["upload", "#receipt", "${BENCH_FIXTURE_RECEIPT}"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the receipt filename is shown",
+					"argv": ["--json", "text", "#receipt-name"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "receipt.txt" }
+					}
+				},
+				{
+					"note": "the receipt size is shown (receipt.txt is 62 bytes)",
+					"argv": ["--json", "text", "#receipt-size"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "62" }
+					}
+				},
+				{
+					"note": "submit the report",
+					"argv": ["click", "#submit"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "a confirmation reference was issued",
+					"argv": ["--json", "attr", "#confirm", "data-ref"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "EXR-700001" }
+					}
+				},
+				{
+					"note": "the submitted total is the exact sum of both lines",
+					"argv": ["--json", "attr", "#confirm", "data-total"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "168.25" }
+					}
+				},
+				{
+					"note": "the receipt name reached the submission",
+					"argv": ["--json", "attr", "#confirm", "data-receipt"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "receipt.txt" }
+					}
+				},
+				{
+					"note": "exactly two line items were submitted",
+					"argv": ["--json", "attr", "#confirm", "data-line-count"],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "2" } }
+				},
+				{
+					"note": "both categories reached the submission",
+					"argv": ["--json", "attr", "#confirm", "data-categories"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "travel,meals" }
+					}
+				},
+				{
+					"note": "no validation error class was added after a valid submit",
+					"argv": ["--json", "attr", "#lines-err", "class"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "err" }
+					}
+				}
+			]
+		}
+	]
+}

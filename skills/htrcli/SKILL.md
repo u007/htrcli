@@ -368,6 +368,11 @@ Supported key names: Enter, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown,
 ArrowLeft, ArrowRight, Home, End, PageUp, PageDown, F1–F12,
 Control+a–z, Alt+a–z, Shift+a–z, Meta+a–z.
 
+`fill` cannot set an **empty** value: the empty string is dropped from the
+command payload, so `fill "#q" ""` fails with `requires a "value"`. To empty a
+field, use `clear` — it also dispatches `input`/`change`, so a live filter or
+validation re-runs.
+
 ### Viewport coordinates (`xy=`)
 
 Any selector argument can be `xy=X,Y` — viewport CSS pixels (same units as CDP `Input.dispatchMouseEvent`):
@@ -465,6 +470,31 @@ htrcli page | grep Ready                 # should show "complete"
 htrcli eval 'document.readyState'        # "loading" | "interactive" | "complete"
 ```
 
+### `wait` — block until something appears (or is gone)
+
+```bash
+htrcli wait --selector "#thread-list" --timeout 10000
+htrcli wait --text "Message forwarded" --timeout 5000
+htrcli wait --url "/sent" --timeout 5000
+```
+
+`wait` polls internally and fails loudly on timeout; it never falls back to
+success. Use `--gone` (with `--selector`) to block until **no element
+matches** — the way to prove an archive/delete/move actually removed the row:
+
+```bash
+htrcli click ".row[data-idx='3'] .archive"
+htrcli wait --selector ".row[data-idx='3']" --gone --timeout 5000
+```
+
+"Gone" means absent from the DOM, not hidden: a `display:none` element still
+matches and the wait times out. `--gone` cannot be combined with `--text` or
+`--url`.
+
+A selector that never matched also satisfies `--gone` immediately, so on a row
+that might not exist yet, `wait --selector` for its presence first — otherwise
+a typo passes vacuously.
+
 ## Retrying flaky commands
 
 Some pages are slow or intermittently fail (a click races a re-render, a list
@@ -528,6 +558,19 @@ A scenario is a list of steps, each a raw htrcli argv plus its expectations:
 - `optional: true` downgrades a failing step to PARTIAL.
 - `requires_auth: true` is reported as NOT_RUN, never as PASS.
 - `${VAR}` in an argv expands from the environment.
+
+`jsonPath` reads the step's raw stdout, so the envelope decides the path:
+`--json text|attr|value` wraps the result as `{"data": ...}` (path `data`),
+`--json extract` nests it (`data.items.0.body`), while a bare `extract` prints
+the payload itself (`items.0.body`, `count`). The office scenarios use the bare
+form for `extract`.
+
+Assert after a **re-render**, not just after the click: an app that rebuilds
+its list (mail, messaging, tables) will happily pass an immediate
+`aria-pressed`/text check even when the state was only written to the DOM. Do
+the next action — send a message, switch channel, re-filter — then re-assert.
+A mutation that writes only the DOM and skips the model passes every other
+check and fails exactly this one.
 
 Verdicts: PASS / PARTIAL / FAIL / NOT_RUN. The report holds the per-step
 exit code, attempts, wall time and output, plus the per-scenario
@@ -1039,6 +1082,47 @@ htrcli --cdp text "div[role='textbox']"           # READ BACK before sending
 Always read the box back before sending. If the text does not contain your
 body **and** the signature, stop and fix it — do not send.
 
+### Mail actions — forward, label, archive (B08)
+
+Three actions that each verify differently.
+
+**Forward.** Open the forward compose, address it with `fill`, type the note
+with `type` (the quoted original is contenteditable, so `type` appends), then
+send and confirm the toast:
+
+```bash
+htrcli --cdp click ".row[data-idx='1'] .forward"
+htrcli --cdp wait --selector "#forward-panel:not([hidden])" --timeout 5000
+htrcli --cdp fill "#forward-to" "dave@example.com"
+htrcli --cdp type "#forward-body" "Numbers look good."
+htrcli --cdp click "#forward-send"
+htrcli --cdp wait --text "Message forwarded" --timeout 5000
+htrcli --cdp --json attr "#sent-log li" "data-to"   # dave@example.com
+```
+
+**Label.** Gmail's label menu is a custom popup, not a native `<select>`, so
+there is nothing for `select` to set. Tick the checkbox, then apply:
+
+```bash
+htrcli --cdp click ".row[data-idx='2'] .label"
+htrcli --cdp wait --selector "#label-menu:not([hidden])" --timeout 5000
+htrcli --cdp check "[aria-label='Finance']"
+htrcli --cdp click "#label-apply"
+htrcli --cdp --json attr ".row[data-idx='2']" "data-labels"   # Finance
+```
+
+**Archive.** Click archive, then prove the row is gone. `wait --gone` is the
+only way to assert absence:
+
+```bash
+htrcli --cdp click ".row[data-idx='3'] .archive"
+htrcli --cdp wait --selector ".row[data-idx='3']" --gone --timeout 5000
+htrcli --cdp --json attr "#archive-count" "data-count"   # 1
+```
+
+A hidden row still matches, so if the app only hides the row the `--gone`
+wait times out — that is the signal that the action did not really remove it.
+
 ### Calendar — create an event (B03)
 
 Date and time fields are **JS datepickers**: `fill` sets the text but leaves
@@ -1163,6 +1247,91 @@ Date pickers, seat maps and payment. Fill the search form, read the available
 slots back, pick one, and **stop before any card entry** — a benchmark run
 must never enter payment details. Book a clearly-labelled test slot and
 cancel it after capturing the confirmation number.
+
+### Expense report — line items + receipt upload (B09)
+
+Two things make an expense form different from a plain form: the line items
+are added dynamically, and the receipt is a file.
+
+**Line items.** Adding a row re-renders the table, so wait for the NEW row's
+field before filling it. Give each row a stable field (`#amount-1`,
+`#amount-2`) and read the running total back — that is the real check that
+every row landed.
+
+```bash
+htrcli --cdp fill "#date-1" "10/22/2026"
+htrcli --cdp select "#category-1" "travel"     # option VALUE, not the label
+htrcli --cdp fill "#amount-1" "125.50"
+htrcli --cdp text "#total-display"             # 125.50
+
+htrcli --cdp click "#add-line"
+htrcli --cdp wait --selector "#date-2" --timeout 5000
+htrcli --cdp fill "#date-2" "10/23/2026"
+htrcli --cdp select "#category-2" "meals"
+htrcli --cdp fill "#amount-2" "42.75"
+htrcli --cdp text "#total-display"             # 168.25
+```
+
+**Receipt.** `upload` sets the files on a real `<input type=file>` without an
+OS picker. It takes a **path on disk**, so pass an absolute path (or a
+`${VAR}` the scenario runner expands). Read the filename back to prove the
+file was attached — a file input that was never set looks identical to one
+that was.
+
+```bash
+htrcli --cdp upload "#receipt" "/abs/path/receipt.txt"
+htrcli --cdp text "#receipt-name"              # receipt.txt
+htrcli --cdp text "#receipt-size"              # 62
+```
+
+Then submit and capture the reference:
+
+```bash
+htrcli --cdp click "#submit"
+htrcli --cdp --json attr "#confirm" "data-ref" # EXR-700001
+htrcli --cdp --json attr "#confirm" "data-total"  # 168.25
+```
+
+`upload` **replaces** any existing selection. To attach several files, pass a
+comma-separated list: `upload "#receipt" "a.pdf,b.pdf"`. It works over both
+transports; the Chrome/CDP path uses `DOM.setFileInputFiles`, the extension
+path sends the bytes.
+
+### File management — upload, move, share (B10)
+
+Cloud drives (Drive/OneDrive/Dropbox) combine three actions that each need a
+different verb: upload, move, share.
+
+**Move with a click, not a drag.** Most drives implement "move to folder" as
+native HTML5 drag-and-drop, which is **not synthesized** and will silently do
+nothing. Look for the click-based path instead — usually a per-file "Move to"
+menu or a folder `<select>`. Prefer that:
+
+```bash
+htrcli --cdp select "tr[data-name='report.txt'] select.folder" "projects"
+htrcli --cdp attr  "tr[data-name='report.txt']" "data-folder"   # projects
+```
+
+**Share is usually a DOM dialog, not a native one.** Click the row's Share
+button, wait for the dialog, read the link back with `value` (an `<input>`
+link has no text content), choose the permission, then apply:
+
+```bash
+htrcli --cdp click "tr[data-name='report.txt'] button.share"
+htrcli --cdp wait --selector "#share-modal.visible" --timeout 5000
+htrcli --cdp --json value "#share-link"          # https://files.example/s/ABC123
+htrcli --cdp select "#share-permission" "edit"   # option VALUE, not the label
+htrcli --cdp click "#share-done"
+htrcli --cdp --json attr "tr[data-name='report.txt']" "data-permission"  # edit
+```
+
+Use `value` for the link, not `text` — reading `text` on an `<input>` returns
+its label/hint, not what it contains. Only use `dialog handle` when the page
+raises a **native** `alert`/`confirm`; a styled modal is ordinary DOM.
+
+**Prove the rest of the page did not change.** A file manager is a shared
+list, so assert an untouched row still has its original folder/permission —
+that catches a selector that matched the wrong row.
 
 ## Common workflows
 

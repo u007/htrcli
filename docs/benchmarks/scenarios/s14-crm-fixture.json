@@ -1,0 +1,334 @@
+{
+	"scenarios": [
+		{
+			"id": "S14",
+			"ref": "B11",
+			"app": "CRM fixture (local)",
+			"goal": "Find a contact by filtering the list, update phone/note/tags, save, prove the values persisted by reopening, and log an activity.",
+			"steps": [
+				{
+					"note": "open the CRM fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_CRM}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the contact list",
+					"argv": [
+						"wait",
+						"--selector",
+						"#contact-list .contact",
+						"--timeout",
+						"10000"
+					],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "all three seed contacts are listed",
+					"argv": [
+						"extract",
+						"list",
+						"#contact-list .contact",
+						"--fields",
+						"name:@data-name"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "3" }
+					}
+				},
+				{
+					"note": "filter the list to Carol",
+					"argv": ["fill", "#search", "carol"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "a filtered-out contact is REMOVED from the DOM",
+					"argv": [
+						"wait",
+						"--selector",
+						".contact[data-name='alice smith']",
+						"--gone",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "only one contact matches the filter",
+					"argv": [
+						"extract",
+						"list",
+						"#contact-list .contact",
+						"--fields",
+						"name:@data-name"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "1" }
+					}
+				},
+				{
+					"note": "the surviving contact is Carol",
+					"argv": [
+						"extract",
+						"list",
+						"#contact-list .contact",
+						"--fields",
+						"name:@data-name"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "items.0.name", "equals": "carol diaz" }
+					}
+				},
+				{
+					"note": "clear the filter (fill cannot set an empty value — use clear)",
+					"argv": ["clear", "#search"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the full list is back",
+					"argv": [
+						"wait",
+						"--selector",
+						".contact[data-name='alice smith']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "open Carol's record",
+					"argv": ["click", ".contact[data-name='carol diaz'] .open"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the edit panel opens on the right contact",
+					"argv": [
+						"wait",
+						"--selector",
+						"#edit-panel:not([hidden])",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the panel names Carol",
+					"argv": ["text", "#edit-name"],
+					"expect": { "exit": 0, "stdoutContains": "Carol Diaz" }
+				},
+				{
+					"note": "set the phone",
+					"argv": ["fill", "#phone", "+1-555-0142"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "set the note",
+					"argv": ["fill", "#note", "Renewal due Q1"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "type the first tag",
+					"argv": ["fill", "#tag-input", "enterprise"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "Enter commits the tag as a chip",
+					"argv": ["press", "Enter"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "type the second tag",
+					"argv": ["fill", "#tag-input", "vip"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "Enter commits the second chip and the input clears",
+					"argv": ["press", "Enter"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the tag input is empty after committing",
+					"argv": ["--json", "value", "#tag-input"],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "" } }
+				},
+				{
+					"note": "both chips exist",
+					"argv": [
+						"extract",
+						"list",
+						"#tags .chip",
+						"--fields",
+						"tag:@data-tag"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "2" }
+					}
+				},
+				{
+					"note": "the first chip is the first tag typed",
+					"argv": [
+						"extract",
+						"list",
+						"#tags .chip",
+						"--fields",
+						"tag:@data-tag"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "items.0.tag", "equals": "enterprise" }
+					}
+				},
+				{
+					"note": "the second chip is the second tag typed",
+					"argv": [
+						"extract",
+						"list",
+						"#tags .chip",
+						"--fields",
+						"tag:@data-tag"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "items.1.tag", "equals": "vip" }
+					}
+				},
+				{
+					"note": "save the record",
+					"argv": ["click", "#save"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the save is confirmed",
+					"argv": ["wait", "--text", "Contact saved", "--timeout", "5000"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the list row now carries the saved phone",
+					"argv": [
+						"--json",
+						"attr",
+						".contact[data-name='carol diaz']",
+						"data-phone"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "+1-555-0142" }
+					}
+				},
+				{
+					"note": "the list row carries both tags",
+					"argv": [
+						"--json",
+						"attr",
+						".contact[data-name='carol diaz']",
+						"data-tags"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "enterprise,vip" }
+					}
+				},
+				{
+					"note": "reopen the record (persistence is in the data model, not the form)",
+					"argv": ["click", ".contact[data-name='carol diaz'] .open"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the reopened phone field holds the saved value",
+					"argv": ["--json", "value", "#phone"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "+1-555-0142" }
+					}
+				},
+				{
+					"note": "the reopened note field holds the saved value",
+					"argv": ["--json", "value", "#note"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "Renewal due Q1" }
+					}
+				},
+				{
+					"note": "the reopened record still renders both chips",
+					"argv": [
+						"extract",
+						"list",
+						"#tags .chip",
+						"--fields",
+						"tag:@data-tag"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "2" }
+					}
+				},
+				{
+					"note": "pick the activity type",
+					"argv": ["select", "#activity-type", "call"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "describe the activity",
+					"argv": ["fill", "#activity-note", "Discussed renewal"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "log it",
+					"argv": ["click", "#log-activity"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the activity is confirmed",
+					"argv": ["wait", "--text", "Activity logged", "--timeout", "5000"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the activity entry carries the chosen type",
+					"argv": ["--json", "attr", "#activity-log li", "data-type"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "call" }
+					}
+				},
+				{
+					"note": "the activity is attached to Carol, not another contact",
+					"argv": ["--json", "attr", "#activity-log li", "data-contact"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "carol diaz" }
+					}
+				},
+				{
+					"note": "the activity details are recorded",
+					"argv": ["text", "#activity-log li"],
+					"expect": { "exit": 0, "stdoutContains": "Discussed renewal" }
+				},
+				{
+					"note": "Alice was not touched by the edit",
+					"argv": [
+						"--json",
+						"attr",
+						".contact[data-name='alice smith']",
+						"data-phone"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "" } }
+				},
+				{
+					"note": "Alice still has no tags",
+					"argv": [
+						"--json",
+						"attr",
+						".contact[data-name='alice smith']",
+						"data-tags"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "" } }
+				}
+			]
+		}
+	]
+}

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CRM fixture (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 12px; }
+  #search { width: 260px; padding: 4px; }
+  #contact-list { margin-top: 10px; border: 1px solid #ddd; }
+  .contact { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-bottom: 1px solid #eee; }
+  .company { color: #666; }
+  #edit-panel { margin-top: 12px; border: 1px solid #ccc; padding: 10px; }
+  #edit-panel label { display: block; margin-top: 8px; }
+  #phone, #note, #tag-input, #activity-note { width: 320px; }
+  #note, #activity-note { min-height: 44px; }
+  #tags { margin-top: 6px; min-height: 22px; }
+  .chip { display: inline-block; background: #e8eefc; border-radius: 10px; padding: 2px 8px; margin-right: 6px; }
+  #toast { margin-top: 10px; padding: 6px; background: #eef; }
+  #activity-log li { font-family: monospace; }
+</style>
+</head>
+<body>
+  <h1>Contacts (fixture)</h1>
+
+  <input id="search" type="search" aria-label="Search contacts" placeholder="Search contacts">
+  <div id="contact-list"></div>
+
+  <section id="edit-panel" hidden>
+    <h2 id="edit-name"></h2>
+    <label>Phone <input id="phone" type="tel" aria-label="Phone"></label>
+    <label>Note <textarea id="note" aria-label="Note"></textarea></label>
+    <label>Tags <span id="tags"></span></label>
+    <input id="tag-input" type="text" aria-label="Add tag" placeholder="Type a tag and press Enter">
+    <button id="save">Save</button>
+  </section>
+
+  <div id="toast" role="status" hidden></div>
+
+  <section id="activity">
+    <h2>Log activity</h2>
+    <label>Type
+      <select id="activity-type" aria-label="Activity type">
+        <option value="call">Call</option>
+        <option value="email">Email</option>
+        <option value="meeting">Meeting</option>
+      </select>
+    </label>
+    <label>Details <textarea id="activity-note" aria-label="Activity details"></textarea></label>
+    <button id="log-activity">Log activity</button>
+    <ul id="activity-log"></ul>
+  </section>
+
+<script>
+  const contacts = [
+    { id: "1", name: "Alice Smith", company: "Acme", phone: "", note: "", tags: [] },
+    { id: "2", name: "Bob Jones", company: "Globex", phone: "", note: "", tags: [] },
+    { id: "3", name: "Carol Diaz", company: "Initech", phone: "", note: "", tags: [] },
+  ];
+
+  const search = document.getElementById("search");
+  const list = document.getElementById("contact-list");
+  const panel = document.getElementById("edit-panel");
+  const editName = document.getElementById("edit-name");
+  const phone = document.getElementById("phone");
+  const note = document.getElementById("note");
+  const tags = document.getElementById("tags");
+  const tagInput = document.getElementById("tag-input");
+  const saveButton = document.getElementById("save");
+  const toast = document.getElementById("toast");
+  const activityType = document.getElementById("activity-type");
+  const activityNote = document.getElementById("activity-note");
+  const logButton = document.getElementById("log-activity");
+  const activityLog = document.getElementById("activity-log");
+
+  let editing = null;
+
+  function showToast(message) {
+    toast.textContent = message;
+    toast.hidden = false;
+  }
+
+  // The list is RE-RENDERED on filter, so a non-matching contact is absent
+  // from the DOM (not merely hidden) — the same shape a SPA produces, and
+  // what `wait --gone` is designed to assert.
+  function render() {
+    const query = search.value.trim().toLowerCase();
+    list.textContent = "";
+    const matches = contacts.filter((contact) =>
+      contact.name.toLowerCase().includes(query),
+    );
+    if (matches.length === 0) {
+      const empty = document.createElement("p");
+      empty.id = "no-matches";
+      empty.textContent = "No contacts";
+      list.appendChild(empty);
+      return;
+    }
+    for (const contact of matches) {
+      const row = document.createElement("div");
+      row.className = "contact";
+      row.dataset.id = contact.id;
+      row.dataset.name = contact.name.toLowerCase();
+      row.dataset.phone = contact.phone;
+      row.dataset.tags = contact.tags.join(",");
+
+      const open = document.createElement("button");
+      open.className = "open";
+      open.dataset.id = contact.id;
+      open.textContent = contact.name;
+      row.appendChild(open);
+
+      const company = document.createElement("span");
+      company.className = "company";
+      company.textContent = contact.company;
+      row.appendChild(company);
+
+      list.appendChild(row);
+    }
+  }
+
+  function renderTags() {
+    tags.textContent = "";
+    if (!editing) return;
+    for (const tag of editing.tags) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.dataset.tag = tag;
+      chip.textContent = tag;
+      tags.appendChild(chip);
+    }
+  }
+
+  function openContact(id) {
+    editing = contacts.find((contact) => contact.id === id) ?? null;
+    if (!editing) return;
+    editName.textContent = editing.name;
+    phone.value = editing.phone;
+    note.value = editing.note;
+    tagInput.value = "";
+    panel.hidden = false;
+    renderTags();
+  }
+
+  list.addEventListener("click", (event) => {
+    const button = event.target.closest(".open");
+    if (!button) return;
+    openContact(button.dataset.id);
+  });
+
+  search.addEventListener("input", render);
+
+  tagInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    const value = tagInput.value.trim();
+    if (!value || !editing) return;
+    if (!editing.tags.includes(value)) editing.tags.push(value);
+    tagInput.value = "";
+    renderTags();
+  });
+
+  saveButton.addEventListener("click", () => {
+    if (!editing) return;
+    editing.phone = phone.value;
+    editing.note = note.value;
+    render();
+    showToast("Contact saved");
+  });
+
+  logButton.addEventListener("click", () => {
+    if (!editing) return;
+    const item = document.createElement("li");
+    item.className = "activity";
+    item.dataset.type = activityType.value;
+    item.dataset.contact = editing.name.toLowerCase();
+    item.textContent = `${activityType.value}: ${activityNote.value}`;
+    activityLog.appendChild(item);
+    showToast("Activity logged");
+  });
+
+  render();
+</script>
+</body>
+</html>

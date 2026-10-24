@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Expense report with line items (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  th, td { text-align: left; padding: 4px; border-bottom: 1px solid #eee; }
+  input, select { padding: 5px; font-size: 13px; box-sizing: border-box; }
+  .amount { width: 100px; }
+  .date { width: 120px; }
+  .err { color: #d00; font-size: 12px; margin-top: 4px; display: none; }
+  .err.show { display: block; }
+  #total-display { font-weight: bold; }
+  #receipt-name, #receipt-size { font-family: monospace; }
+  button { padding: 7px 14px; font-size: 14px; cursor: pointer; }
+  #confirm { display: none; border: 1px solid #1a73e8; padding: 16px; margin-top: 16px; }
+  #confirm.visible { display: block; }
+  #conf-ref { font-weight: bold; color: #1a73e8; font-family: monospace; }
+</style>
+</head>
+<body>
+  <h1>Expense Report with Line Items (fixture)</h1>
+
+  <table>
+    <thead>
+      <tr><th>Date</th><th>Category</th><th>Amount</th></tr>
+    </thead>
+    <tbody id="lines">
+      <tr class="line" data-line="1">
+        <td><input id="date-1" class="date" type="text" placeholder="mm/dd/yyyy"></td>
+        <td>
+          <select id="category-1" class="category">
+            <option value="">— Select —</option>
+            <option value="travel">Travel</option>
+            <option value="meals">Meals</option>
+            <option value="supplies">Supplies</option>
+          </select>
+        </td>
+        <td><input id="amount-1" class="amount" type="number" step="0.01" min="0"></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <button id="add-line" type="button">Add line item</button>
+
+  <p>Total: <span id="total-display">0.00</span></p>
+
+  <!-- A real <input type=file>. `htrcli upload` sets its files without a picker. -->
+  <p>
+    Receipt:
+    <input id="receipt" type="file">
+    <span id="receipt-name">(none)</span>
+    <span id="receipt-size"></span>
+  </p>
+
+  <p><button id="submit" type="button">Submit report</button></p>
+  <div id="lines-err" class="err">Every line needs a date, a category and an amount greater than 0</div>
+
+  <div id="confirm">
+    <h2>Expense report submitted</h2>
+    <p>Reference: <span id="conf-ref">—</span></p>
+    <p>Total: <span id="conf-total">—</span></p>
+    <p>Lines: <span id="conf-lines">—</span></p>
+    <p>Receipt: <span id="conf-receipt">—</span></p>
+  </div>
+
+  <script>
+    (() => {
+      var lines = document.getElementById("lines");
+      var counter = 1;
+      var refCounter = 0;
+
+      function template(n) {
+        return (
+          '<td><input id="date-' + n + '" class="date" type="text" placeholder="mm/dd/yyyy"></td>' +
+          '<td><select id="category-' + n + '" class="category">' +
+          '<option value="">— Select —</option>' +
+          '<option value="travel">Travel</option>' +
+          '<option value="meals">Meals</option>' +
+          '<option value="supplies">Supplies</option>' +
+          '</select></td>' +
+          '<td><input id="amount-' + n + '" class="amount" type="number" step="0.01" min="0"></td>'
+        );
+      }
+
+      function recalc() {
+        var sum = 0;
+        document.querySelectorAll(".line .amount").forEach((el) => {
+          var n = parseFloat(el.value);
+          if (!Number.isNaN(n)) sum += n;
+        });
+        document.getElementById("total-display").textContent = sum.toFixed(2);
+        return sum;
+      }
+
+      document.getElementById("add-line").addEventListener("click", () => {
+        counter++;
+        var tr = document.createElement("tr");
+        tr.className = "line";
+        tr.setAttribute("data-line", String(counter));
+        tr.innerHTML = template(counter);
+        lines.appendChild(tr);
+      });
+
+      lines.addEventListener("input", recalc);
+
+      // Show the chosen receipt's name and size, so the scenario can prove
+      // that `upload` actually set the file.
+      document.getElementById("receipt").addEventListener("change", () => {
+        var input = document.getElementById("receipt");
+        var has = input.files && input.files.length > 0;
+        document.getElementById("receipt-name").textContent = has
+          ? input.files[0].name
+          : "(none)";
+        document.getElementById("receipt-size").textContent = has
+          ? String(input.files[0].size)
+          : "";
+      });
+
+      function validRow(tr) {
+        var date = tr.querySelector(".date");
+        var cat = tr.querySelector(".category");
+        var amt = tr.querySelector(".amount");
+        var n = parseFloat(amt.value);
+        return (
+          /^\d{2}\/\d{2}\/\d{4}$/.test(date.value.trim()) &&
+          cat.value !== "" &&
+          !Number.isNaN(n) &&
+          n > 0
+        );
+      }
+
+      document.getElementById("submit").addEventListener("click", () => {
+        var rows = Array.from(document.querySelectorAll(".line"));
+        var ok = rows.length > 0 && rows.every(validRow);
+        document.getElementById("lines-err").classList.toggle("show", !ok);
+        if (!ok) return;
+
+        refCounter++;
+        var ref = `EXR-${String(700000 + refCounter)}`;
+        var total = recalc();
+        var cats = rows.map((tr) => tr.querySelector(".category").value).join(",");
+        var input = document.getElementById("receipt");
+        var has = input.files && input.files.length > 0;
+        var receipt = has ? input.files[0].name : "(none)";
+        var receiptSize = has ? String(input.files[0].size) : "0";
+
+        document.getElementById("conf-ref").textContent = ref;
+        document.getElementById("conf-total").textContent = total.toFixed(2);
+        document.getElementById("conf-lines").textContent = cats;
+        document.getElementById("conf-receipt").textContent = receipt;
+
+        var confirm = document.getElementById("confirm");
+        confirm.setAttribute("data-ref", ref);
+        confirm.setAttribute("data-total", total.toFixed(2));
+        confirm.setAttribute("data-receipt", receipt);
+        confirm.setAttribute("data-receipt-size", receiptSize);
+        confirm.setAttribute("data-line-count", String(rows.length));
+        confirm.setAttribute("data-categories", cats);
+        confirm.classList.add("visible");
+      });
+    })();
+  </script>
+</body>
+</html>

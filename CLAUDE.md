@@ -37,7 +37,10 @@ htrcli serve          # run daemon: HTTP :3845 + Unix socket relay (Chrome+Firef
 
 # Utility
 make close           # Kill process on :3845
-make bench-smoke     # Run the offline benchmark scenario (needs a real Chrome)
+make bench-smoke     # Run one offline benchmark scenario (also: bench-office,
+                     # bench-tasks, bench-form, bench-booking, bench-expense,
+                     # bench-files, bench-mail, bench-crm, bench-messaging;
+                     # all need a real Chrome on the CDP port)
 ```
 
 ### Benchmark harness

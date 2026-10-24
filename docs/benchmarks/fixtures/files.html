@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Files (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; }
+  table { border-collapse: collapse; width: 100%; max-width: 760px; }
+  th, td { text-align: left; padding: 6px; border-bottom: 1px solid #eee; }
+  select, input { padding: 4px; font-size: 13px; }
+  button { padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  #upload { margin-bottom: 12px; }
+  #share-modal {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.3); align-items: center; justify-content: center;
+  }
+  #share-modal.visible { display: flex; }
+  .dialog { background: #fff; padding: 20px; border-radius: 8px; width: 420px; }
+  .dialog label { display: block; font-size: 12px; color: #555; margin: 8px 0 4px; }
+  #share-link { width: 100%; box-sizing: border-box; }
+  .perm { color: #555; }
+  .size { color: #777; }
+</style>
+</head>
+<body>
+  <h1>Files (fixture)</h1>
+
+  <p><input id="upload" type="file"></p>
+
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Size</th><th>Folder</th><th>Permission</th><th>Actions</th></tr>
+    </thead>
+    <tbody id="files">
+      <tr class="file" data-name="Q4-summary.txt" data-size="2048" data-folder="my-drive" data-permission="private">
+        <td>Q4-summary.txt</td>
+        <td><span class="size">2048</span></td>
+        <td>
+          <select class="folder">
+            <option value="my-drive">My Drive</option>
+            <option value="projects">Projects</option>
+            <option value="archive">Archive</option>
+          </select>
+        </td>
+        <td><span class="perm">private</span></td>
+        <td><button class="share" type="button">Share</button></td>
+      </tr>
+      <tr class="file" data-name="old-notes.txt" data-size="512" data-folder="archive" data-permission="private">
+        <td>old-notes.txt</td>
+        <td><span class="size">512</span></td>
+        <td>
+          <select class="folder">
+            <option value="my-drive">My Drive</option>
+            <option value="projects">Projects</option>
+            <option value="archive" selected>Archive</option>
+          </select>
+        </td>
+        <td><span class="perm">private</span></td>
+        <td><button class="share" type="button">Share</button></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Share dialog: a DOM modal (not a native browser dialog). -->
+  <div id="share-modal">
+    <div class="dialog">
+      <h2>Share file</h2>
+      <label>Link</label>
+      <input id="share-link" type="text" readonly value="https://files.example/s/ABC123">
+      <label>Permission</label>
+      <select id="share-permission">
+        <option value="view">Can view</option>
+        <option value="comment">Can comment</option>
+        <option value="edit">Can edit</option>
+      </select>
+      <p><button id="share-done" type="button">Done</button></p>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const files = document.getElementById("files");
+      const modal = document.getElementById("share-modal");
+
+      const folderCell = () =>
+        '<td><select class="folder">' +
+        '<option value="my-drive">My Drive</option>' +
+        '<option value="projects">Projects</option>' +
+        '<option value="archive">Archive</option>' +
+        "</select></td>";
+
+      // A chosen file becomes a row in "My Drive", private by default.
+      document.getElementById("upload").addEventListener("change", (ev) => {
+        const input = ev.target;
+        if (!input.files || input.files.length === 0) return;
+        const file = input.files[0];
+
+        const tr = document.createElement("tr");
+        tr.className = "file";
+        tr.setAttribute("data-name", file.name);
+        tr.setAttribute("data-size", String(file.size));
+        tr.setAttribute("data-folder", "my-drive");
+        tr.setAttribute("data-permission", "private");
+        tr.innerHTML =
+          `<td>${file.name}</td>` +
+          `<td><span class="size">${file.size}</span></td>` +
+          `${folderCell()}` +
+          '<td><span class="perm">private</span></td>' +
+          '<td><button class="share" type="button">Share</button></td>';
+        tr.querySelector("select.folder").value = "my-drive";
+        files.appendChild(tr);
+        input.value = "";
+      });
+
+      // Moving: the folder select updates the row's own attribute.
+      files.addEventListener("change", (ev) => {
+        const sel = ev.target.closest("select.folder");
+        if (!sel) return;
+        sel.closest("tr").setAttribute("data-folder", sel.value);
+      });
+
+      // Sharing: open the modal for the clicked row.
+      let activeRow = null;
+      files.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("button.share");
+        if (!btn) return;
+        activeRow = btn.closest("tr");
+        document.getElementById("share-permission").value = "view";
+        modal.classList.add("visible");
+      });
+
+      document.getElementById("share-done").addEventListener("click", () => {
+        if (activeRow) {
+          const perm = document.getElementById("share-permission").value;
+          activeRow.setAttribute("data-permission", perm);
+          activeRow.setAttribute("data-shared", "true");
+          activeRow.querySelector(".perm").textContent = perm;
+        }
+        modal.classList.remove("visible");
+        activeRow = null;
+      });
+    })();
+  </script>
+</body>
+</html>

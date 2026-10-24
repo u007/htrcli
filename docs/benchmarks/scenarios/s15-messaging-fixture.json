@@ -1,0 +1,382 @@
+{
+	"scenarios": [
+		{
+			"id": "S15",
+			"ref": "B12",
+			"app": "Messaging fixture (local)",
+			"goal": "React to a message, post to a channel and a DM, search the history, and prove each write stayed in its own conversation.",
+			"steps": [
+				{
+					"note": "open the messaging fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_MESSAGING}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the message list",
+					"argv": [
+						"wait",
+						"--selector",
+						"#messages .message",
+						"--timeout",
+						"10000"
+					],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "the app opens on #general",
+					"argv": ["--json", "text", "#channel-title"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "#general" }
+					}
+				},
+				{
+					"note": "the channel history renders with author, body, timestamp",
+					"argv": [
+						"extract",
+						"list",
+						"#messages .message",
+						"--fields",
+						"author:@data-author,body:.body,ts:@data-ts,channel:@data-channel"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.0.body",
+							"equals": "Morning everyone — standup at 9:30"
+						}
+					}
+				},
+				{
+					"note": "m2 already carries two 👍 reactions from other people",
+					"argv": [
+						"--json",
+						"text",
+						"[data-message-id='m2'] [data-emoji='👍'] .count"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "2" } }
+				},
+				{
+					"note": "a count above zero is NOT the same as reacted-by-me",
+					"argv": [
+						"--json",
+						"attr",
+						"[data-message-id='m2'] [data-emoji='👍']",
+						"aria-pressed"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "false" }
+					}
+				},
+				{
+					"note": "react with ✅ on m2",
+					"argv": ["click", "[data-message-id='m2'] [data-emoji='✅']"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the reaction button reports the pressed state",
+					"argv": [
+						"--json",
+						"attr",
+						"[data-message-id='m2'] [data-emoji='✅']",
+						"aria-pressed"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "true" }
+					}
+				},
+				{
+					"note": "the new reaction starts at a count of one",
+					"argv": [
+						"--json",
+						"text",
+						"[data-message-id='m2'] [data-emoji='✅'] .count"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "1" } }
+				},
+				{
+					"note": "compose in the contenteditable composer (fill replaces it)",
+					"argv": [
+						"fill",
+						"#composer",
+						"Quarterly numbers are ready for review"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "Enter sends — no send button needed",
+					"argv": ["press", "Enter"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the message appears in the live list",
+					"argv": [
+						"wait",
+						"--text",
+						"Quarterly numbers are ready for review",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the sent message is attributed to the current user",
+					"argv": [
+						"--json",
+						"attr",
+						"#messages .message:last-child",
+						"data-author"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "you" }
+					}
+				},
+				{
+					"note": "and it landed in #general",
+					"argv": [
+						"--json",
+						"attr",
+						"#messages .message:last-child",
+						"data-channel"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "general" }
+					}
+				},
+				{
+					"note": "the body text is exactly what was typed",
+					"argv": ["--json", "text", "#messages .message:last-child .body"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Quarterly numbers are ready for review"
+						}
+					}
+				},
+				{
+					"note": "the ✅ reaction survived the re-render caused by sending",
+					"argv": [
+						"--json",
+						"attr",
+						"[data-message-id='m2'] [data-emoji='✅']",
+						"aria-pressed"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "true" }
+					}
+				},
+				{
+					"note": "the composer is cleared after send",
+					"argv": ["--json", "text", "#composer"],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "" } }
+				},
+				{
+					"note": "search the history for a term that only m2 contains",
+					"argv": ["fill", "#search", "budget"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the result count is reported",
+					"argv": ["--json", "text", "#search-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "1 result" }
+					}
+				},
+				{
+					"note": "the matching message is still there",
+					"argv": [
+						"wait",
+						"--selector",
+						"[data-message-id='m2']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "non-matching messages left the DOM (not merely hidden)",
+					"argv": [
+						"wait",
+						"--gone",
+						"--selector",
+						"[data-message-id='m1']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "clear the search (fill cannot set an empty value — use clear)",
+					"argv": ["clear", "#search"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the full history comes back",
+					"argv": [
+						"wait",
+						"--selector",
+						"[data-message-id='m1']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the result count is cleared",
+					"argv": ["--json", "text", "#search-count"],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "" } }
+				},
+				{
+					"note": "open the DM with Alice",
+					"argv": ["click", ".channel[data-channel='dm-alice']"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the header follows the conversation",
+					"argv": ["--json", "text", "#channel-title"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "Alice Chen" }
+					}
+				},
+				{
+					"note": "the DM shows only its own message",
+					"argv": [
+						"wait",
+						"--selector",
+						"[data-message-id='m6']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "channel messages are not leaking into the DM",
+					"argv": [
+						"wait",
+						"--gone",
+						"--selector",
+						"[data-message-id='m1']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "compose a DM reply",
+					"argv": ["fill", "#composer", "Sending the budget deck now"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "send with the Send button (the other send path)",
+					"argv": ["click", "#send"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the DM message is addressed to the DM",
+					"argv": [
+						"--json",
+						"attr",
+						"#messages .message:last-child",
+						"data-channel"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "dm-alice" }
+					}
+				},
+				{
+					"note": "back to #general",
+					"argv": ["click", ".channel[data-channel='general']"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the DM message did not leak into the channel",
+					"argv": [
+						"wait",
+						"--gone",
+						"--selector",
+						"[data-message-id='m9']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the channel message is still there",
+					"argv": [
+						"wait",
+						"--selector",
+						"[data-message-id='m8']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the reaction survived the channel switches too",
+					"argv": [
+						"--json",
+						"attr",
+						"[data-message-id='m2'] [data-emoji='✅']",
+						"aria-pressed"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "true" }
+					}
+				},
+				{
+					"note": "the channel holds exactly four messages (no duplicates, no leaks)",
+					"argv": ["extract", "list", "#messages .message"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "4" }
+					}
+				},
+				{
+					"note": "the channel history is now four messages, newest last",
+					"argv": [
+						"extract",
+						"list",
+						"#messages .message",
+						"--fields",
+						"author:@data-author,body:.body,ts:@data-ts,channel:@data-channel"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.3.body",
+							"equals": "Quarterly numbers are ready for review"
+						}
+					}
+				},
+				{
+					"note": "the sent message carries a deterministic timestamp",
+					"argv": [
+						"extract",
+						"list",
+						"#messages .message",
+						"--fields",
+						"author:@data-author,ts:@data-ts"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.3.ts",
+							"equals": "2026-03-02T09:21:00Z"
+						}
+					}
+				}
+			]
+		}
+	]
+}

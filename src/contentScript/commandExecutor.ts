@@ -29,7 +29,7 @@ import {
 	waitForScrollableActionableElement,
 } from "./elementFinder";
 import { extractListFrom, extractTable } from "./extractData";
-import { assignRef } from "./refRegistry";
+import { assignRef, DetachedRefError } from "./refRegistry";
 import { getSnapshot } from "./snapshot";
 import { generateXPath } from "./xpathGenerator";
 
@@ -208,6 +208,8 @@ async function executeAction(command: Command): Promise<unknown> {
 			return handleWait(
 				requireTarget(target, action),
 				options?.timeout as number,
+				options?.gone === true,
+				options?.interval as number,
 			);
 		case "isVisible":
 			return handleIsVisible(requireTarget(target, action));
@@ -576,11 +578,69 @@ async function handleExtractList(
 	});
 }
 
+/**
+ * Wait for a DOM condition on a target.
+ *
+ * Default behaviour waits for the element to APPEAR. With `gone` the sense is
+ * inverted: it resolves once NO element matches the target. "Gone" means
+ * absent from the DOM, not merely hidden — a `display:none` element still
+ * matches, so hide-only implementations must use a different check.
+ *
+ * Both branches fail loudly on timeout; neither falls back to success.
+ */
+/**
+ * True when NO element matches the target, ignoring `index`: a gone check on
+ * "the Nth match" would pass while earlier matches still exist. A ref whose
+ * element was removed is gone; any other ref error is rethrown.
+ */
+function isAbsent(target: TargetSelector): boolean {
+	try {
+		return findAllElements(target).length === 0;
+	} catch (error) {
+		if (error instanceof DetachedRefError) {
+			console.debug(
+				"[HTR NControl] wait --gone: ref detached, element is gone",
+				error.message,
+			);
+			return true;
+		}
+		throw error;
+	}
+}
+
 async function handleWait(
 	target: TargetSelector,
 	timeout?: number,
-): Promise<RemoteElementInfo> {
+	gone = false,
+	interval?: number,
+): Promise<RemoteElementInfo | { gone: true }> {
 	const timeoutMs = timeout ?? 5000;
+	const label = target.selector ?? target.xpath ?? JSON.stringify(target);
+
+	if (gone) {
+		if (interval === undefined || interval <= 0) {
+			throw new Error(`wait: --interval must be > 0, got ${interval}`);
+		}
+		const deadline = Date.now() + timeoutMs;
+		for (;;) {
+			// A document still loading has not rendered its elements yet, so an
+			// empty match there does not prove the element is gone.
+			const loading = document.readyState === "loading";
+			if (!loading && isAbsent(target)) return { gone: true };
+			const remaining = deadline - Date.now();
+			if (remaining <= 0) {
+				throw new Error(
+					loading
+						? `wait: "${label}" not confirmed gone, document still loading after ${timeoutMs}ms`
+						: `wait: element "${label}" still present after ${timeoutMs}ms`,
+				);
+			}
+			await new Promise((resolve) =>
+				setTimeout(resolve, Math.min(interval, remaining)),
+			);
+		}
+	}
+
 	// `wait` always waits for the element to appear (the `waitForAppear` gate
 	// does not apply) and fails loudly on timeout instead of resolving null.
 	const element = await waitForElement(target, timeoutMs, {
@@ -588,7 +648,6 @@ async function handleWait(
 		throwOnTimeout: true,
 	});
 	if (!element) {
-		const label = target.selector ?? target.xpath ?? JSON.stringify(target);
 		throw new Error(
 			`wait: element "${label}" did not appear within ${timeoutMs}ms`,
 		);

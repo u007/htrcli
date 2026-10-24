@@ -139,6 +139,8 @@
     refToEl.set(refId, el);
     return refId;
   }
+  class DetachedRefError extends Error {
+  }
   function resolveRef(refId) {
     const el = refToEl.get(refId);
     if (!el) {
@@ -148,7 +150,7 @@
     }
     if (!el.isConnected) {
       refToEl.delete(refId);
-      throw new Error(
+      throw new DetachedRefError(
         `stale ref: ${refId} points to an element that is no longer in the document (page re-rendered or navigated)`
       );
     }
@@ -1285,7 +1287,9 @@
       case "wait":
         return handleWait(
           requireTarget(target, action),
-          options == null ? void 0 : options.timeout
+          options == null ? void 0 : options.timeout,
+          (options == null ? void 0 : options.gone) === true,
+          options == null ? void 0 : options.interval
         );
       case "isVisible":
         return handleIsVisible(requireTarget(target, action));
@@ -1559,14 +1563,47 @@
       container: (options == null ? void 0 : options.container) === true
     });
   }
-  async function handleWait(target, timeout) {
+  function isAbsent(target) {
+    try {
+      return findAllElements(target).length === 0;
+    } catch (error) {
+      if (error instanceof DetachedRefError) {
+        console.debug(
+          "[HTR NControl] wait --gone: ref detached, element is gone",
+          error.message
+        );
+        return true;
+      }
+      throw error;
+    }
+  }
+  async function handleWait(target, timeout, gone = false, interval) {
     const timeoutMs = timeout ?? 5e3;
+    const label = target.selector ?? target.xpath ?? JSON.stringify(target);
+    if (gone) {
+      if (interval === void 0 || interval <= 0) {
+        throw new Error(`wait: --interval must be > 0, got ${interval}`);
+      }
+      const deadline = Date.now() + timeoutMs;
+      for (; ; ) {
+        const loading = document.readyState === "loading";
+        if (!loading && isAbsent(target)) return { gone: true };
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          throw new Error(
+            loading ? `wait: "${label}" not confirmed gone, document still loading after ${timeoutMs}ms` : `wait: element "${label}" still present after ${timeoutMs}ms`
+          );
+        }
+        await new Promise(
+          (resolve) => setTimeout(resolve, Math.min(interval, remaining))
+        );
+      }
+    }
     const element = await waitForElement(target, timeoutMs, {
       force: true,
       throwOnTimeout: true
     });
     if (!element) {
-      const label = target.selector ?? target.xpath ?? JSON.stringify(target);
       throw new Error(
         `wait: element "${label}" did not appear within ${timeoutMs}ms`
       );

@@ -111,45 +111,91 @@ scenarios, not assertions.
   Cell entry and grid read-back verified against the local Sheets fixture
   (scenario S06).
 
+### B13 — Form filling (HR/IT/surveys) — P2
+- **App**: web form
+- **Goal**: Fill multi-page form end-to-end, submit, capture ref.
+- **Start state**: form page 1 open.
+- **Pass/fail**: all fields match; submission ref captured; no validation error after correct fill.
+- **Likely gaps**: multi-page navigation, required-field validation, selects/comboboxes. OFFLINE PROXY verified via S09 (docs/benchmarks/fixtures/form.html): name+email fill, date fill, category select, country pick, confirmation reference (EXP-100001), and error cleared after correct fill. Live form run needs an actual expense portal.
+- **Safety**: test data only; never enter real personal data.
+
 ### B07 — Booking (meeting room / travel / appointment) — P1
 - **App**: booking site
 - **Goal**: Book a resource for a time slot; capture confirmation number.
 - **Start state**: search form available.
 - **Pass/fail**: confirmation number captured; booking appears in account.
-- **Likely gaps**: date pickers, seat maps; payment gating (never enter card).
+- **Likely gaps**: date pickers, seat maps; payment gating (never enter card). OFFLINE PROXY verified via S10 (docs/benchmarks/fixtures/booking.html): room select via native `<select>`, date via popover day grid, time select, seat map with one taken seat, confirmation number captured. Live booking-site run needs auth — see BLOCKED line in TODO.md.
 - **Safety**: use a clearly-labelled test slot; cancel after capture.
 
 ### B08 — Forward / label / archive email — P1
 - **App**: Gmail web
 - **Goal**: Forward a thread with a note; apply label; archive.
 - **Pass/fail**: forwarded in Sent; label applied; thread archived.
+- **Likely gaps**: forward compose, custom label popup (not a native
+  `<select>`), and proving a row LEFT the page after archive (nothing in
+  `wait` could assert absence before `--gone`). OFFLINE PROXY verified via S13
+  (`fixtures/mail.html`): forward to `dave@example.com` with a typed note (sent
+  log records recipient + exact note), a `check` of the Finance checkbox in a
+  custom label menu (row 2 `data-labels=Finance`), and an archive asserted with
+  `wait --gone` (row 3 absent from the DOM, counter 1, 2 rows left, row 1
+  untouched). Live Gmail run still needs auth.
 
 ### B09 — Expense report / invoice submission — P2
 - **App**: expense portal
 - **Goal**: Fill expense form with line items (date, category, amount, receipt
   upload), submit.
 - **Pass/fail**: submission confirmation; totals match.
-- **Likely gaps**: receipt upload, multi-page form.
+- **Likely gaps**: receipt upload, multi-line items. OFFLINE PROXY verified via
+  S11 (`fixtures/expense.html` + `fixtures/receipt.txt`): dynamic add-line,
+  native `<select>` per row, `htrcli upload` on a real file input (filename and
+  size read back), running total (125.50 + 42.75 = 168.25), and confirmation
+  reference `EXR-700001`. Live expense-portal run still needs auth.
 
 ### B10 — File management (Drive/OneDrive/Dropbox) — P2
 - **App**: cloud drive web
 - **Goal**: Upload a file, move to folder, share link, set permissions.
 - **Pass/fail**: file in target folder; share link works.
+- **Likely gaps**: file move (often native drag-and-drop, which is not
+  synthesized), share dialogs, permission selects. OFFLINE PROXY verified via
+  S12 (`fixtures/files.html` + `fixtures/report.txt`): `htrcli upload` on a real
+  file input (filename + real byte size 72 read back), a click-based move via a
+  per-row native `<select>` (avoiding unsupported HTML5 drag-and-drop), a DOM
+  share dialog, the share link read back with `value`
+  (`https://files.example/s/ABC123`), edit permission granted, and an untouched
+  file confirmed unchanged. Live Drive/OneDrive run still needs auth.
 
 ### B11 — Contact / CRM update — P2
 - **App**: CRM web
 - **Goal**: Find contact, update fields (phone, note, tag), log activity.
 - **Pass/fail**: fields persisted; activity logged.
+- **Likely gaps**: live search filters often HIDE rows rather than remove them
+  (then `wait --gone` times out — assert the surviving count instead); tag
+  inputs commit on Enter into chips and have no native control; `fill` cannot
+  set an empty string, so clearing a search box needs `clear`. OFFLINE PROXY
+  verified via S14 (`fixtures/crm.html`): filter to one contact (non-matching
+  rows removed from the DOM, proven with `wait --gone`), clear with `clear`,
+  update phone + note, commit two tag chips with `fill` + `press Enter`, save,
+  reopen to prove the values came from the data model (not the form), log an
+  activity attributed to the edited contact, and confirm a third contact was
+  untouched. Live CRM run still needs auth.
 
 ### B12 — Messaging (Slack/Teams/Discord web) — P2
 - **App**: messaging web
 - **Goal**: Post a message to a channel/DM, react, search history.
 - **Pass/fail**: message visible; search returns it.
-
-### B13 — Form filling (HR/IT/surveys) — P2
-- **App**: web form
-- **Goal**: Fill multi-page form end-to-end, submit, capture ref.
-- **Pass/fail**: all fields match; submission ref captured.
+- **Likely gaps**: the composer is `contenteditable` (Slack/Teams), so `fill`
+  replaces the text and `Enter` must send while `Shift+Enter` newlines — a
+  composer that swallows Enter needs a click on the send button instead; thread
+  replies are a distinct interaction and are NOT covered here; reactions are
+  buttons whose state lives in the app's model, so the real question is whether
+  it survives a re-render. OFFLINE PROXY verified via S15
+  (`fixtures/messaging.html`): react ✅ on a message that already shows two 👍
+  from other people (count above zero is not the same as reacted-by-me), send
+  from the contenteditable with `press Enter`, prove the ✅ survives the
+  re-render that sending causes, search "budget" (matching message stays, the
+  others leave the DOM, proven with `wait --gone`), clear with `clear`, post to
+  a DM with the Send button, then switch back and prove neither write leaked
+  into the other conversation. Live Slack/Teams run still needs auth.
 
 ### B14 — Research & summarize (web) — P2
 - **App**: web pages
@@ -259,11 +305,25 @@ a datepicker + guest combobox, a contenteditable doc surface, a cell grid).
 | S02, S03 | `scenarios/s02-gmail-fixture.json` | B01 find emails (collect + extract); B02 reply (type appends, signature survives) |
 | S04–S06 | `scenarios/s03-office-fixtures.json` | B03 event (datepicker + guest combobox); B05 doc edit; B06 cell entry + grid read-back |
 | S07, S08 | `scenarios/s04-tasks-fixture.json` | B04 quick-add (task + date in one field, committed with Enter); B04 full form (popover date grid); B04 ARIA checkbox |
+| S09 | `scenarios/s09-form-fixture.json` | B13 multi-page form (validation, select, pick, confirmation ref) |
+| S10 | `scenarios/s10-booking-fixture.json` | B07 room select, popover date grid, seat map, confirmation number |
+| S11 | `scenarios/s11-expense-fixture.json` | B09 multi-line expense report: dynamic add-line, native select, receipt upload, total + reference capture |
+| S12 | `scenarios/s12-files-fixture.json` | B10 upload (name + real size), click-based folder move, share dialog, share-link readback, permission grant, non-destructive check |
+| S13 | `scenarios/s13-mail-actions.json` | B08 forward with typed note, custom label popup via `check`, archive proven with `wait --gone` |
+| S14 | `scenarios/s14-crm-fixture.json` | B11 filtered contact search (`wait --gone` + `clear`), phone/note/tag-chip edit, save + reopen persistence, activity log attribution |
+| S15 | `scenarios/s15-messaging-fixture.json` | B12 react (state survives re-render), contenteditable send via Enter, DM post via the Send button, search with `--gone`, channel isolation both ways |
 
 ```bash
 make bench-smoke      # S01
 make bench-office     # S02–S06
 make bench-tasks      # S07–S08
+make bench-form       # S09
+make bench-booking    # S10
+make bench-expense    # S11
+make bench-files      # S12
+make bench-mail       # S13
+make bench-crm        # S14
+make bench-messaging  # S15
 ```
 
 Both need a Chrome on the CDP port (9555 by default in

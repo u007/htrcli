@@ -1,0 +1,166 @@
+{
+	"scenarios": [
+		{
+			"id": "S13",
+			"ref": "B08",
+			"app": "Mail actions fixture (local)",
+			"goal": "Forward a thread with a note, apply a label, archive a thread, and prove the archived row left the DOM.",
+			"steps": [
+				{
+					"note": "open the mail-actions fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_MAIL}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the thread list",
+					"argv": ["wait", "--selector", "#thread-list", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "open the forward compose from row 1",
+					"argv": ["click", ".row[data-idx='1'] .forward"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the forward panel is visible (hidden attribute removed)",
+					"argv": [
+						"wait",
+						"--selector",
+						"#forward-panel:not([hidden])",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "address the forward",
+					"argv": ["fill", "#forward-to", "dave@example.com"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "type a note into the contenteditable forward body",
+					"argv": ["type", "#forward-body", "Numbers look good."],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "send the forward",
+					"argv": ["click", "#forward-send"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the forward is confirmed",
+					"argv": ["wait", "--text", "Message forwarded", "--timeout", "5000"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the sent log records the recipient",
+					"argv": ["--json", "attr", "#sent-log li", "data-to"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "dave@example.com" }
+					}
+				},
+				{
+					"note": "the sent log records the note exactly",
+					"argv": ["--json", "attr", "#sent-log li", "data-note"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "Numbers look good." }
+					}
+				},
+				{
+					"note": "open the label menu on row 2",
+					"argv": ["click", ".row[data-idx='2'] .label"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the label menu is visible",
+					"argv": [
+						"wait",
+						"--selector",
+						"#label-menu:not([hidden])",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "tick the Finance checkbox in the custom menu",
+					"argv": ["check", "[aria-label='Finance']"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "apply the label",
+					"argv": ["click", "#label-apply"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "row 2 carries exactly the Finance label",
+					"argv": ["--json", "attr", ".row[data-idx='2']", "data-labels"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "Finance" }
+					}
+				},
+				{
+					"note": "archive row 3",
+					"argv": ["click", ".row[data-idx='3'] .archive"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the archived row is GONE from the DOM (not merely hidden)",
+					"argv": [
+						"wait",
+						"--selector",
+						".row[data-idx='3']",
+						"--gone",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the archive counter incremented exactly once",
+					"argv": ["--json", "attr", "#archive-count", "data-count"],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "1" } }
+				},
+				{
+					"note": "the archive toast is shown",
+					"argv": ["text", "#toast"],
+					"expect": { "exit": 0, "stdoutContains": "Conversation archived" }
+				},
+				{
+					"note": "only the two unarchived rows remain",
+					"argv": [
+						"extract",
+						"list",
+						"#thread-list .row",
+						"--fields",
+						"sender:.sender,subject:.subject"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "2" }
+					}
+				},
+				{
+					"note": "row 1 was untouched by the label action",
+					"argv": [
+						"wait",
+						"--selector",
+						".row[data-idx='1']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "row 1 still has no labels",
+					"argv": ["--json", "attr", ".row[data-idx='1']", "data-labels"],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "" } }
+				}
+			]
+		}
+	]
+}

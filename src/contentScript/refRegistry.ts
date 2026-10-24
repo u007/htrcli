@@ -33,6 +33,15 @@ export function assignRef(el: Element): string {
 }
 
 /**
+ * Thrown when a ref's element was removed from the document. Distinct from the
+ * "not known" error (never minted, or the page navigated): only a detached
+ * element means the target is gone, so `wait --gone` treats this one alone as
+ * success. The Go side matches the message text (see isDetachedRefError in
+ * htrcli/internal/commands/wait.go).
+ */
+export class DetachedRefError extends Error {}
+
+/**
  * Resolve a ref id back to its element. Throws an explicit stale-ref error if
  * the id was never minted (unknown / wrong page) or the element has since
  * been detached from the document.
@@ -46,7 +55,7 @@ export function resolveRef(refId: string): Element {
 	}
 	if (!el.isConnected) {
 		refToEl.delete(refId);
-		throw new Error(
+		throw new DetachedRefError(
 			`stale ref: ${refId} points to an element that is no longer in the document (page re-rendered or navigated)`,
 		);
 	}

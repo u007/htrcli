@@ -379,6 +379,124 @@ describe("wait action (DOM)", () => {
 	});
 });
 
+describe("wait --gone (DOM)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("resolves once a matching element is removed", async () => {
+		const el = document.createElement("div");
+		el.id = "archivable";
+		document.body.appendChild(el);
+		setTimeout(() => el.remove(), 120);
+
+		const result = await executeCommand({
+			id: "g1",
+			action: "wait",
+			target: { selector: "#archivable" },
+			options: { timeout: 2000, gone: true, interval: 50 },
+		});
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({ gone: true });
+	});
+
+	it("resolves immediately when nothing matches", async () => {
+		const result = await executeCommand({
+			id: "g2",
+			action: "wait",
+			target: { selector: "#absent-from-start" },
+			options: { timeout: 2000, gone: true, interval: 50 },
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("fails loudly, naming the selector, when the element stays", async () => {
+		const el = document.createElement("div");
+		el.id = "sticky";
+		document.body.appendChild(el);
+
+		const result = await executeCommand({
+			id: "g3",
+			action: "wait",
+			target: { selector: "#sticky" },
+			options: { timeout: 250, gone: true, interval: 50 },
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/#sticky/);
+		expect(result.error).toMatch(/still present/);
+	});
+
+	it("does not report gone while the document is still loading", async () => {
+		Object.defineProperty(document, "readyState", {
+			configurable: true,
+			get: () => "loading",
+		});
+		try {
+			const result = await executeCommand({
+				id: "g8",
+				action: "wait",
+				target: { selector: "#not-rendered-yet" },
+				options: { timeout: 250, gone: true, interval: 50 },
+			});
+			expect(result.success).toBe(false);
+			expect(result.error).toMatch(/still loading/);
+		} finally {
+			delete (document as { readyState?: string }).readyState;
+		}
+	});
+
+	it("ignores target.index: gone means no match at all", async () => {
+		const first = document.createElement("div");
+		first.className = "row";
+		const second = document.createElement("div");
+		second.className = "row";
+		document.body.appendChild(first);
+		document.body.appendChild(second);
+		setTimeout(() => second.remove(), 120);
+
+		// Index 1 is the second row; removing it must not pass while the first
+		// row still matches the selector.
+		const result = await executeCommand({
+			id: "g5",
+			action: "wait",
+			target: { selector: ".row", index: 1 },
+			options: { timeout: 250, gone: true, interval: 50 },
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/still present/);
+	});
+
+	it("rejects gone without a positive interval", async () => {
+		const result = await executeCommand({
+			id: "g6",
+			action: "wait",
+			target: { selector: "#anything" },
+			options: { timeout: 250, gone: true },
+		});
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/--interval must be > 0/);
+	});
+
+	it("still treats a hidden element as present", async () => {
+		const el = document.createElement("div");
+		el.id = "hidden-but-present";
+		el.style.display = "none";
+		document.body.appendChild(el);
+
+		const result = await executeCommand({
+			id: "g4",
+			action: "wait",
+			target: { selector: "#hidden-but-present" },
+			options: { timeout: 250, gone: true, interval: 50 },
+		});
+		expect(result.success).toBe(false);
+	});
+});
+
 describe("low-level synthetic input", () => {
 	let originalElementFromPoint: typeof document.elementFromPoint;
 

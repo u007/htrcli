@@ -1,0 +1,111 @@
+{
+	"scenarios": [
+		{
+			"id": "S10",
+			"ref": "B07",
+			"app": "Meeting-room booking (local)",
+			"goal": "Book a resource for a time slot: pick a room, choose a date via the popover date grid, pick a start time, select seats, and capture the confirmation number.",
+			"steps": [
+				{
+					"note": "open the booking fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_BOOKING}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the room dropdown",
+					"argv": ["wait", "--selector", "#room", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "pick Conference Room A",
+					"argv": ["select", "#room", "conf-a"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "open the date popover",
+					"argv": ["click", "#date-trigger"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "wait for day 2026-10-23",
+					"argv": [
+						"wait",
+						"--selector",
+						"#day-grid button[data-day='2026-10-23']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "click the day button",
+					"argv": ["click", "#day-grid button[data-day='2026-10-23']"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "read the chosen date back",
+					"argv": ["attr", "#date-trigger", "data-date"],
+					"expect": { "exit": 0, "stdoutContains": "2026-10-23" }
+				},
+				{
+					"note": "pick the start time",
+					"argv": ["select", "#start-time", "14:00"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "reveal seat selection page",
+					"argv": [
+						"eval",
+						"document.getElementById('page2').classList.add('visible')"
+					],
+					"expect": { "exit": 0, "stdoutContains": "null" }
+				},
+				{
+					"note": "wait for the seat map",
+					"argv": ["wait", "--selector", "#seat-map", "--timeout", "10000"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "click seat B2 (A1 is taken, must not be selectable)",
+					"argv": ["click", ".seat[data-seat='B2']"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "click Continue to confirm",
+					"argv": ["click", "#next2"],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+
+				{
+					"note": "confirmation shows a booking number",
+					"argv": ["attr", "#confirm", "data-confirmation"],
+					"expect": { "exit": 0, "stdoutContains": "BK-" }
+				},
+				{
+					"note": "confirmation shows the room",
+					"argv": ["text", "#conf-room"],
+					"expect": { "exit": 0, "stdoutContains": "Conference Room A" }
+				},
+				{
+					"note": "confirmation shows the date",
+					"argv": ["text", "#conf-date"],
+					"expect": { "exit": 0, "stdoutContains": "2026-10-23" }
+				},
+				{
+					"note": "confirmation shows the seats",
+					"argv": ["text", "#conf-seats"],
+					"expect": { "exit": 0, "stdoutContains": "B2" }
+				},
+				{
+					"note": "the taken seat A1 was never selected",
+					"argv": ["attr", ".seat[data-seat='A1']", "class"],
+					"expect": { "exit": 0, "stdoutNotContains": "selected" }
+				}
+			]
+		}
+	]
+}
