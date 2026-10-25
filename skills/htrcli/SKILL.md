@@ -53,7 +53,7 @@ each probe costs a round trip.
 
 | Works | Not available over `--cdp` (use `eval` or the extension transport) |
 |---|---|
-| open, find/findAll, snapshot, text/value/attr/html, click/dblclick/rightclick, fill, type, select, check/uncheck, clear, press/keydown/keyup, mouse*, drag, upload, eval, screenshot, tabs list/get/new/close (Chrome only), **pick**, **fill-form**, **--frame**, console read/watch, network read/watch/wait | scroll, back/forward/reload, dialog handle/list, fetch, printpdf, network mock/block/unmock, trace export, screenshot --annotate |
+| open, find/findAll, snapshot, text/value/attr/html, click/dblclick/rightclick, fill, type, select, check/uncheck, clear, press/keydown/keyup, mouse*, drag, upload, eval, screenshot, tabs list/get/new/close (Chrome only), **pick**, **fill-form**, **--frame**, console read/watch, network read/watch/wait | scroll, back/forward, dialog handle/list, fetch, printpdf, network mock/block/unmock, trace export, screenshot --annotate |
 
 ### Filling forms: verb per widget
 
@@ -254,6 +254,12 @@ htrcli find "input[name=q]"    # 4. Re-inspect after any page change
 `open`, `back`, `forward`, and `reload` block until the destination page
 finishes loading (up to 25s). Clicks that *trigger* a navigation also block
 for the destination page to finish loading.
+
+`reload` works over BOTH transports. Over `--cdp` it issues `Page.reload` and
+waits for `Page.loadEventFired` — it is NOT a re-navigate of the same URL,
+because a repeat navigate can be served as a same-document navigation that
+leaves the page's in-memory JS state alive. That distinction is what makes
+"this survived a reload" mean "this was persisted".
 
 Selectors (`"input[name=q]"`, `"#submit"`, `"role=button"`, `"text=Submit"`)
 and **refs** (`@e3`, `@e7`) work directly in all interaction commands. All
@@ -575,13 +581,24 @@ benchmark a task that aggregates (read a figure on page A, use it on page C):
 - Captures win over environment variables of the same name.
 - `${VAR}` also expands inside `stdoutContains`, `stdoutNotContains` and
   `jsonPath.equals`, so an expectation can reference a fixture URL without
-  hard-coding the machine's path.
+  hard-coding the machine's path. Captures expand there too, which is how a
+  scenario asserts "the record opened on the id I just captured"; a capture
+  shadows an env var of the same name in both places.
 
 `jsonPath` reads the step's raw stdout, so the envelope decides the path:
 `--json text|attr|value` wraps the result as `{"data": ...}` (path `data`),
+but an EMPTY attribute value is dropped entirely (`data` is `omitempty`), so
+the path is missing rather than `""` — assert an empty/absent state by
+visibility (`wait --selector "<sel>.visible" --gone`) instead, and pair it with
+a positive `wait` on the same selector so it is proven able to match,
 `--json extract` nests it (`data.items.0.body`), while a bare `extract` prints
 the payload itself (`items.0.body`, `count`). The office scenarios use the bare
 form for `extract`.
+
+A **live counter is not a validator**. If a page shows "12 / 280" and also
+refuses over-limit submits, those are usually two separate comparisons, so
+asserting the counter's text proves nothing about the submit path. Prove the
+boundary with a real submit at the limit and one over it.
 
 Assert after a **re-render**, not just after the click: an app that rebuilds
 its list (mail, messaging, tables) will happily pass an immediate
@@ -589,6 +606,29 @@ its list (mail, messaging, tables) will happily pass an immediate
 the next action — send a message, switch channel, re-filter — then re-assert.
 A mutation that writes only the DOM and skips the model passes every other
 check and fails exactly this one.
+
+### Two composers on one page (message threads)
+
+A thread panel adds a second `contenteditable` next to the channel composer.
+`fill` targets by selector, so the risk is not "which input" but **which write
+target**: both send on Enter and both look identical. Prove the destination, not
+the keystroke:
+
+```bash
+htrcli click "#messages .message[data-message-id='m2'] .reply"   # open m2's thread
+htrcli fill "#thread-input" "Numbers reconcile — approving"      # the THREAD input
+htrcli press Enter
+htrcli extract list "#messages .message" --fields body:.body     # channel unchanged
+htrcli --json attr "#messages .message[data-message-id='m2']" data-reply-count
+```
+
+- Give the parents **different** pre-existing counts (m1=0, m2=2). A reply that
+  lands on the wrong parent is then a numeric mismatch, not "some count changed".
+- Assert the reply text is ABSENT from the channel (`stdoutNotContains`), not
+  only that it appears in the thread — an optimistic thread render can hide a
+  channel-level commit.
+- Switch channel and back, then re-read the count: that is the only check that
+  separates model state from a DOM append.
 
 Verdicts: PASS / PARTIAL / FAIL / NOT_RUN. The report holds the per-step
 exit code, attempts, wall time and output, plus the per-scenario
@@ -648,6 +688,9 @@ htrcli extract table <selector>     # HTML table -> {columns, rows}
 htrcli extract list <selector>       # List of items -> {items}
 htrcli extract list <selector> --fields "name:.name,age:.age"
 htrcli extract list <selector> --fields "title:.title,due:@data-due"   # @attr = an attribute
+# Zero matches is an ERROR (Element not found), deliberately: a typo'd selector
+# must not read as "no data". To assert emptiness, use :empty instead:
+#   htrcli wait --selector "#thread-replies:empty"
 htrcli find <selector> --ref        # Mint a persistent ref (@eN) for later use
 htrcli findAll <selector> --ref     # Mint refs for every match
 htrcli text <selector>              # Text content
@@ -1161,6 +1204,25 @@ htrcli --cdp value "#guest-input"                   # read back
 The day picker is a grid of buttons: click the trigger, click next/prev until
 the month label matches, then click the day. There is no `pick` for a date
 grid.
+
+**Native `<input type="date">` is the opposite case** and is common on real
+HR/booking/expense portals: `fill` works, because the value is assigned through
+the native setter and the browser normalizes it to `YYYY-MM-DD`. Two traps:
+a string in any other format is silently discarded (`value` becomes `""`, no
+error, no event worth trusting), and the displayed text follows the browser's
+locale, so assert `--json value` (the normalized ISO string), never the
+visible date. Read it back after filling:
+
+```bash
+htrcli --cdp fill "#start-date" "2026-04-06"
+htrcli --cdp --json value "#start-date"    # "2026-04-06" — or "" if it was rejected
+```
+
+`<input type="datetime-local">` behaves the same way with the
+`YYYY-MM-DDTHH:mm` format (`fill "#schedule-at" "2026-04-06T14:30"` →
+`value` reads back `2026-04-06T14:30`). Its `min` attribute does NOT block a
+programmatic fill — only the page's own check will refuse an out-of-range
+time, so assert the page's error, not `:invalid` styling.
 
 ### Docs — edit and share (B05)
 

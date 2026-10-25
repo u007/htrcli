@@ -1,0 +1,915 @@
+{
+	"scenarios": [
+		{
+			"id": "S20",
+			"ref": "B15",
+			"app": "Social composer fixture (local)",
+			"goal": "Compose under a hard 280-character limit (280 accepted, 281 refused, 300 refused for scheduling), schedule into the future against a fixed demo clock while the past and the current minute are refused, publish another immediately, prove both states survive a reload, then reschedule the scheduled post in place without duplicating it — leaving the seeded post untouched.",
+			"steps": [
+				{
+					"note": "open the social composer fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_SOCIAL}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "clear the fixture's storage so every run starts from the seed (this scenario proves scheduling survives a reload, so it must not inherit the last run's queue)",
+					"argv": ["eval", "localStorage.removeItem('social-queue-v1')"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "reload so the fixture re-seeds from scratch",
+					"argv": ["reload"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "wait for the queue table",
+					"argv": ["wait", "--selector", "#queue tr", "--timeout", "10000"],
+					"expect": {
+						"exit": 0
+					},
+					"retry": 2
+				},
+				{
+					"note": "one post already exists",
+					"argv": ["extract", "list", "#queue tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "the counter starts empty",
+					"argv": ["--json", "text", "#char-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0 / 280"
+						}
+					}
+				},
+				{
+					"note": "the remaining budget starts at the full limit",
+					"argv": ["--json", "attr", "#char-count", "data-remaining"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "280"
+						}
+					}
+				},
+				{
+					"note": "scheduling with an empty composer is refused",
+					"argv": ["click", "#schedule"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the refusal asks for text",
+					"argv": ["--json", "text", "#form-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Write something first"
+						}
+					}
+				},
+				{
+					"note": "posting now with an empty composer is refused too",
+					"argv": ["click", "#post-now"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and names the same reason (both entry points validate)",
+					"argv": ["--json", "text", "#form-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Write something first"
+						}
+					}
+				},
+				{
+					"note": "write far past the limit",
+					"argv": [
+						"fill",
+						"#post-text",
+						"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the counter shows the overage",
+					"argv": ["--json", "text", "#char-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "300 / 280"
+						}
+					}
+				},
+				{
+					"note": "the counter flags the overage for styling",
+					"argv": ["--json", "attr", "#char-count", "data-over"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "the remaining budget goes negative",
+					"argv": ["--json", "attr", "#char-count", "data-remaining"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "-20"
+						}
+					}
+				},
+				{
+					"note": "pick a valid future time",
+					"argv": ["fill", "#schedule-at", "2026-04-06T14:30"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "an over-limit post cannot be scheduled",
+					"argv": ["click", "#schedule"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the refusal quotes the actual length and the limit",
+					"argv": ["--json", "text", "#form-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Post is 300 characters — the limit is 280"
+						}
+					}
+				},
+				{
+					"note": "nothing was queued by the refusal",
+					"argv": ["extract", "list", "#queue tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "one character over the limit",
+					"argv": [
+						"fill",
+						"#post-text",
+						"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "281 is over",
+					"argv": ["--json", "attr", "#char-count", "data-over"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "281 is refused by a submit, not just by the counter",
+					"argv": ["click", "#schedule"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the refusal names 281 exactly",
+					"argv": ["--json", "text", "#form-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Post is 281 characters — the limit is 280"
+						}
+					}
+				},
+				{
+					"note": "still nothing queued",
+					"argv": ["extract", "list", "#queue tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "exactly at the limit",
+					"argv": [
+						"fill",
+						"#post-text",
+						"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "280 is NOT over — the boundary is >, not >=",
+					"argv": ["--json", "attr", "#char-count", "data-over"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0"
+						}
+					}
+				},
+				{
+					"note": "the counter reads exactly at the limit",
+					"argv": ["--json", "text", "#char-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "280 / 280"
+						}
+					}
+				},
+				{
+					"note": "a post of exactly 280 characters is ACCEPTED",
+					"argv": ["click", "#post-now"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the boundary post was queued",
+					"argv": ["extract", "list", "#queue tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "it was published, not scheduled",
+					"argv": [
+						"--json",
+						"attr",
+						"#queue tr[data-id='P-1002']",
+						"data-state"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "published"
+						}
+					}
+				},
+				{
+					"note": "the boundary post kept its full 280 characters (no silent truncation)",
+					"argv": ["--json", "text", "#queue tr[data-id='P-1002'] .q-text"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+						}
+					}
+				},
+				{
+					"note": "write the post that will be scheduled",
+					"argv": ["fill", "#post-text", "Team offsite photos are up"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the counter tracks the real length",
+					"argv": ["--json", "text", "#char-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "26 / 280"
+						}
+					}
+				},
+				{
+					"note": "clear the time so scheduling has nothing to use",
+					"argv": ["clear", "#schedule-at"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "scheduling without a time is refused",
+					"argv": ["click", "#schedule"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the refusal asks for a date and time",
+					"argv": ["--json", "text", "#form-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Pick a date and time to schedule"
+						}
+					}
+				},
+				{
+					"note": "a time in the past (compared against the fixture's fixed clock, not the machine's)",
+					"argv": ["fill", "#schedule-at", "2026-03-30T10:00"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "scheduling in the past is refused",
+					"argv": ["click", "#schedule"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the refusal echoes the time it would have used",
+					"argv": ["--json", "text", "#form-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Cannot schedule for 2026-03-30 10:00 — that is not in the future"
+						}
+					}
+				},
+				{
+					"note": "exactly the fixture's own clock time",
+					"argv": ["fill", "#schedule-at", "2026-04-01T09:00"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "'now' is not 'in the future'",
+					"argv": ["click", "#schedule"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the boundary is <=, so the current minute is refused",
+					"argv": ["--json", "text", "#form-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Cannot schedule for 2026-04-01 09:00 — that is not in the future"
+						}
+					}
+				},
+				{
+					"note": "narrow the audience",
+					"argv": ["select", "#audience", "followers"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "attach a file to the post",
+					"argv": ["upload", "#media", "${BENCH_FIXTURE_REPORT}"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the attachment name is shown",
+					"argv": ["--json", "text", "#media-name"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "report.txt"
+						}
+					}
+				},
+				{
+					"note": "pick a future time",
+					"argv": ["fill", "#schedule-at", "2026-04-06T14:30"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "schedule it",
+					"argv": ["click", "#schedule"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the queue id is the expected sequence number",
+					"argv": ["--json", "text", "#queue tr .q-id"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "P-1003"
+						}
+					}
+				},
+				{
+					"note": "capture the generated post id",
+					"argv": ["--json", "text", "#queue tr .q-id"],
+					"expect": {
+						"exit": 0
+					},
+					"capture": {
+						"post_id": "data"
+					}
+				},
+				{
+					"note": "three posts now exist",
+					"argv": ["extract", "list", "#queue tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "3"
+						}
+					}
+				},
+				{
+					"note": "the new post is SCHEDULED, not published",
+					"argv": [
+						"--json",
+						"attr",
+						"#queue tr[data-id='${post_id}']",
+						"data-state"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "scheduled"
+						}
+					}
+				},
+				{
+					"note": "it carries the time it was scheduled for",
+					"argv": ["--json", "text", "#queue tr[data-id='${post_id}'] .q-when"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-04-06 14:30"
+						}
+					}
+				},
+				{
+					"note": "it carries the audience that was chosen",
+					"argv": [
+						"--json",
+						"text",
+						"#queue tr[data-id='${post_id}'] .q-audience"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "followers"
+						}
+					}
+				},
+				{
+					"note": "it carries the attachment name",
+					"argv": [
+						"--json",
+						"attr",
+						"#queue tr[data-id='${post_id}']",
+						"data-media"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "report.txt"
+						}
+					}
+				},
+				{
+					"note": "the composer resets the counter after a successful schedule",
+					"argv": ["--json", "text", "#char-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0 / 280"
+						}
+					}
+				},
+				{
+					"note": "the composer drops the attachment after a successful schedule",
+					"argv": ["--json", "text", "#media-name"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "(none)"
+						}
+					}
+				},
+				{
+					"note": "the scheduling error is cleared on success",
+					"argv": ["--json", "attr", "#form-error", "class"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "err"
+						}
+					}
+				},
+				{
+					"note": "write a post to publish immediately",
+					"argv": ["fill", "#post-text", "Shipping v2 today"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "publish it",
+					"argv": ["click", "#post-now"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "four posts exist",
+					"argv": ["extract", "list", "#queue tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "4"
+						}
+					}
+				},
+				{
+					"note": "the published post is PUBLISHED, not scheduled",
+					"argv": [
+						"--json",
+						"attr",
+						"#queue tr[data-id='P-1004']",
+						"data-state"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "published"
+						}
+					}
+				},
+				{
+					"note": "publishing stamps the fixture clock, not a real date",
+					"argv": ["--json", "text", "#queue tr[data-id='P-1004'] .q-when"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-04-01 09:00"
+						}
+					}
+				},
+				{
+					"note": "a published post without an attachment shows a dash",
+					"argv": ["--json", "text", "#queue tr[data-id='P-1004'] .q-media"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "—"
+						}
+					}
+				},
+				{
+					"note": "reload the page — scheduled and published state must both survive",
+					"argv": ["reload"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "wait for the queue after the reload",
+					"argv": ["wait", "--selector", "#queue tr", "--timeout", "10000"],
+					"expect": {
+						"exit": 0
+					},
+					"retry": 2
+				},
+				{
+					"note": "all four posts survived",
+					"argv": ["extract", "list", "#queue tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "4"
+						}
+					}
+				},
+				{
+					"note": "the scheduled post is still scheduled after the reload",
+					"argv": [
+						"--json",
+						"attr",
+						"#queue tr[data-id='${post_id}']",
+						"data-state"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "scheduled"
+						}
+					}
+				},
+				{
+					"note": "and kept its scheduled time",
+					"argv": ["--json", "text", "#queue tr[data-id='${post_id}'] .q-when"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-04-06 14:30"
+						}
+					}
+				},
+				{
+					"note": "the published post is still published after the reload",
+					"argv": [
+						"--json",
+						"attr",
+						"#queue tr[data-id='P-1004']",
+						"data-state"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "published"
+						}
+					}
+				},
+				{
+					"note": "the seeded post is untouched",
+					"argv": [
+						"--json",
+						"attr",
+						"#queue tr[data-id='P-1001']",
+						"data-state"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "published"
+						}
+					}
+				},
+				{
+					"note": "the seeded post kept its original time",
+					"argv": ["--json", "text", "#queue tr[data-id='P-1001'] .q-when"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-03-28 10:00"
+						}
+					}
+				},
+				{
+					"note": "open the scheduled post for editing",
+					"argv": ["click", "#queue tr[data-id='${post_id}'] .edit"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the editing banner is visible",
+					"argv": [
+						"wait",
+						"--selector",
+						"#banner.visible",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the banner names the post being edited",
+					"argv": ["--json", "text", "#banner-id"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "P-1003"
+						}
+					}
+				},
+				{
+					"note": "the composer is prefilled with that post's text",
+					"argv": ["--json", "value", "#post-text"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Team offsite photos are up"
+						}
+					}
+				},
+				{
+					"note": "the time field is prefilled with that post's time",
+					"argv": ["--json", "value", "#schedule-at"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-04-06T14:30"
+						}
+					}
+				},
+				{
+					"note": "a published post offers no edit button",
+					"argv": [
+						"wait",
+						"--selector",
+						"#queue tr[data-id='P-1004'] .edit",
+						"--gone",
+						"--timeout",
+						"1500"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "reschedule it to a new time",
+					"argv": ["fill", "#schedule-at", "2026-04-08T09:15"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "save the reschedule",
+					"argv": ["click", "#schedule"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "editing did not create a duplicate",
+					"argv": ["extract", "list", "#queue tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "4"
+						}
+					}
+				},
+				{
+					"note": "the post kept its id",
+					"argv": ["--json", "text", "#queue tr[data-id='${post_id}'] .q-id"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "P-1003"
+						}
+					}
+				},
+				{
+					"note": "the post moved to the new time",
+					"argv": ["--json", "text", "#queue tr[data-id='${post_id}'] .q-when"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-04-08 09:15"
+						}
+					}
+				},
+				{
+					"note": "and is still scheduled",
+					"argv": [
+						"--json",
+						"attr",
+						"#queue tr[data-id='${post_id}']",
+						"data-state"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "scheduled"
+						}
+					}
+				},
+				{
+					"note": "the editing banner closed",
+					"argv": [
+						"wait",
+						"--selector",
+						"#banner.visible",
+						"--gone",
+						"--timeout",
+						"1500"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "reload once more — the reschedule must persist",
+					"argv": ["reload"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "wait for the queue after the second reload",
+					"argv": ["wait", "--selector", "#queue tr", "--timeout", "10000"],
+					"expect": {
+						"exit": 0
+					},
+					"retry": 2
+				},
+				{
+					"note": "the rescheduled time persisted",
+					"argv": ["--json", "text", "#queue tr[data-id='${post_id}'] .q-when"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-04-08 09:15"
+						}
+					}
+				},
+				{
+					"note": "the seeded post was never rewritten",
+					"argv": ["--json", "text", "#queue tr[data-id='P-1001'] .q-text"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "We are hiring — join the team."
+						}
+					}
+				}
+			]
+		}
+	]
+}

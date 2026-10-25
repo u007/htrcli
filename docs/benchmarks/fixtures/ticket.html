@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Helpdesk fixture (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 12px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+  th, td { border-bottom: 1px solid #ddd; text-align: left; padding: 5px 6px; font-size: 13px; }
+  tr.ticket { cursor: pointer; }
+  tr.ticket:hover { background: #f5f8ff; }
+  #confirmation { margin-top: 8px; padding: 6px; background: #eaf7ea; }
+  #error { margin-top: 8px; padding: 6px; background: #fdeaea; }
+  #new-form, #detail { border: 1px solid #ccc; padding: 8px; margin-top: 10px; }
+  label { display: block; margin-top: 8px; font-size: 12px; color: #333; }
+  input[type="text"], textarea, select { width: 100%; box-sizing: border-box; padding: 4px; }
+  textarea { min-height: 64px; }
+  .row { display: flex; gap: 8px; }
+  .row > div { flex: 1; }
+  .comment { padding: 4px 0; border-bottom: 1px solid #f0f0f0; }
+  .comment .author { font-weight: bold; margin-right: 6px; }
+  #comments { margin-top: 6px; }
+  #comment-box { margin-top: 6px; min-height: 44px; }
+  .meta { color: #555; font-size: 12px; margin-top: 4px; }
+  button { margin-top: 8px; }
+</style>
+</head>
+<body>
+  <main>
+    <h1>Helpdesk</h1>
+    <button id="new-ticket">New ticket</button>
+    <div id="confirmation" role="status" hidden>
+      Ticket <strong id="confirmation-id"></strong> created
+    </div>
+
+    <section id="list-section">
+      <table id="ticket-list">
+        <thead>
+          <tr><th>Id</th><th>Subject</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Comments</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="new-form" hidden>
+      <h2>New ticket</h2>
+      <form id="ticket-form">
+        <label for="t-subject">Subject</label>
+        <input id="t-subject" type="text" autocomplete="off">
+        <label for="t-body">Description</label>
+        <textarea id="t-body"></textarea>
+        <div class="row">
+          <div>
+            <label for="t-category">Category</label>
+            <select id="t-category">
+              <option value="hardware">Hardware</option>
+              <option value="software">Software</option>
+              <option value="access">Access</option>
+            </select>
+          </div>
+          <div>
+            <label for="t-priority">Priority</label>
+            <select id="t-priority">
+              <option value="low">Low</option>
+              <option value="normal" selected>Normal</option>
+              <option value="high">High</option>
+            </select>
+          </div>
+        </div>
+        <label for="t-attachment">Attachment</label>
+        <input id="t-attachment" type="file">
+        <div id="t-attachment-name" class="meta"></div>
+        <div id="t-error" role="alert" hidden></div>
+        <button id="t-submit" type="submit">Create ticket</button>
+        <button id="t-cancel" type="button">Cancel</button>
+      </form>
+    </section>
+
+    <section id="detail" hidden>
+      <h2><span id="detail-id"></span> — <span id="detail-subject"></span></h2>
+      <div class="meta">
+        Priority: <span id="detail-priority"></span> · Category: <span id="detail-category"></span>
+      </div>
+      <div class="row">
+        <div>
+          <label for="detail-status">Status</label>
+          <select id="detail-status">
+            <option value="Open">Open</option>
+            <option value="In progress">In progress</option>
+            <option value="Waiting">Waiting</option>
+            <option value="Resolved">Resolved</option>
+          </select>
+        </div>
+        <div>
+          <label for="detail-assignee">Assignee</label>
+          <select id="detail-assignee">
+            <option value="unassigned">Unassigned</option>
+            <option value="alice">alice</option>
+            <option value="bob">bob</option>
+            <option value="you">you</option>
+          </select>
+        </div>
+      </div>
+      <button id="save-changes">Save changes</button>
+      <div id="detail-error" role="alert" hidden></div>
+      <p id="detail-body"></p>
+      <div id="detail-attachment" hidden>Attachment: <span id="detail-attachment-name"></span></div>
+      <h3>Comments</h3>
+      <div id="comments"></div>
+      <label for="comment-box">Add a comment</label>
+      <textarea id="comment-box"></textarea>
+      <div id="comment-error" role="alert" hidden></div>
+      <button id="add-comment">Add comment</button>
+      <button id="back">Back to list</button>
+    </section>
+  </main>
+
+<script>
+  // Two tickets already exist so a new one can be told apart from a re-render,
+  // and each carries a different status so a cross-ticket write is visible.
+  const tickets = [
+    {
+      id: "TKT-1040",
+      subject: "Printer on 3rd floor jams",
+      body: "Every duplex job jams at the fuser.",
+      status: "Open",
+      priority: "normal",
+      category: "hardware",
+      assignee: "unassigned",
+      attachment: "",
+      comments: [{ author: "alice", body: "Tried a new toner, still jams" }],
+    },
+    {
+      id: "TKT-1041",
+      subject: "VPN drops after 10 minutes",
+      body: "Connection resets on the corporate SSID.",
+      status: "Waiting",
+      priority: "high",
+      category: "access",
+      assignee: "alice",
+      attachment: "",
+      comments: [],
+    },
+  ];
+
+  let nextNumber = 1042;
+  let selected = null;
+  let pendingAttachment = "";
+
+  const tbody = document.querySelector("#ticket-list tbody");
+  const confirmation = document.getElementById("confirmation");
+  const confirmationId = document.getElementById("confirmation-id");
+  const listSection = document.getElementById("list-section");
+  const newForm = document.getElementById("new-form");
+  const detail = document.getElementById("detail");
+  const errorEl = document.getElementById("t-error");
+  const subjectEl = document.getElementById("t-subject");
+  const bodyEl = document.getElementById("t-body");
+  const categoryEl = document.getElementById("t-category");
+  const priorityEl = document.getElementById("t-priority");
+  const attachmentEl = document.getElementById("t-attachment");
+  const attachmentNameEl = document.getElementById("t-attachment-name");
+  const commentBox = document.getElementById("comment-box");
+  const commentError = document.getElementById("comment-error");
+  const commentsEl = document.getElementById("comments");
+
+  function showElementError(el, text) {
+    el.textContent = text;
+    el.hidden = false;
+  }
+
+  function ticketById(id) {
+    return tickets.find((ticket) => ticket.id === id);
+  }
+
+  function renderList() {
+    tbody.replaceChildren();
+    for (const ticket of tickets) {
+      const row = document.createElement("tr");
+      row.className = "ticket";
+      row.dataset.ticketId = ticket.id;
+      row.dataset.status = ticket.status;
+      row.dataset.priority = ticket.priority;
+      row.dataset.assignee = ticket.assignee;
+      row.dataset.comments = String(ticket.comments.length);
+
+      const cells = [
+        ticket.id,
+        ticket.subject,
+        ticket.status,
+        ticket.priority,
+        ticket.assignee,
+        String(ticket.comments.length),
+      ];
+      for (const value of cells) {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        row.appendChild(cell);
+      }
+      row.addEventListener("click", () => openDetail(ticket.id));
+      tbody.appendChild(row);
+    }
+  }
+
+  function renderDetail() {
+    const ticket = ticketById(selected);
+    if (!ticket) {
+      detail.hidden = true;
+      return;
+    }
+    document.getElementById("detail-id").textContent = ticket.id;
+    document.getElementById("detail-subject").textContent = ticket.subject;
+    document.getElementById("detail-status").value = ticket.status;
+    document.getElementById("detail-assignee").value = ticket.assignee;
+    document.getElementById("detail-priority").textContent = ticket.priority;
+    document.getElementById("detail-category").textContent = ticket.category;
+    document.getElementById("detail-body").textContent = ticket.body;
+
+    const attachment = document.getElementById("detail-attachment");
+    if (ticket.attachment) {
+      attachment.hidden = false;
+      document.getElementById("detail-attachment-name").textContent =
+        ticket.attachment;
+    } else {
+      attachment.hidden = true;
+      document.getElementById("detail-attachment-name").textContent = "";
+    }
+
+    commentsEl.replaceChildren();
+    for (const comment of ticket.comments) {
+      const row = document.createElement("div");
+      row.className = "comment";
+      row.dataset.author = comment.author;
+      const author = document.createElement("span");
+      author.className = "author";
+      author.textContent = comment.author;
+      const body = document.createElement("span");
+      body.className = "body";
+      body.textContent = comment.body;
+      row.append(author, body);
+      commentsEl.appendChild(row);
+    }
+    detail.dataset.ticketId = ticket.id;
+  }
+
+  function openDetail(id) {
+    selected = id;
+    commentBox.value = "";
+    commentError.hidden = true;
+    document.getElementById("detail-error").hidden = true;
+    renderDetail();
+    detail.hidden = false;
+    listSection.hidden = true;
+    newForm.hidden = true;
+  }
+
+  function openList() {
+    selected = null;
+    detail.hidden = true;
+    newForm.hidden = true;
+    listSection.hidden = false;
+    renderList();
+  }
+
+  document.getElementById("new-ticket").addEventListener("click", () => {
+    pendingAttachment = "";
+    subjectEl.value = "";
+    bodyEl.value = "";
+    categoryEl.value = "hardware";
+    priorityEl.value = "normal";
+    attachmentEl.value = "";
+    attachmentNameEl.textContent = "";
+    errorEl.hidden = true;
+    confirmation.hidden = true;
+    listSection.hidden = true;
+    detail.hidden = true;
+    newForm.hidden = false;
+  });
+
+  document.getElementById("t-cancel").addEventListener("click", openList);
+  document.getElementById("back").addEventListener("click", openList);
+
+  attachmentEl.addEventListener("change", () => {
+    const file = attachmentEl.files?.[0];
+    pendingAttachment = file ? file.name : "";
+    attachmentNameEl.textContent = pendingAttachment;
+  });
+
+  document.getElementById("ticket-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const subject = subjectEl.value.trim();
+    const body = bodyEl.value.trim();
+    if (!subject) {
+      showElementError(errorEl, "Subject is required");
+      return;
+    }
+    if (!body) {
+      showElementError(errorEl, "Description is required");
+      return;
+    }
+    const id = `TKT-${nextNumber}`;
+    nextNumber += 1;
+    tickets.unshift({
+      id,
+      subject,
+      body,
+      status: "Open",
+      priority: priorityEl.value,
+      category: categoryEl.value,
+      assignee: "unassigned",
+      attachment: pendingAttachment,
+      comments: [],
+    });
+    errorEl.hidden = true;
+    confirmationId.textContent = id;
+    confirmation.hidden = false;
+    renderList();
+    openDetail(id);
+  });
+
+  document.getElementById("save-changes").addEventListener("click", () => {
+    const ticket = ticketById(selected);
+    if (!ticket) return;
+    const status = document.getElementById("detail-status").value;
+    const assignee = document.getElementById("detail-assignee").value;
+    const detailError = document.getElementById("detail-error");
+    if (status === "Resolved" && assignee === "unassigned") {
+      showElementError(detailError, "Resolve needs an assignee");
+      return;
+    }
+    ticket.status = status;
+    ticket.assignee = assignee;
+    detailError.hidden = true;
+    renderList();
+    renderDetail();
+  });
+
+  document.getElementById("add-comment").addEventListener("click", () => {
+    const ticket = ticketById(selected);
+    const body = commentBox.value.trim();
+    if (!ticket) return;
+    if (!body) {
+      showElementError(commentError, "Write a comment first");
+      return;
+    }
+    ticket.comments.push({ author: "you", body });
+    commentError.hidden = true;
+    commentBox.value = "";
+    renderList();
+    renderDetail();
+  });
+
+  renderList();
+</script>
+</body>
+</html>

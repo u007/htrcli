@@ -1,0 +1,774 @@
+{
+	"scenarios": [
+		{
+			"id": "S19",
+			"ref": "B19",
+			"app": "HR leave fixture (local)",
+			"goal": "Request annual leave over a weekend-spanning date range, proving the inclusive day count, the balance decrement, a request that exceeds the balance, persistence across a reload, and a cancellation that returns the days — without touching the pre-existing request.",
+			"steps": [
+				{
+					"note": "open the HR leave fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_LEAVE}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "clear the fixture's storage so every run starts from the seed (this scenario proves persistence, so it must not inherit the last run's requests)",
+					"argv": ["eval", "localStorage.removeItem('leave-requests-v1')"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "reload so the fixture re-seeds from scratch",
+					"argv": ["reload"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "wait for the requests table",
+					"argv": ["wait", "--selector", "#requests tr", "--timeout", "10000"],
+					"expect": {
+						"exit": 0
+					},
+					"retry": 2
+				},
+				{
+					"note": "one request already exists",
+					"argv": ["extract", "list", "#requests tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "the seeded request count is recorded for the untouched check",
+					"argv": ["--json", "attr", "#balance", "data-days"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "14"
+						}
+					}
+				},
+				{
+					"note": "no duration is shown before any date is typed",
+					"argv": ["--json", "text", "#duration"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "—"
+						}
+					}
+				},
+				{
+					"note": "fill only the start date",
+					"argv": ["fill", "#start-date", "2026-04-06"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "a half-filled range still shows no duration",
+					"argv": ["--json", "text", "#duration"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "—"
+						}
+					}
+				},
+				{
+					"note": "the native date input normalized the value it was given",
+					"argv": ["--json", "value", "#start-date"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-04-06"
+						}
+					}
+				},
+				{
+					"note": "fill the end date — Monday 6 April to Sunday 12 April spans a weekend",
+					"argv": ["fill", "#end-date", "2026-04-12"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the duration updates live from both dates, counting weekends: 7 days, not 6",
+					"argv": ["--json", "text", "#duration"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "7 days"
+						}
+					}
+				},
+				{
+					"note": "the live count is also available as a number",
+					"argv": ["--json", "attr", "#duration", "data-days"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "7"
+						}
+					}
+				},
+				{
+					"note": "a single-day range reads in the singular",
+					"argv": ["fill", "#start-date", "2026-04-12"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the same day twice is one day, not zero",
+					"argv": ["--json", "text", "#duration"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "1 day"
+						}
+					}
+				},
+				{
+					"note": "an inverted range shows no duration at all",
+					"argv": ["fill", "#start-date", "2026-04-10"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "end 12 April is after start 10 April, so 3 days",
+					"argv": ["--json", "text", "#duration"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "3 days"
+						}
+					}
+				},
+				{
+					"note": "invert it: start after end",
+					"argv": ["fill", "#start-date", "2026-04-12"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and end before start again",
+					"argv": ["fill", "#end-date", "2026-04-06"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "an inverted range is shown as no duration",
+					"argv": ["--json", "text", "#duration"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "—"
+						}
+					}
+				},
+				{
+					"note": "submitting an inverted range is refused",
+					"argv": ["click", "#submit"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the refusal names the date order, not a generic error",
+					"argv": ["--json", "text", "#form-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "End date cannot be before the start date"
+						}
+					}
+				},
+				{
+					"note": "a refused submit changed nothing",
+					"argv": ["--json", "attr", "#balance", "data-days"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "14"
+						}
+					}
+				},
+				{
+					"note": "put a valid range back",
+					"argv": ["fill", "#end-date", "2026-04-12"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "dates present but no leave type",
+					"argv": ["click", "#submit"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the missing type is named",
+					"argv": ["--json", "text", "#form-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Leave type is required"
+						}
+					}
+				},
+				{
+					"note": "choose the leave type",
+					"argv": ["select", "#leave-type", "annual"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "dates and type present but no reason",
+					"argv": ["click", "#submit"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the missing reason is named",
+					"argv": ["--json", "text", "#form-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Reason is required"
+						}
+					}
+				},
+				{
+					"note": "a range longer than the balance: Wednesday 1 to Thursday 30 April is 30 days",
+					"argv": ["fill", "#start-date", "2026-04-01"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "set the 30-day end date",
+					"argv": ["fill", "#end-date", "2026-04-30"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the live count agrees",
+					"argv": ["--json", "text", "#duration"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "30 days"
+						}
+					}
+				},
+				{
+					"note": "a reason is supplied so the balance is the only thing left to object to",
+					"argv": ["fill", "#reason", "Family holiday in April"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "submit the over-balance request",
+					"argv": ["click", "#submit"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the refusal quotes both numbers",
+					"argv": ["--json", "text", "#form-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Requested 30 days but only 14 remain"
+						}
+					}
+				},
+				{
+					"note": "the over-balance request took no days",
+					"argv": ["--json", "attr", "#balance", "data-days"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "14"
+						}
+					}
+				},
+				{
+					"note": "and added no row",
+					"argv": ["extract", "list", "#requests tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "and showed no confirmation",
+					"argv": [
+						"wait",
+						"--selector",
+						"#confirmation.visible",
+						"--gone",
+						"--timeout",
+						"1500"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "now a range that fits: Monday 6 to Sunday 12 April, 7 days",
+					"argv": ["fill", "#start-date", "2026-04-06"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "set the fitting end date",
+					"argv": ["fill", "#end-date", "2026-04-12"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "submit the fitting request",
+					"argv": ["click", "#submit"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the confirmation names the generated request id",
+					"argv": ["--json", "text", "#conf-request"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "RQ-"
+					},
+					"capture": {
+						"request_id": "data"
+					}
+				},
+				{
+					"note": "the generated id is the expected sequence number",
+					"argv": ["--json", "text", "#conf-request"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "RQ-1002"
+						}
+					}
+				},
+				{
+					"note": "the confirmation quotes the inclusive day count",
+					"argv": ["--json", "text", "#conf-days"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "7"
+						}
+					}
+				},
+				{
+					"note": "the confirmation quotes the new balance",
+					"argv": ["--json", "text", "#conf-balance"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "7"
+						}
+					}
+				},
+				{
+					"note": "the header balance moved 14 -> 7",
+					"argv": ["--json", "attr", "#balance", "data-days"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "7"
+						}
+					}
+				},
+				{
+					"note": "the submission error is cleared on success",
+					"argv": ["--json", "attr", "#form-error", "class"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "err"
+						}
+					}
+				},
+				{
+					"note": "the confirmation is visible now (the same selector the refused submit had to miss)",
+					"argv": [
+						"wait",
+						"--selector",
+						"#confirmation.visible",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the form is reset after a successful submit",
+					"argv": ["--json", "value", "#start-date"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": ""
+						}
+					}
+				},
+				{
+					"note": "the duration display is reset with the form",
+					"argv": ["--json", "text", "#duration"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "—"
+						}
+					}
+				},
+				{
+					"note": "a second request now exists",
+					"argv": ["extract", "list", "#requests tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "the new request is the first row, by the id just captured",
+					"argv": [
+						"--json",
+						"attr",
+						"#requests tr[data-request-id='${request_id}']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "pending"
+						}
+					}
+				},
+				{
+					"note": "the row carries the inclusive day count, not a difference",
+					"argv": [
+						"--json",
+						"text",
+						"#requests tr[data-request-id='${request_id}'] .req-days"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "7"
+						}
+					}
+				},
+				{
+					"note": "the row carries both dates as submitted",
+					"argv": [
+						"--json",
+						"text",
+						"#requests tr[data-request-id='${request_id}'] .req-start"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-04-06"
+						}
+					}
+				},
+				{
+					"note": "the row's end date is the one submitted",
+					"argv": [
+						"--json",
+						"text",
+						"#requests tr[data-request-id='${request_id}'] .req-end"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-04-12"
+						}
+					}
+				},
+				{
+					"note": "the row's leave type was stored from the select",
+					"argv": [
+						"--json",
+						"text",
+						"#requests tr[data-request-id='${request_id}'] .req-type"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Annual"
+						}
+					}
+				},
+				{
+					"note": "reload the page — the request and the balance must survive",
+					"argv": ["reload"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "wait for the table to come back",
+					"argv": ["wait", "--selector", "#requests tr", "--timeout", "10000"],
+					"expect": {
+						"exit": 0
+					},
+					"retry": 2
+				},
+				{
+					"note": "the balance persisted at 7",
+					"argv": ["--json", "attr", "#balance", "data-days"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "7"
+						}
+					}
+				},
+				{
+					"note": "the request persisted",
+					"argv": ["extract", "list", "#requests tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "the persisted request is still pending",
+					"argv": [
+						"--json",
+						"attr",
+						"#requests tr[data-request-id='${request_id}']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "pending"
+						}
+					}
+				},
+				{
+					"note": "the seeded request is still there and still approved",
+					"argv": [
+						"--json",
+						"attr",
+						"#requests tr[data-request-id='RQ-1001']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "approved"
+						}
+					}
+				},
+				{
+					"note": "an approved request offers no cancel button",
+					"argv": [
+						"wait",
+						"--selector",
+						"#requests tr[data-request-id='RQ-1001'] .cancel",
+						"--gone",
+						"--timeout",
+						"1500"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "cancel the pending request",
+					"argv": [
+						"click",
+						"#requests tr[data-request-id='${request_id}'] .cancel"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the request is now cancelled",
+					"argv": [
+						"--json",
+						"attr",
+						"#requests tr[data-request-id='${request_id}']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "cancelled"
+						}
+					}
+				},
+				{
+					"note": "the days went back to the balance: 7 -> 14",
+					"argv": ["--json", "attr", "#balance", "data-days"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "14"
+						}
+					}
+				},
+				{
+					"note": "a cancelled request cannot be cancelled again",
+					"argv": [
+						"wait",
+						"--selector",
+						"#requests tr[data-request-id='${request_id}'] .cancel",
+						"--gone",
+						"--timeout",
+						"1500"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "reload again — the cancellation persisted",
+					"argv": ["reload"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "wait for the table after the second reload",
+					"argv": ["wait", "--selector", "#requests tr", "--timeout", "10000"],
+					"expect": {
+						"exit": 0
+					},
+					"retry": 2
+				},
+				{
+					"note": "the cancellation survived the reload",
+					"argv": [
+						"--json",
+						"attr",
+						"#requests tr[data-request-id='${request_id}']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "cancelled"
+						}
+					}
+				},
+				{
+					"note": "and so did the restored balance",
+					"argv": ["--json", "attr", "#balance", "data-days"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "14"
+						}
+					}
+				},
+				{
+					"note": "the pre-existing request kept its days",
+					"argv": [
+						"--json",
+						"text",
+						"#requests tr[data-request-id='RQ-1001'] .req-days"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "3"
+						}
+					}
+				},
+				{
+					"note": "the pre-existing request was never rewritten",
+					"argv": [
+						"--json",
+						"text",
+						"#requests tr[data-request-id='RQ-1001'] .req-start"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-03-02"
+						}
+					}
+				}
+			]
+		}
+	]
+}

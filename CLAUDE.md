@@ -40,7 +40,8 @@ make close           # Kill process on :3845
 make bench-smoke     # Run one offline benchmark scenario (also: bench-office,
                      # bench-tasks, bench-form, bench-booking, bench-expense,
                      # bench-files, bench-mail, bench-crm, bench-messaging,
-                     # bench-research; all need a real Chrome on the CDP port)
+                     # bench-research, bench-tickets, bench-leave,
+                     # bench-social; all need a real Chrome on the CDP port)
 ```
 
 ### Benchmark harness
@@ -52,7 +53,9 @@ raw htrcli argv plus expectations (`exit`, `stdoutContains`,
 the backoff policy lives in one place; `requires_auth: true` is reported as
 NOT_RUN, never as PASS. `capture: {"name": "items.0.q4"}` carries a step's
 value into a later `${name}` reference (per-scenario, only from a step that
-passed), which is how an aggregating task benchmarks more than a page visit.
+passed) — in argv and in expectations — which is how an aggregating task
+benchmarks more than a page visit and how a created record's id is reused as a
+selector.
 
 Scenarios live in `docs/benchmarks/scenarios/`, the spec in
 `docs/benchmarks/office-task-benchmark.md`, and the fixture page in

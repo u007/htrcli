@@ -204,3 +204,111 @@ func TestValidateBenchScenarioAcceptsCaptureNames(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// expectRunner answers each step from a table keyed by its argv and evaluates
+// the step's expectations the way runBenchStep does. captureRunner alone is not
+// enough for these tests: it reports OK unconditionally, so an expectation
+// would never be consulted.
+func expectRunner(stdoutByArgv map[string]string) benchRunner {
+	return func(step BenchStep) BenchStepResult {
+		stdout := stdoutByArgv[strings.Join(step.Argv, " ")]
+		run := selfRun{Stdout: stdout, ExitCode: 0}
+		res := BenchStepResult{
+			Argv:     step.Argv,
+			Stdout:   stdout,
+			ExitCode: 0,
+			Attempts: 1,
+		}
+		if err := evaluateBenchExpect(expandBenchExpect(step.Expect), run); err != nil {
+			res.Failure = err.Error()
+			return res
+		}
+		res.OK = true
+		return res
+	}
+}
+
+// An expectation must be able to reference a captured value: the natural
+// cross-check ("the detail view opened on the id I just captured") is
+// unwritable otherwise.
+func TestRunBenchScenarioExpectationUsesCapture(t *testing.T) {
+	runner := expectRunner(map[string]string{
+		"--json text #confirmation-id":       `{"data":"TKT-1042"}`,
+		"--json attr #detail data-ticket-id": `{"data":"TKT-1042"}`,
+	})
+
+	s := BenchScenario{
+		ID: "B17",
+		Steps: []BenchStep{
+			{
+				Argv:    []string{"--json", "text", "#confirmation-id"},
+				Capture: map[string]string{"ticket_id": "data"},
+			},
+			{
+				Argv: []string{"--json", "attr", "#detail", "data-ticket-id"},
+				Expect: &BenchExpect{
+					JSONPath: &JSONPathExpect{Path: "data", Equals: "${ticket_id}"},
+				},
+			},
+		},
+	}
+	res := runBenchScenario(s, runner)
+	if res.Verdict != VerdictPass {
+		t.Fatalf("verdict = %q, failure = %q, want PASS", res.Verdict, res.Steps[1].Failure)
+	}
+}
+
+// A capture referenced from an expectation must win over an environment
+// variable of the same name, exactly as it does in argv.
+func TestRunBenchScenarioExpectationCaptureWinsOverEnvironment(t *testing.T) {
+	t.Setenv("ticket_id", "FROM-ENV")
+	runner := expectRunner(map[string]string{
+		"--json text #confirmation-id": `{"data":"TKT-1042"}`,
+		"--json text #detail-id":       `{"data":"TKT-1042"}`,
+	})
+
+	s := BenchScenario{
+		ID: "B17",
+		Steps: []BenchStep{
+			{
+				Argv:    []string{"--json", "text", "#confirmation-id"},
+				Capture: map[string]string{"ticket_id": "data"},
+			},
+			{
+				Argv:   []string{"--json", "text", "#detail-id"},
+				Expect: &BenchExpect{StdoutContains: "${ticket_id}"},
+			},
+		},
+	}
+	res := runBenchScenario(s, runner)
+	if res.Verdict != VerdictPass {
+		t.Fatalf("verdict = %q, failure = %q, want PASS (capture must shadow the env var)", res.Verdict, res.Steps[1].Failure)
+	}
+}
+
+// An expectation naming a value that was never captured keeps its literal form
+// and fails loudly, rather than silently matching an empty string.
+func TestRunBenchScenarioExpectationUnresolvedCaptureFails(t *testing.T) {
+	runner := expectRunner(map[string]string{
+		"--json text #detail-id": `{"data":"TKT-1042"}`,
+	})
+
+	s := BenchScenario{
+		ID: "B17",
+		Steps: []BenchStep{
+			{
+				Argv: []string{"--json", "text", "#detail-id"},
+				Expect: &BenchExpect{
+					JSONPath: &JSONPathExpect{Path: "data", Equals: "${never_captured}"},
+				},
+			},
+		},
+	}
+	res := runBenchScenario(s, runner)
+	if res.Verdict != VerdictFail {
+		t.Fatalf("verdict = %q, want FAIL for an unresolved capture", res.Verdict)
+	}
+	if !strings.Contains(res.Steps[0].Failure, "never_captured") {
+		t.Fatalf("failure = %q, want the unresolved name visible", res.Steps[0].Failure)
+	}
+}

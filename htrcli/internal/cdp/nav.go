@@ -38,3 +38,23 @@ func Screenshot(s *Session) ([]byte, error) {
 	}
 	return base64.StdEncoding.DecodeString(res.Data)
 }
+
+// Reload reloads the current document.
+//
+// Deliberately Page.reload rather than Page.navigate-with-the-same-URL: a
+// repeat navigate of a file:// or cached URL can be served as a
+// same-document navigation, which would leave in-page JS state alive and
+// silently defeat the thing a reload is used to prove (that state survives
+// only because it was persisted).
+func Reload(s *Session, timeoutMs int) error {
+	if err := s.Call("Page.enable", nil, nil); err != nil {
+		return fmt.Errorf("Page.enable: %w", err)
+	}
+	if err := s.Call("Page.reload", map[string]any{}, nil); err != nil {
+		return err
+	}
+	if _, err := s.WaitEvent("Page.loadEventFired", time.Duration(timeoutMs)*time.Millisecond); err != nil {
+		return fmt.Errorf("page did not finish reloading: %w", err)
+	}
+	return nil
+}

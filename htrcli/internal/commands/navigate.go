@@ -114,7 +114,7 @@ var reloadCmd = &cobra.Command{
 	Short: "Reload page",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
-			return errUnsupportedCDP("reload")
+			return runReloadCDP()
 		}
 		c := GetClient()
 		tabID, err := GetTabID()

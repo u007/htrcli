@@ -6,6 +6,9 @@
 		bench-mail \
 		bench-crm \
 		bench-messaging \
+		bench-tickets \
+		bench-leave \
+		bench-social \
 		bench-research \
 		htrcli-build htrcli-build-all htrcli-build-linux htrcli-install htrcli-clean \
 		ext-build ext-dev ext-zip firefox-build firefox-install firefox-zip
@@ -106,6 +109,15 @@ bench-crm: htrcli-build
 bench-messaging: htrcli-build
 	$(call bench_run,BENCH_FIXTURE_MESSAGING="$(BENCH_FIXTURES)/messaging.html",s15-messaging-fixture.json,messaging)
 	$(call bench_run,BENCH_FIXTURE_MESSAGING="$(BENCH_FIXTURES)/messaging.html",s17-thread-replies.json,messaging-threads)
+
+bench-tickets: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_TICKET="$(BENCH_FIXTURES)/ticket.html" BENCH_FIXTURE_REPORT="$(BENCH_FIXTURES)/report.txt",s18-ticket-fixture.json,tickets)
+
+bench-leave: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_LEAVE="$(BENCH_FIXTURES)/leave.html",s19-leave-fixture.json,leave)
+
+bench-social: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_SOCIAL="$(BENCH_FIXTURES)/social.html" BENCH_FIXTURE_REPORT="$(BENCH_FIXTURES)/report.txt",s20-social-fixture.json,social)
 
 bench-research: htrcli-build
 	$(call bench_run,BENCH_FIXTURE_RESEARCH_A="$(BENCH_FIXTURES)/research-source-a.html" BENCH_FIXTURE_RESEARCH_B="$(BENCH_FIXTURES)/research-source-b.html" BENCH_FIXTURE_RESEARCH_SUMMARY="$(BENCH_FIXTURES)/research-summary.html",s16-research-fixture.json,research)

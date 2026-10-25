@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Social post composer with scheduling (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; max-width: 820px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #666; font-size: 12px; margin: 0 0 16px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  th, td { text-align: left; padding: 5px 4px; border-bottom: 1px solid #eee; font-size: 13px; vertical-align: top; }
+  .row { margin: 8px 0; }
+  label { display: inline-block; width: 90px; font-size: 13px; }
+  textarea { width: 100%; box-sizing: border-box; padding: 6px; font-size: 13px; }
+  input, select { padding: 5px; font-size: 13px; box-sizing: border-box; }
+  .err { color: #d00; font-size: 12px; margin-top: 6px; display: none; }
+  .err.show { display: block; }
+  #char-count { font-size: 12px; color: #666; }
+  #char-count[data-over="1"] { color: #d00; font-weight: bold; }
+  .muted { color: #666; font-size: 12px; }
+  [data-state="scheduled"] .q-state { color: #a06000; }
+  [data-state="published"] .q-state { color: #1a7f37; }
+  button { padding: 6px 13px; font-size: 13px; cursor: pointer; }
+  button.mini { padding: 2px 8px; font-size: 12px; }
+  #banner { display: none; background: #eef4ff; border: 1px solid #b9cdf5; padding: 8px; font-size: 13px; margin-bottom: 8px; }
+  #banner.visible { display: block; }
+  #banner-id { font-family: monospace; font-weight: bold; }
+</style>
+</head>
+<body>
+  <h1>Social Post Composer (fixture)</h1>
+  <p class="sub">Fixed demo clock: <span id="clock" data-now="2026-04-01T09:00">1 April 2026, 09:00</span>.
+    Times are compared against that clock, never the machine's.</p>
+
+  <div id="banner">Editing scheduled post <span id="banner-id">—</span>
+    <button type="button" class="mini" id="banner-cancel">Cancel edit</button>
+  </div>
+
+  <div class="row">
+    <label for="post-text">Post</label>
+    <textarea id="post-text" rows="4" placeholder="What do you want to say?"></textarea>
+    <div><span id="char-count" data-remaining="280" data-over="0">0 / 280</span></div>
+  </div>
+
+  <div class="row">
+    <label for="audience">Audience</label>
+    <select id="audience">
+      <option value="public">Public</option>
+      <option value="followers">Followers</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <label for="media">Attachment</label>
+    <input id="media" type="file">
+    <span id="media-name" class="muted">(none)</span>
+  </div>
+
+  <div class="row">
+    <label for="schedule-at">Schedule</label>
+    <input id="schedule-at" type="datetime-local" min="2026-04-01T09:00">
+  </div>
+
+  <p>
+    <button id="post-now" type="button">Post now</button>
+    <button id="schedule" type="button">Schedule</button>
+  </p>
+  <div id="form-error" class="err"></div>
+
+  <h2 style="font-size:15px;margin:20px 0 0">Queue</h2>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Post</th><th>Audience</th><th>When</th><th>State</th><th>Media</th><th></th></tr>
+    </thead>
+    <tbody id="queue"></tbody>
+  </table>
+
+<script>
+  var STORAGE_KEY = "social-queue-v1";
+  var LIMIT = 280;
+  var FIXTURE_NOW = "2026-04-01T09:00";
+
+  var state = load();
+  // Non-empty while the composer is editing an existing scheduled post; both
+  // submit buttons then UPDATE that post instead of creating a new one.
+  var editingId = "";
+
+  function seed() {
+    return {
+      next: 1002,
+      posts: [
+        {
+          id: "P-1001",
+          text: "We are hiring — join the team.",
+          audience: "public",
+          media: "",
+          when: "2026-03-28T10:00",
+          state: "published",
+        },
+      ],
+    };
+  }
+
+  function load() {
+    var raw;
+    var parsed;
+    try {
+      raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.posts) && typeof parsed.next === "number") {
+          return parsed;
+        }
+      }
+    } catch (error) {
+      console.warn("social fixture: ignoring unreadable storage", error);
+    }
+    return seed();
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (error) {
+      console.warn("social fixture: could not persist", error);
+    }
+  }
+
+  function showError(message) {
+    var el = document.getElementById("form-error");
+    el.textContent = message;
+    el.className = "err show";
+  }
+
+  function clearError() {
+    var el = document.getElementById("form-error");
+    el.textContent = "";
+    el.className = "err";
+  }
+
+  function displayTime(iso) {
+    return iso.replace("T", " ");
+  }
+
+  function renderCounter() {
+    var text = document.getElementById("post-text").value;
+    var el = document.getElementById("char-count");
+    el.textContent = `${text.length} / ${LIMIT}`;
+    el.setAttribute("data-remaining", String(LIMIT - text.length));
+    el.setAttribute("data-over", text.length > LIMIT ? "1" : "0");
+  }
+
+  function rowFor(post) {
+    var tr = document.createElement("tr");
+    tr.setAttribute("data-id", post.id);
+    tr.setAttribute("data-state", post.state);
+    tr.setAttribute("data-media", post.media || "");
+
+    var action = post.state === "scheduled"
+      ? `<button type="button" class="edit" data-edit-id="${post.id}">Edit</button>`
+      : "";
+
+    tr.innerHTML =
+      `<td class="q-id">${post.id}</td>` +
+      `<td class="q-text">${escapeHtml(post.text)}</td>` +
+      `<td class="q-audience">${post.audience}</td>` +
+      `<td class="q-when">${displayTime(post.when)}</td>` +
+      `<td class="q-state">${post.state === "scheduled" ? "Scheduled" : "Published"}</td>` +
+      `<td class="q-media">${post.media ? escapeHtml(post.media) : "—"}</td>` +
+      `<td class="q-action">${action}</td>`;
+    return tr;
+  }
+
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function renderQueue() {
+    var body = document.getElementById("queue");
+    body.textContent = "";
+    state.posts.forEach((post) => {
+      body.appendChild(rowFor(post));
+    });
+  }
+
+  function findPost(id) {
+    var i;
+    for (i = 0; i < state.posts.length; i += 1) {
+      if (state.posts[i].id === id) return state.posts[i];
+    }
+    return null;
+  }
+
+  function resetForm() {
+    document.getElementById("post-text").value = "";
+    document.getElementById("schedule-at").value = "";
+    document.getElementById("audience").value = "public";
+    document.getElementById("media").value = "";
+    document.getElementById("media-name").textContent = "(none)";
+    renderCounter();
+  }
+
+  function currentMediaName() {
+    var input = document.getElementById("media");
+    var file = input.files?.[0];
+    return file ? file.name : "";
+  }
+
+  function validateText() {
+    var text = document.getElementById("post-text").value.trim();
+    if (!text) {
+      showError("Write something first");
+      return null;
+    }
+    if (text.length > LIMIT) {
+      showError(`Post is ${text.length} characters — the limit is ${LIMIT}`);
+      return null;
+    }
+    return text;
+  }
+
+  document.getElementById("post-now").addEventListener("click", () => {
+    var text = validateText();
+    var editing;
+    if (text === null) return;
+
+    if (editingId) {
+      editing = findPost(editingId);
+      if (editing) {
+        editing.text = text;
+        editing.audience = document.getElementById("audience").value;
+        editing.media = currentMediaName();
+        editing.when = FIXTURE_NOW;
+        editing.state = "published";
+        save();
+        clearError();
+        stopEditing();
+        resetForm();
+        renderQueue();
+        return;
+      }
+    }
+
+    var post = {
+      id: `P-${state.next}`,
+      text: text,
+      audience: document.getElementById("audience").value,
+      media: currentMediaName(),
+      when: FIXTURE_NOW,
+      state: "published",
+    };
+    state.next += 1;
+    state.posts.unshift(post);
+    save();
+    clearError();
+    resetForm();
+    renderQueue();
+  });
+
+  document.getElementById("schedule").addEventListener("click", () => {
+    var text = validateText();
+    var editing;
+    if (text === null) return;
+
+    var at = document.getElementById("schedule-at").value;
+    if (!at) {
+      showError("Pick a date and time to schedule");
+      return;
+    }
+    if (at <= FIXTURE_NOW) {
+      showError(`Cannot schedule for ${displayTime(at)} — that is not in the future`);
+      return;
+    }
+
+    if (editingId) {
+      editing = findPost(editingId);
+      if (editing) {
+        editing.text = text;
+        editing.audience = document.getElementById("audience").value;
+        editing.media = currentMediaName();
+        editing.when = at;
+        editing.state = "scheduled";
+        save();
+        clearError();
+        stopEditing();
+        resetForm();
+        renderQueue();
+        return;
+      }
+    }
+
+    var post = {
+      id: `P-${state.next}`,
+      text: text,
+      audience: document.getElementById("audience").value,
+      media: currentMediaName(),
+      when: at,
+      state: "scheduled",
+    };
+    state.next += 1;
+    state.posts.unshift(post);
+    save();
+    clearError();
+    resetForm();
+    renderQueue();
+  });
+
+  document.getElementById("post-text").addEventListener("input", renderCounter);
+
+  document.getElementById("media").addEventListener("change", () => {
+    var input = document.getElementById("media");
+    var file = input.files?.[0];
+    document.getElementById("media-name").textContent = file ? file.name : "(none)";
+  });
+
+  document.getElementById("queue").addEventListener("click", (event) => {
+    var button = event.target.closest(".edit");
+    if (!button) return;
+    var post = findPost(button.getAttribute("data-edit-id"));
+    if (!post || post.state !== "scheduled") return;
+
+    document.getElementById("post-text").value = post.text;
+    document.getElementById("audience").value = post.audience;
+    document.getElementById("schedule-at").value = post.when;
+    editingId = post.id;
+    document.getElementById("banner-id").textContent = post.id;
+    document.getElementById("banner").className = "visible";
+    renderCounter();
+  });
+
+  function stopEditing() {
+    editingId = "";
+    document.getElementById("banner").className = "";
+    document.getElementById("banner-id").textContent = "—";
+  }
+
+  document.getElementById("banner-cancel").addEventListener("click", () => {
+    stopEditing();
+    clearError();
+    resetForm();
+  });
+
+  resetForm();
+  renderQueue();
+</script>
+</body>
+</html>

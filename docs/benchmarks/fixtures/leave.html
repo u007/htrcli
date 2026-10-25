@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HR leave request (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; max-width: 900px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #666; font-size: 12px; margin: 0 0 16px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  th, td { text-align: left; padding: 5px 4px; border-bottom: 1px solid #eee; font-size: 13px; }
+  label { display: inline-block; width: 110px; font-size: 13px; }
+  input, select, textarea { padding: 5px; font-size: 13px; box-sizing: border-box; }
+  textarea { width: 420px; vertical-align: top; }
+  .row { margin: 6px 0; }
+  .err { color: #d00; font-size: 12px; margin-top: 6px; display: none; }
+  .err.show { display: block; }
+  #balance { font-weight: bold; }
+  #duration { font-weight: bold; }
+  [data-status="pending"] .req-status { color: #a06000; }
+  [data-status="cancelled"] .req-status { color: #777; }
+  [data-status="approved"] .req-status { color: #1a7f37; }
+  button { padding: 6px 13px; font-size: 13px; cursor: pointer; }
+  button.cancel { padding: 2px 8px; font-size: 12px; }
+  #confirmation { display: none; border: 1px solid #1a7f37; padding: 14px; margin-top: 16px; }
+  #confirmation.visible { display: block; }
+  #conf-request { font-weight: bold; font-family: monospace; color: #1a7f37; }
+</style>
+</head>
+<body>
+  <h1>HR Leave Request (fixture)</h1>
+  <p class="sub">Annual leave: <span id="balance" data-days="14">14</span> days remaining.
+    Days are counted inclusively; weekends are included.</p>
+
+  <div class="row">
+    <label for="leave-type">Leave type</label>
+    <select id="leave-type">
+      <option value="">Select…</option>
+      <option value="annual">Annual</option>
+      <option value="sick">Sick</option>
+      <option value="unpaid">Unpaid</option>
+    </select>
+  </div>
+  <div class="row">
+    <label for="start-date">Start date</label>
+    <input id="start-date" type="date">
+  </div>
+  <div class="row">
+    <label for="end-date">End date</label>
+    <input id="end-date" type="date">
+  </div>
+  <div class="row">
+    <label>Duration</label>
+    <span id="duration" data-days="">—</span>
+  </div>
+  <div class="row">
+    <label for="reason">Reason</label>
+    <textarea id="reason" rows="2"></textarea>
+  </div>
+
+  <p><button id="submit" type="button">Submit request</button></p>
+  <div id="form-error" class="err"></div>
+
+  <div id="confirmation">
+    <p>Request submitted: <span id="conf-request">—</span></p>
+    <p>Days: <span id="conf-days">—</span> · Remaining: <span id="conf-balance">—</span></p>
+  </div>
+
+  <h2 style="font-size:15px;margin:20px 0 0">My requests</h2>
+  <table>
+    <thead>
+      <tr><th>Request</th><th>Type</th><th>Start</th><th>End</th><th>Days</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody id="requests"></tbody>
+  </table>
+
+<script>
+  var STORAGE_KEY = "leave-requests-v1";
+  var TYPE_LABEL = { annual: "Annual", sick: "Sick", unpaid: "Unpaid" };
+
+  var state = load();
+
+  function seed() {
+    return {
+      remaining: 14,
+      next: 1002,
+      requests: [
+        {
+          id: "RQ-1001",
+          type: "annual",
+          start: "2026-03-02",
+          end: "2026-03-04",
+          days: 3,
+          reason: "Family event",
+          status: "approved",
+        },
+      ],
+    };
+  }
+
+  function load() {
+    var raw;
+    var parsed;
+    try {
+      raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.remaining === "number" && Array.isArray(parsed.requests)) {
+          return parsed;
+        }
+      }
+    } catch (error) {
+      console.warn("leave fixture: ignoring unreadable storage", error);
+    }
+    return seed();
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (error) {
+      console.warn("leave fixture: could not persist", error);
+    }
+  }
+
+  // Inclusive calendar days, parsed as UTC so a DST shift cannot move the count.
+  function parseDate(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return null;
+    var parts = value.split("-");
+    var ms = Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return Number.isNaN(ms) ? null : ms;
+  }
+
+  function inclusiveDays(start, end) {
+    var from = parseDate(start);
+    var to = parseDate(end);
+    if (from === null || to === null || to < from) return null;
+    return Math.round((to - from) / 86400000) + 1;
+  }
+
+  function durationText(days) {
+    if (days === null) return "—";
+    return days + (days === 1 ? " day" : " days");
+  }
+
+  function showError(message) {
+    var el = document.getElementById("form-error");
+    el.textContent = message;
+    el.className = "err show";
+  }
+
+  function clearError() {
+    var el = document.getElementById("form-error");
+    el.textContent = "";
+    el.className = "err";
+  }
+
+  function renderBalance() {
+    var el = document.getElementById("balance");
+    el.textContent = String(state.remaining);
+    el.setAttribute("data-days", String(state.remaining));
+  }
+
+  function renderDuration() {
+    var days = inclusiveDays(
+      document.getElementById("start-date").value,
+      document.getElementById("end-date").value,
+    );
+    var el = document.getElementById("duration");
+    el.textContent = durationText(days);
+    el.setAttribute("data-days", days === null ? "" : String(days));
+  }
+
+  function rowFor(request) {
+    var tr = document.createElement("tr");
+    tr.setAttribute("data-request-id", request.id);
+    tr.setAttribute("data-status", request.status);
+
+    var action = request.status === "pending"
+      ? `<button type="button" class="cancel" data-request-id="${request.id}">Cancel</button>`
+      : "";
+
+    tr.innerHTML =
+      '<td class="req-id">' + request.id + "</td>" +
+      '<td class="req-type">' + TYPE_LABEL[request.type] + "</td>" +
+      '<td class="req-start">' + request.start + "</td>" +
+      '<td class="req-end">' + request.end + "</td>" +
+      '<td class="req-days">' + request.days + "</td>" +
+      '<td class="req-status">' + capitalize(request.status) + "</td>" +
+      '<td class="req-action">' + action + "</td>";
+    return tr;
+  }
+
+  function capitalize(text) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+
+  function renderList() {
+    var body = document.getElementById("requests");
+    body.textContent = "";
+    state.requests.forEach((request) => {
+      body.appendChild(rowFor(request));
+    });
+  }
+
+  function renderAll() {
+    renderBalance();
+    renderDuration();
+    renderList();
+  }
+
+  function findRequest(id) {
+    var i;
+    for (i = 0; i < state.requests.length; i += 1) {
+      if (state.requests[i].id === id) return state.requests[i];
+    }
+    return null;
+  }
+
+  document.getElementById("start-date").addEventListener("input", renderDuration);
+  document.getElementById("end-date").addEventListener("input", renderDuration);
+  document.getElementById("start-date").addEventListener("change", renderDuration);
+  document.getElementById("end-date").addEventListener("change", renderDuration);
+
+  document.getElementById("submit").addEventListener("click", () => {
+    var typeEl = document.getElementById("leave-type");
+    var startEl = document.getElementById("start-date");
+    var endEl = document.getElementById("end-date");
+    var reasonEl = document.getElementById("reason");
+
+    var type = typeEl.value;
+    var start = startEl.value;
+    var end = endEl.value;
+    var reason = reasonEl.value.trim();
+
+    if (!start || !end) { showError("Start and end dates are required"); return; }
+    if (parseDate(start) === null || parseDate(end) === null) {
+      showError("Dates must be valid calendar dates");
+      return;
+    }
+    var days = inclusiveDays(start, end);
+    if (days === null) { showError("End date cannot be before the start date"); return; }
+    if (!type) { showError("Leave type is required"); return; }
+    if (!reason) { showError("Reason is required"); return; }
+    if (days > state.remaining) {
+      showError(`Requested ${days} days but only ${state.remaining} remain`);
+      return;
+    }
+
+    var request = {
+      id: `RQ-${state.next}`,
+      type: type,
+      start: start,
+      end: end,
+      days: days,
+      reason: reason,
+      status: "pending",
+    };
+    state.next += 1;
+    state.remaining -= days;
+    state.requests.unshift(request);
+    save();
+
+    clearError();
+    document.getElementById("conf-request").textContent = request.id;
+    document.getElementById("conf-days").textContent = String(days);
+    document.getElementById("conf-balance").textContent = String(state.remaining);
+    document.getElementById("confirmation").className = "visible";
+
+    typeEl.value = "";
+    startEl.value = "";
+    endEl.value = "";
+    reasonEl.value = "";
+    renderAll();
+  });
+
+  document.getElementById("requests").addEventListener("click", (event) => {
+    var button = event.target.closest(".cancel");
+    if (!button) return;
+    var request = findRequest(button.getAttribute("data-request-id"));
+    if (!request || request.status !== "pending") return;
+    request.status = "cancelled";
+    state.remaining += request.days;
+    save();
+    renderAll();
+  });
+
+  renderAll();
+</script>
+</body>
+</html>

@@ -185,10 +185,12 @@ scenarios, not assertions.
 - **Pass/fail**: message visible; search returns it.
 - **Likely gaps**: the composer is `contenteditable` (Slack/Teams), so `fill`
   replaces the text and `Enter` must send while `Shift+Enter` newlines — a
-  composer that swallows Enter needs a click on the send button instead; thread
-  replies are a distinct interaction and are NOT covered here; reactions are
-  buttons whose state lives in the app's model, so the real question is whether
-  it survives a re-render. OFFLINE PROXY verified via S15
+  composer that swallows Enter needs a click on the send button instead; a
+  thread adds a SECOND contenteditable to the page, so the reply must be typed
+  into the thread input and must land on its parent rather than the channel —
+  split out as B12a; reactions are buttons whose state lives in the app's model,
+  so the real question is whether it survives a re-render. OFFLINE PROXY
+  verified via S15
   (`fixtures/messaging.html`): react ✅ on a message that already shows two 👍
   from other people (count above zero is not the same as reacted-by-me), send
   from the contenteditable with `press Enter`, prove the ✅ survives the
@@ -196,6 +198,27 @@ scenarios, not assertions.
   others leave the DOM, proven with `wait --gone`), clear with `clear`, post to
   a DM with the Send button, then switch back and prove neither write leaked
   into the other conversation. Live Slack/Teams run still needs auth.
+
+### B12a — Thread replies (messaging) — P2
+- **App**: messaging web
+- **Goal**: Reply to a specific message inside its thread, not the channel.
+- **Pass/fail**: the reply attaches to the opened parent; channel history is
+  unchanged.
+- **Likely gaps**: a thread is a different WRITE TARGET that looks identical to
+  the channel composer — both are `contenteditable`, both send on Enter, and the
+  only thing distinguishing them is which input has focus. The failure this
+  catches is a reply that renders in the thread optimistically but is committed
+  to the channel (or to the wrong parent). OFFLINE PROXY verified via S17
+  (`fixtures/messaging.html`): two parents start with different reply counts
+  (m1=0, m2=2) so a mis-attached reply shows as a numeric mismatch, a reply typed
+  into `#thread-input` and sent with Enter raises m2 to 3 while the channel list
+  stays at three messages and never contains the reply text
+  (`stdoutNotContains`), the count survives a switch to another channel and back
+  (model-backed, not DOM-only), and a second reply to m1 proves counts are
+  per-parent (m1=1, m2 unchanged). `extract list` errors on zero matches by
+  design, so an empty thread is asserted with `wait --selector
+  "#thread-replies:empty"`. Live Slack/Teams run still needs auth.
+- **Safety**: reply in a test channel only.
 
 ### B14 — Research & summarize (web) — P2
 - **App**: web pages
@@ -221,6 +244,27 @@ scenarios, not assertions.
 - **Goal**: Compose and (optionally) schedule a post with media.
 - **Pass/fail**: post visible on profile / scheduled in queue.
 - **Likely gaps**: rich-text/media upload, scheduling date pickers.
+- **Likely gaps (as measured)**: the character limit is the interesting part,
+  not the composer. A scenario that only checks the counter proves nothing —
+  the counter is a different code path from the submit validator, so a `>=`
+  off-by-one inside the validator passes a counter-only scenario (this was a
+  real surviving mutant until the scenario submitted a post of EXACTLY the
+  limit and required it to be accepted). The other trap is time: "schedule for
+  a future time" depends on now, so the fixture carries a FIXED demo clock
+  (`data-now="2026-04-01T09:00"`) and compares against it, which makes the
+  past / exactly-now / future boundaries deterministic. Native
+  `<input type="datetime-local">` accepts `fill` and normalizes to
+  `YYYY-MM-DDTHH:mm`; its `min` attribute is documentation only — it does not
+  block a programmatic fill, so the page's own check is what the scenario
+  asserts. Media upload reuses the `upload` path already proven by S12/S18
+  rather than adding a binary fixture. OFFLINE PROXY verified via S20
+  (`fixtures/social.html`): empty-composer refusal from both buttons, 300-char
+  and 281-char refusals quoting exact lengths, 280 characters accepted and
+  stored WITHOUT silent truncation, missing-time / past-time / exactly-now
+  refusals, a scheduled post (audience + attachment) vs an immediately
+  published one, both surviving a reload with distinct states, and a
+  reschedule IN PLACE that must not duplicate the post — with the seeded post
+  untouched throughout. Live social platform run still needs auth.
 
 ### B16 — E-commerce reorder — P3
 - **App**: store account web
@@ -232,6 +276,21 @@ scenarios, not assertions.
 - **App**: helpdesk web
 - **Goal**: Create ticket with subject/body/attachment; add a comment.
 - **Pass/fail**: ticket number captured; comment visible.
+- **Likely gaps**: this is the first task with a real create→update CHAIN — the
+  generated id has to be captured and then used as a SELECTOR to reopen the
+  record, so the harness must expand captures inside expectations too (see
+  "Running the benchmark"), not only inside argv. A ticket form is otherwise
+  ordinary (text, textarea, two selects, a file input), but the update half is
+  not: status and assignee are separate writes that must be re-read from the
+  model after a view change, and a rejected update must not persist. OFFLINE
+  PROXY verified via S18 (`fixtures/ticket.html` + `report.txt`): two seeded
+  tickets with different statuses/assignees, create rejected twice for missing
+  subject then missing description, subject/description/category/priority/
+  attachment submitted, the generated id captured and then used as
+  `[data-ticket-id='${ticket_id}']`, resolving without an assignee refused,
+  status+assignee updated and read back from the list, a comment posted and its
+  count reflected on the row, and both seeded tickets proven untouched. Live
+  helpdesk run still needs auth.
 
 ### B18 — Bank / finance portal read-only check — P3
 - **App**: bank web
@@ -243,6 +302,31 @@ scenarios, not assertions.
 - **App**: HR portal
 - **Goal**: Submit a leave request with dates and reason.
 - **Pass/fail**: request number/status captured.
+- **Likely gaps**: the first scenario whose correct answer is a NUMBER the page
+  computes, so a wrong implementation still produces a plausible-looking form.
+  Three things have to be pinned separately: the day count is INCLUSIVE of both
+  endpoints and of weekends (off-by-one and "business days only" are both
+  wrong-but-reasonable), the balance is read-modify-written in both directions
+  (a request takes days, a cancellation gives them back), and the result
+  survives a reload — which needs `reload` over `--cdp`, the transport every
+  scenario uses. That last one was a hard stop: `reload` used to answer
+  "reload is not supported over --cdp yet", so no scenario could prove
+  persistence at all. It is now implemented (Page.reload + wait for the load
+  event) and this scenario is its first user. The date fields are native
+  `<input type="date">`, matching what real portals use; `fill` sets them and
+  the browser normalizes the value, and a malformed string silently becomes
+  empty, so the scenario also asserts the normalized value read back.
+  OFFLINE PROXY verified via S19 (`fixtures/leave.html`): a fresh run clears the
+  fixture's storage first (the scenario proves persistence, so it must not
+  inherit the previous run), then walks a half-filled range, the live duration
+  for a weekend-spanning Monday→Sunday week (7 days, not 6 and not 5), a
+  single-day range, an inverted range shown as no duration and refused on
+  submit, missing type, missing reason, a 30-day request refused against a
+  14-day balance with no row and no confirmation, a fitting 7-day request
+  (balance 14 → 7, captured request id), the reload, and a cancellation that
+  restores 14 and still reads cancelled after a second reload — with the
+  pre-existing approved request untouched throughout. Live HR portal run still
+  needs auth.
 
 ### B20 — Survey / feedback submission — P3
 - **App**: survey web
@@ -262,6 +346,16 @@ scenarios, not assertions.
 - [x] Attribute fields for `extract list` (`@attr`, `@sel@attr`, `[data-x]`) — a task's due date is an attribute, not text.
 - [x] ARIA checkbox support for `check`/`uncheck` (`role="checkbox"` + `aria-checked`).
 - [x] Step-output capture + `${var}` substitution (`"capture": {"name": "items.0.q4"}`), plus `${VAR}` expansion in expectation strings — the prerequisite for any scenario that aggregates across steps (B14).
+- [x] `reload` over `--cdp` (`cdp.Reload`: Page.reload, then wait for
+  `Page.loadEventFired`). Previously "not supported over --cdp yet", which
+  blocked every persistence assertion — a benchmark can only prove state was
+  persisted by destroying the page's memory first. Deliberately Page.reload and
+  not a re-navigate of the same URL, which can be served as a same-document
+  navigation and leave the old JS state alive. Pinned by
+  `internal/cdp/nav_reload_test.go` (verb + wait).
+- [x] Captures expand inside expectations (`stdoutContains`, `stdoutNotContains`,
+  `jsonPath.equals`), so a scenario can assert that a record opened on the id it
+  just captured (B17).
 
 ## Running the benchmark
 
@@ -307,8 +401,11 @@ The harness is `htrcli bench run <scenario-file>`. A scenario file is JSON
   re-scanned (a value containing `${...}` passes through literally), a capture
   shadows an environment variable of the same name, and a path that does not
   resolve FAILS the step rather than seeding later steps with an empty string.
-  Without this, a task that carries a fact from one page into another (B14)
-  could only be faked with hard-coded text.
+  Captures expand inside EXPECTATION strings too (`stdoutContains`,
+  `stdoutNotContains`, `jsonPath.equals`), so a scenario can assert that a
+  record opened on the id it just captured (B17). Without this, a task that
+  carries a fact from one page into another (B14) could only be faked with
+  hard-coded text.
 
 Verdicts: PASS (all steps met their expectations), PARTIAL (only optional
 steps failed), FAIL (a required step failed), NOT_RUN (skipped).
@@ -340,6 +437,10 @@ a datepicker + guest combobox, a contenteditable doc surface, a cell grid).
 | S14 | `scenarios/s14-crm-fixture.json` | B11 filtered contact search (`wait --gone` + `clear`), phone/note/tag-chip edit, save + reopen persistence, activity log attribution |
 | S15 | `scenarios/s15-messaging-fixture.json` | B12 react (state survives re-render), contenteditable send via Enter, DM post via the Send button, search with `--gone`, channel isolation both ways |
 | S16 | `scenarios/s16-research-fixture.json` | B14 capture two pages' figures + opaque refs into `${var}`s, compose a sourced summary, reject unsourced saves, `stdoutNotContains` the wrong column |
+| S17 | `scenarios/s17-thread-replies.json` | B12a reply into a thread from a second contenteditable, per-parent counts (m1=0 vs m2=2), channel history untouched (`count` + `stdoutNotContains`), count survives a channel round trip, empty thread via `:empty` |
+| S18 | `scenarios/s18-ticket-fixture.json` | B17 create with two-stage validation + attachment, capture the generated id and reuse it as a selector, refuse Resolve-without-assignee, update status+assignee, comment, seeded tickets untouched |
+| S19 | `scenarios/s19-leave-fixture.json` | B19 inclusive weekend-spanning day count (7, not 6 or 5), live duration, inverted range refused, over-balance refused with nothing written, balance 14 → 7 → 14 across a request and a cancellation, both proven by `reload` |
+| S20 | `scenarios/s20-social-fixture.json` | B15 hard 280 cap proven by an ACCEPTED 280-char post and refused 281/300, live counter, fixed demo clock making past/now/future deterministic, scheduled vs published states surviving `reload`, reschedule in place without duplication |
 
 ```bash
 make bench-smoke      # S01
@@ -351,8 +452,11 @@ make bench-expense    # S11
 make bench-files      # S12
 make bench-mail       # S13
 make bench-crm        # S14
-make bench-messaging  # S15
+make bench-messaging  # S15 + S17
 make bench-research   # S16
+make bench-tickets    # S18
+make bench-leave      # S19
+make bench-social     # S20
 ```
 
 Both need a Chrome on the CDP port (9555 by default in

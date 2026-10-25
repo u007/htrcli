@@ -108,6 +108,7 @@ func runBenchScenario(s BenchScenario, run benchRunner) BenchScenarioResult {
 	for i, step := range s.Steps {
 		prepared := step
 		prepared.Argv = substituteCaptures(step.Argv, caps)
+		prepared.Expect = substituteExpectCaptures(step.Expect, caps)
 		sr := run(prepared)
 		sr.Index = i + 1
 		sr.Note = step.Note
@@ -183,6 +184,29 @@ func substituteCaptures(argv []string, caps map[string]string) []string {
 		})
 	}
 	return out
+}
+
+// substituteExpectCaptures replaces ${name} with a captured value inside the
+// expectation strings, mirroring substituteCaptures for argv.
+//
+// Without this a scenario could use a captured value in a selector but not in
+// the assertion that reads the result back — the natural cross-check
+// ("the detail view opened on the id I just captured") would be unwritable.
+// Environment expansion still runs later, so an unresolved name keeps its
+// literal form and fails the expectation loudly.
+func substituteExpectCaptures(expect *BenchExpect, caps map[string]string) *BenchExpect {
+	if expect == nil || len(caps) == 0 {
+		return expect
+	}
+	out := *expect
+	out.StdoutContains = substituteCaptures([]string{expect.StdoutContains}, caps)[0]
+	out.StdoutNotContains = substituteCaptures([]string{expect.StdoutNotContains}, caps)[0]
+	if expect.JSONPath != nil {
+		path := *expect.JSONPath
+		path.Equals = substituteCaptures([]string{expect.JSONPath.Equals}, caps)[0]
+		out.JSONPath = &path
+	}
+	return &out
 }
 
 // applyCaptureSpec pulls values out of a step's stdout.

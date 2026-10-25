@@ -374,6 +374,25 @@ func runOpenCDP(url string) error {
 	return nil
 }
 
+// runReloadCDP mirrors runReload over the CDP transport.
+func runReloadCDP() error {
+	s, _, err := cdpSession()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	if err := cdp.Reload(s, timeout); err != nil {
+		return err
+	}
+	if output.JSONOutput {
+		output.PrintJSON(map[string]any{"success": true})
+		return nil
+	}
+	fmt.Println("Reloaded (cdp)")
+	return nil
+}
+
 // runTabsListCDP lists CDP page targets (no Active column — CDP has no
 // reliable notion of "active").
 func runTabsListCDP() error {

@@ -1,0 +1,455 @@
+{
+	"scenarios": [
+		{
+			"id": "S18",
+			"ref": "B17",
+			"app": "Helpdesk fixture (local)",
+			"goal": "Create a ticket with an attachment, capture its generated id, then use that captured id to reopen it, change status and assignee, and add a comment — without touching the pre-existing tickets.",
+			"steps": [
+				{
+					"note": "open the helpdesk fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_TICKET}"],
+					"expect": { "exit": 0, "stdoutContains": "Navigated" }
+				},
+				{
+					"note": "wait for the ticket table",
+					"argv": [
+						"wait",
+						"--selector",
+						"#ticket-list .ticket",
+						"--timeout",
+						"10000"
+					],
+					"expect": { "exit": 0 },
+					"retry": 2
+				},
+				{
+					"note": "two tickets already exist",
+					"argv": [
+						"extract",
+						"list",
+						"#ticket-list .ticket",
+						"--fields",
+						"id:@data-ticket-id,status:@data-status,assignee:@data-assignee"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "2" }
+					}
+				},
+				{
+					"note": "the newest seeded ticket is open and unassigned",
+					"argv": [
+						"--json",
+						"attr",
+						"#ticket-list .ticket[data-ticket-id='TKT-1041']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "Waiting" }
+					}
+				},
+				{
+					"note": "open the new-ticket form",
+					"argv": ["click", "#new-ticket"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "submitting an empty form is rejected",
+					"argv": ["click", "#t-submit"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the rejection names the missing field",
+					"argv": [
+						"wait",
+						"--selector",
+						"#t-error:not([hidden])",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "and it says which one",
+					"argv": ["--json", "text", "#t-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "Subject is required" }
+					}
+				},
+				{
+					"note": "fill the subject only",
+					"argv": ["fill", "#t-subject", "Laptop overheats during video calls"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the second required field is caught separately",
+					"argv": ["click", "#t-submit"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the validator moved on to the description",
+					"argv": ["--json", "text", "#t-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "Description is required" }
+					}
+				},
+				{
+					"note": "describe the problem",
+					"argv": [
+						"fill",
+						"#t-body",
+						"Fan spins up after 5 minutes of a call and the machine throttles."
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "pick the category by option value",
+					"argv": ["select", "#t-category", "software"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "raise the priority",
+					"argv": ["select", "#t-priority", "high"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "attach a file (no OS file picker)",
+					"argv": ["upload", "#t-attachment", "${BENCH_FIXTURE_REPORT}"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the form echoes the chosen filename",
+					"argv": ["--json", "text", "#t-attachment-name"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "report.txt" }
+					}
+				},
+				{
+					"note": "submit the ticket",
+					"argv": ["click", "#t-submit"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the confirmation names the generated id",
+					"argv": [
+						"wait",
+						"--selector",
+						"#confirmation:not([hidden])",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "capture the generated ticket id for every later selector",
+					"argv": ["--json", "text", "#confirmation-id"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "exists": true }
+					},
+					"capture": { "ticket_id": "data" }
+				},
+				{
+					"note": "the new row is findable BY THE CAPTURED ID — capture used as a selector",
+					"argv": [
+						"wait",
+						"--selector",
+						"#ticket-list .ticket[data-ticket-id='${ticket_id}']",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the row carries the submitted priority",
+					"argv": [
+						"--json",
+						"attr",
+						"#ticket-list .ticket[data-ticket-id='${ticket_id}']",
+						"data-priority"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "high" }
+					}
+				},
+				{
+					"note": "and starts Open, unassigned, with no comments",
+					"argv": [
+						"--json",
+						"attr",
+						"#ticket-list .ticket[data-ticket-id='${ticket_id}']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "Open" }
+					}
+				},
+				{
+					"note": "no comments yet",
+					"argv": [
+						"--json",
+						"attr",
+						"#ticket-list .ticket[data-ticket-id='${ticket_id}']",
+						"data-comments"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "0" } }
+				},
+				{
+					"note": "the detail view opened on the captured id",
+					"argv": ["--json", "attr", "#detail", "data-ticket-id"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "${ticket_id}" }
+					}
+				},
+				{
+					"note": "the detail shows the captured id in its heading",
+					"argv": ["--json", "text", "#detail-id"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "${ticket_id}" }
+					}
+				},
+				{
+					"note": "the subject came through verbatim",
+					"argv": ["--json", "text", "#detail-subject"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Laptop overheats during video calls"
+						}
+					}
+				},
+				{
+					"note": "the attachment was recorded on the ticket, not just in the form",
+					"argv": ["--json", "text", "#detail-attachment-name"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "report.txt" }
+					}
+				},
+				{
+					"note": "resolving without an assignee is refused",
+					"argv": ["select", "#detail-status", "Resolved"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "try to save the invalid update",
+					"argv": ["click", "#save-changes"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the update is rejected with a reason",
+					"argv": ["--json", "text", "#detail-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Resolve needs an assignee"
+						}
+					}
+				},
+				{
+					"note": "go back to the list — this re-renders FROM THE MODEL, so a rejected save cannot hide",
+					"argv": ["click", "#back"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the rejected status never reached the model",
+					"argv": [
+						"--json",
+						"attr",
+						"#ticket-list .ticket[data-ticket-id='${ticket_id}']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "Open" }
+					}
+				},
+				{
+					"note": "reopen the SAME ticket by its captured id",
+					"argv": [
+						"click",
+						"#ticket-list .ticket[data-ticket-id='${ticket_id}']"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "assign it",
+					"argv": ["select", "#detail-assignee", "bob"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "and move it to in-progress",
+					"argv": ["select", "#detail-status", "In progress"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "save the update",
+					"argv": ["click", "#save-changes"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the error cleared on a valid save",
+					"argv": [
+						"wait",
+						"--selector",
+						"#detail-error[hidden]",
+						"--timeout",
+						"5000"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the row now reports the new status",
+					"argv": [
+						"--json",
+						"attr",
+						"#ticket-list .ticket[data-ticket-id='${ticket_id}']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "In progress" }
+					}
+				},
+				{
+					"note": "and the assignee",
+					"argv": [
+						"--json",
+						"attr",
+						"#ticket-list .ticket[data-ticket-id='${ticket_id}']",
+						"data-assignee"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "bob" }
+					}
+				},
+				{
+					"note": "add a comment from the detail view",
+					"argv": [
+						"fill",
+						"#comment-box",
+						"Swapped the thermal paste, monitoring for a week"
+					],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "post it",
+					"argv": ["click", "#add-comment"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the comment is listed once",
+					"argv": [
+						"extract",
+						"list",
+						"#comments .comment",
+						"--fields",
+						"author:@data-author,body:.body"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "1" }
+					}
+				},
+				{
+					"note": "with the exact text and author",
+					"argv": [
+						"extract",
+						"list",
+						"#comments .comment",
+						"--fields",
+						"author:@data-author,body:.body"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.0.body",
+							"equals": "Swapped the thermal paste, monitoring for a week"
+						}
+					}
+				},
+				{
+					"note": "the row's comment count moved 0 -> 1",
+					"argv": [
+						"--json",
+						"attr",
+						"#ticket-list .ticket[data-ticket-id='${ticket_id}']",
+						"data-comments"
+					],
+					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "1" } }
+				},
+				{
+					"note": "back to the list",
+					"argv": ["click", "#back"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "the list grew from two tickets to three",
+					"argv": [
+						"extract",
+						"list",
+						"#ticket-list .ticket",
+						"--fields",
+						"id:@data-ticket-id,status:@data-status,assignee:@data-assignee,comments:@data-comments"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "count", "equals": "3" }
+					}
+				},
+				{
+					"note": "the first seeded ticket was never touched",
+					"argv": [
+						"--json",
+						"attr",
+						"#ticket-list .ticket[data-ticket-id='TKT-1040']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "Open" }
+					}
+				},
+				{
+					"note": "nor was the second, and it kept its own assignee",
+					"argv": [
+						"--json",
+						"attr",
+						"#ticket-list .ticket[data-ticket-id='TKT-1041']",
+						"data-assignee"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "alice" }
+					}
+				},
+				{
+					"note": "the new ticket is first in the list (created tickets sort to the top)",
+					"argv": [
+						"extract",
+						"list",
+						"#ticket-list .ticket",
+						"--fields",
+						"id:@data-ticket-id"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "items.0.id", "equals": "${ticket_id}" }
+					}
+				}
+			]
+		}
+	]
+}
