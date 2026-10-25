@@ -277,7 +277,7 @@
     if (!text) return;
     counter += 1;
     if (!threads[openThread]) threads[openThread] = [];
-    threads["m2"].push({
+    threads[openThread].push({
       id: `m${counter}`,
       author: "you",
       ts: `2026-03-02T09:${String(3 + counter).padStart(2, "0")}:00Z`,

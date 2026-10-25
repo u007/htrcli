@@ -65,7 +65,10 @@
 				{
 					"note": "the thread panel is bound to m2, not to the channel",
 					"argv": ["--json", "attr", "#thread-panel", "data-parent"],
-					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "m2" } }
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "m2" }
+					}
 				},
 				{
 					"note": "the panel names the parent message it will reply to",
@@ -111,11 +114,7 @@
 				},
 				{
 					"note": "type a reply into the THREAD composer (a second contenteditable on the page)",
-					"argv": [
-						"fill",
-						"#thread-input",
-						"Numbers reconcile — approving"
-					],
+					"argv": ["fill", "#thread-input", "Numbers reconcile — approving"],
 					"expect": { "exit": 0 }
 				},
 				{
@@ -278,7 +277,10 @@
 				{
 					"note": "the panel rebound to m1",
 					"argv": ["--json", "attr", "#thread-panel", "data-parent"],
-					"expect": { "exit": 0, "jsonPath": { "path": "data", "equals": "m1" } }
+					"expect": {
+						"exit": 0,
+						"jsonPath": { "path": "data", "equals": "m1" }
+					}
 				},
 				{
 					"note": "m1's thread starts empty (extract list errors on zero matches by design, so emptiness is asserted with :empty)",
