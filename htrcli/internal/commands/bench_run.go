@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -176,11 +177,9 @@ func substituteCaptures(argv []string, caps map[string]string) []string {
 	}
 	out := make([]string, len(argv))
 	for i, arg := range argv {
-		out[i] = os.Expand(arg, func(name string) string {
-			if v, ok := caps[name]; ok {
-				return v
-			}
-			return "${" + name + "}"
+		out[i] = expandBenchRef(arg, func(name string) (string, bool) {
+			v, ok := caps[name]
+			return v, ok
 		})
 	}
 	return out
@@ -253,14 +252,43 @@ func benchArgv(step BenchStep) []string {
 func expandBenchVars(argv []string) []string {
 	out := make([]string, len(argv))
 	for i, a := range argv {
-		out[i] = os.Expand(a, func(name string) string {
-			if v, ok := os.LookupEnv(name); ok {
-				return v
-			}
-			return "${" + name + "}"
-		})
+		out[i] = expandBenchRef(a, os.LookupEnv)
 	}
 	return out
+}
+
+// benchRefPattern matches a ${name} or $name reference whose name is a
+// shell-style identifier: a letter or underscore, then letters, digits or
+// underscores.
+//
+// The name rule is load-bearing, not cosmetic. os.Expand reads ANY run of
+// alphanumerics after a "$" as a variable, so a currency or template string
+// such as "$4,760.50" became "${4},760.50" and "$520.50" became "${5}20.50" as
+// soon as a capture map was non-empty — the expected value silently changed and
+// the step failed on data that was never wrong. Money, prices and percent
+// strings are ordinary benchmark data, so a "$" that cannot start an identifier
+// must stay literal.
+var benchRefPattern = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}|\$[A-Za-z_][A-Za-z0-9_]*`)
+
+// expandBenchRef replaces ${name} and $name using lookup, leaving every other
+// "$" untouched. An unknown name keeps its ORIGINAL form (braced or bare) so a
+// typo fails as an obvious unmatched value instead of being rewritten.
+func expandBenchRef(input string, lookup func(string) (string, bool)) string {
+	if !strings.ContainsRune(input, '$') {
+		return input
+	}
+	return benchRefPattern.ReplaceAllStringFunc(input, func(match string) string {
+		var name string
+		if strings.HasPrefix(match, "${") {
+			name = match[2 : len(match)-1]
+		} else {
+			name = match[1:]
+		}
+		if v, ok := lookup(name); ok {
+			return v
+		}
+		return match
+	})
 }
 
 // benchStepRunnerFor returns the runner that executes a step over the given

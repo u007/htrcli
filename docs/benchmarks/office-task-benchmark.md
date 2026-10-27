@@ -297,6 +297,35 @@ scenarios, not assertions.
 - **Goal**: Read balance and recent transactions; no writes.
 - **Pass/fail**: balance + ≥1 transaction captured.
 - **Safety**: read-only; never initiate transfers.
+- **Likely gaps**: the hard part is asserting a NEGATIVE. "No write happened" is
+  not provable from the absence of a confirmation — an unreachable or misspelled
+  selector is absent too, and passes. The page therefore has to record its own
+  READS (a live access log is the positive control) while the write path stays
+  present and one click away but unused, and the log must distinguish the two so
+  a `transfer` entry would be visible if one occurred. Two more traps: the
+  CURRENT and AVAILABLE balances are different fields (reading the wrong card
+  looks right to the number of decimals), and a period filter must change the
+  rows and the period total but never the balance. The running-balance column is
+  the reconciliation check: its last value must equal the header balance, so a
+  table that is merely present cannot pass.
+  OFFLINE PROXY verified via S22 (`fixtures/finance.html`): a fresh run clears
+  the fixture ledger first, then reads $4,820.50 (and 4820.50 via
+  `attr data-amount`, captured and reused in later expectations) with a
+  deliberately different available balance, six rows in the default period with
+  the 28 March row provably absent, the March row reappearing with a wider
+  filter and the period total moving +$520.50 → -$117.50 → +$460.50 while the
+  balance never moves, `extract table` reading headers + rows, the last running
+  balance reconciling with the header, a second account ($12,483.07) proving the
+  reads are account-scoped and its predecessor's rows gone, and then the
+  read-only half: the access log records every view/filter (so the log is
+  demonstrably live and the `tr[data-action='transfer']` selector is able to
+  match), `body[data-writes]` stays 0, the transfer panel is opened but never
+  submitted, and after a `reload` the balance, the six-row default period, the
+  log and the zero write count are all unchanged. htrcli needed one real fix
+  here: `os.Expand` read the `$4` in `"$4,760.50"` as a variable named `4` and
+  rewrote expectations to `"${4},760.50"` as soon as a capture existed — see
+  `expandBenchRef`. Live bank run still needs auth (read-only, and only against
+  a staging account).
 
 ### B19 — HR leave request — P3
 - **App**: HR portal
@@ -332,6 +361,40 @@ scenarios, not assertions.
 - **App**: survey web
 - **Goal**: Complete a multi-page survey and submit.
 - **Pass/fail**: completion confirmation captured.
+- **Safety**: answers only; never submit a survey on someone else's behalf.
+- **Likely gaps**: the first task where the ARTIFACT is a set of answers rather
+  than one record, so a submission that looks complete can still carry the wrong
+  ones. Three things have to be pinned separately: the wizard gates per page AND
+  per question (each unanswered question is named, and answering a later one
+  must not satisfy an earlier one), a rating matrix must record each ROW
+  independently (one listener keyed to a single row renders identically but
+  writes every row into the same field), and going Back must restore what was
+  already answered — which only holds if the step re-renders FROM THE MODEL. A
+  step that is merely hidden keeps the DOM's own values, so the restore is
+  untestable; here that mutant SURVIVED until the fixture began clearing its
+  inputs before every render. The free-text minimum belongs at the exact
+  boundary (9 refused, 10 accepted), and a submitted response must be refused a
+  second time and still carry the same id after a reload.
+  OFFLINE PROXY verified via S21 (`fixtures/survey.html`): a fresh run clears
+  the fixture's storage first (the scenario proves a submission survives a
+  reload, so it must not inherit the last run), then Next-with-nothing names
+  only the first missing question, answering work mode advances the message to
+  Team size, a Back/forward round trip proves the radio and the select were
+  restored from the model (`:checked` + `--json value`), the matrix names
+  Onboarding while Tooling is answered and stays on Onboarding after `check`
+  Tooling, the multi-select gate appears once the matrix is complete, the review
+  page reflects every answer (and BOTH tools, not the last one clicked), a
+  checkbox removal and a matrix edit made from the review are reflected without
+  disturbing neighbouring answers, 9 characters is refused at the boundary and
+  10 accepted, the capture id appears in the response list, a second submit is
+  refused with the row count unchanged, and after `reload` the same id is shown
+  with `body[data-submitted='1']` and the seeded response still reads Hybrid.
+  htrcli needed nothing new: `check` drives `<input type="radio">` through the
+  native `checked` setter, `wait` matches `:checked` and attribute selectors,
+  `select` takes the option VALUE, and `--json value` reads it back. One
+  documented GAP was worked around: "the error area is empty" is not assertable
+  (`--json` drops an empty `data`), so the successful submit is proven by the
+  confirmation and the row count instead. Live survey run still needs auth.
 
 ## Enhancement backlog (driven by gaps above)
 
@@ -421,7 +484,8 @@ defines.
 These need no authenticated session and touch NO real data: they drive the
 local fixture pages in `fixtures/`, which mimic the DOM shapes of the real
 apps (a virtualized mail list, a contenteditable reply box with a signature,
-a datepicker + guest combobox, a contenteditable doc surface, a cell grid).
+a datepicker + guest combobox, a contenteditable doc surface, a cell grid,
+a three-step survey wizard whose answers live in the page's model).
 
 | Scenario | File | Covers |
 |---|---|---|
@@ -441,6 +505,8 @@ a datepicker + guest combobox, a contenteditable doc surface, a cell grid).
 | S18 | `scenarios/s18-ticket-fixture.json` | B17 create with two-stage validation + attachment, capture the generated id and reuse it as a selector, refuse Resolve-without-assignee, update status+assignee, comment, seeded tickets untouched |
 | S19 | `scenarios/s19-leave-fixture.json` | B19 inclusive weekend-spanning day count (7, not 6 or 5), live duration, inverted range refused, over-balance refused with nothing written, balance 14 → 7 → 14 across a request and a cancellation, both proven by `reload` |
 | S20 | `scenarios/s20-social-fixture.json` | B15 hard 280 cap proven by an ACCEPTED 280-char post and refused 281/300, live counter, fixed demo clock making past/now/future deterministic, scheduled vs published states surviving `reload`, reschedule in place without duplication |
+| S21 | `scenarios/s21-survey-fixture.json` | B20 three-page survey: per-question and per-row gates, Back restoring radio/select from the model, multi-select add and remove, 10-character boundary (9 refused, 10 accepted), second submission refused, confirmation + response list survive `reload` |
+| S22 | `scenarios/s22-finance-fixture.json` | B18 read-only statement: current vs available balance, period filter moving rows/total but never the balance, running balance reconciling with the header, account-scoped reads, and a live access log proving NO write (zero transfer entries, `data-writes` 0) across a `reload` |
 
 ```bash
 make bench-smoke      # S01
@@ -457,6 +523,8 @@ make bench-research   # S16
 make bench-tickets    # S18
 make bench-leave      # S19
 make bench-social     # S20
+make bench-survey     # S21
+make bench-finance    # S22
 ```
 
 Both need a Chrome on the CDP port (9555 by default in

@@ -1,0 +1,666 @@
+{
+	"scenarios": [
+		{
+			"id": "S22",
+			"ref": "B18",
+			"app": "Finance portal statement fixture (local)",
+			"goal": "Read a balance and a statement without writing anything: the current and available balances are different fields, the period filter changes the rows and the period total but never the balance, the last running balance reconciles with the current balance, a second account proves the reads are account-scoped, and the page's own access log proves this was a READ-ONLY run — reads are recorded (so the log is demonstrably live) while no transfer entry exists and the write counter stays at 0, across a reload.",
+			"steps": [
+				{
+					"note": "open the finance statement fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_FINANCE}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "clear the fixture's ledger so every run starts from the seed (this scenario proves nothing was written, so it must not inherit a previous run's log)",
+					"argv": ["eval", "localStorage.removeItem('finance-ledger-v1')"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "reload so the fixture re-seeds from scratch",
+					"argv": ["reload"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the statement is rendered",
+					"argv": ["wait", "--selector", "#txn-rows tr", "--timeout", "10000"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the current balance as a human reads it (thousands separator + cents)",
+					"argv": ["--json", "text", "#balance"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$4,820.50"
+						}
+					}
+				},
+				{
+					"note": "the same balance as an exact number — no separators, no currency symbol, for comparison and reuse",
+					"argv": ["--json", "attr", "#balance", "data-amount"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "4820.50"
+						}
+					},
+					"capture": { "balance": "data" }
+				},
+				{
+					"note": "AVAILABLE is a different number: reading the wrong card is a real failure, not a rounding difference",
+					"argv": ["--json", "text", "#available"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$4,760.50"
+						}
+					}
+				},
+				{
+					"note": "the default statement period shows six transactions",
+					"argv": ["--json", "text", "#row-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "6"
+						}
+					}
+				},
+				{
+					"note": "and their total",
+					"argv": ["--json", "text", "#period-total"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "+$520.50"
+						}
+					}
+				},
+				{
+					"note": "the oldest visible row is 1 April: the 28 March row is OUTSIDE the period",
+					"argv": ["--json", "text", "#txn-rows tr:first-child .t-date"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-04-01"
+						}
+					}
+				},
+				{
+					"note": "and the out-of-period row is genuinely absent, not just off-screen",
+					"argv": [
+						"wait",
+						"--selector",
+						"#txn-rows tr[data-date='2026-03-28']",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the newest row is the utilities debit",
+					"argv": ["--json", "text", "#txn-rows tr:last-child .t-desc"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Utilities"
+						}
+					}
+				},
+				{
+					"note": "RECONCILIATION: the last running balance equals the current balance, so the rows and the header agree",
+					"argv": ["--json", "text", "#txn-rows tr:last-child .t-balance"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$4,820.50"
+						}
+					}
+				},
+				{
+					"note": "structured extraction of the whole table (headers + rows)",
+					"argv": ["extract", "table", "#transactions"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "rowCount",
+							"equals": "6"
+						}
+					}
+				},
+				{
+					"note": "POSITIVE CONTROL for the read-only check: the access log really records reads",
+					"argv": [
+						"wait",
+						"--selector",
+						"#audit-rows tr[data-action='view']",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "one entry so far (the initial view)",
+					"argv": ["--json", "text", "#audit-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "the write counter is zero before the task does anything",
+					"argv": [
+						"wait",
+						"--selector",
+						"body[data-writes='0']",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "narrow the period to a single day",
+					"argv": ["fill", "#from", "2026-04-04"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "same day at both ends",
+					"argv": ["fill", "#to", "2026-04-04"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "apply the filter",
+					"argv": ["click", "#apply"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "one transaction remains",
+					"argv": ["--json", "text", "#row-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "and the period total is that single debit",
+					"argv": ["--json", "text", "#period-total"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "-$117.50"
+						}
+					}
+				},
+				{
+					"note": "which is the utilities row",
+					"argv": ["--json", "text", "#txn-rows tr:last-child .t-desc"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Utilities"
+						}
+					}
+				},
+				{
+					"note": "a date filter must NOT change the balance",
+					"argv": ["--json", "attr", "#balance", "data-amount"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "4820.50"
+						}
+					}
+				},
+				{
+					"note": "the filter was logged as a read, not a write",
+					"argv": ["--json", "text", "#audit-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "widen the period to include March",
+					"argv": ["fill", "#from", "2026-03-01"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "apply the wider filter",
+					"argv": ["click", "#apply"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "seven transactions now",
+					"argv": ["--json", "text", "#row-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "7"
+						}
+					}
+				},
+				{
+					"note": "the wider total includes the March debit",
+					"argv": ["--json", "text", "#period-total"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "+$460.50"
+						}
+					}
+				},
+				{
+					"note": "the formerly-excluded row is now first",
+					"argv": ["--json", "text", "#txn-rows tr:first-child .t-date"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-03-28"
+						}
+					}
+				},
+				{
+					"note": "with its negative amount rendered in the portal's own format",
+					"argv": ["--json", "text", "#txn-rows tr:first-child .t-amount"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "-$60.00"
+						}
+					}
+				},
+				{
+					"note": "the period label tracks the filter",
+					"argv": ["--json", "text", "#period"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-03-01 – 2026-04-04"
+						}
+					}
+				},
+				{
+					"note": "the balance is STILL unchanged after widening",
+					"argv": ["--json", "attr", "#balance", "data-amount"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "${balance}"
+						}
+					}
+				},
+				{
+					"note": "two filters, two log entries",
+					"argv": ["--json", "text", "#audit-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "3"
+						}
+					}
+				},
+				{
+					"note": "switch to the savings account",
+					"argv": ["select", "#account", "savings"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the savings balance is a different number with a different thousands group",
+					"argv": ["--json", "text", "#balance"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$12,483.07"
+						}
+					}
+				},
+				{
+					"note": "savings has one transaction in its default period",
+					"argv": ["--json", "text", "#row-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "which is the interest credit",
+					"argv": ["--json", "text", "#txn-rows tr:first-child .t-desc"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Interest"
+						}
+					}
+				},
+				{
+					"note": "the everyday rows are gone, so the previous account's reads cannot leak into this one",
+					"argv": [
+						"wait",
+						"--selector",
+						"#txn-rows tr[data-date='2026-04-01']",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the account switch was logged as a read",
+					"argv": ["--json", "text", "#audit-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "4"
+						}
+					}
+				},
+				{
+					"note": "switch back to the everyday account",
+					"argv": ["select", "#account", "everyday"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the original balance is back, read from the captured value",
+					"argv": ["--json", "attr", "#balance", "data-amount"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "${balance}"
+						}
+					}
+				},
+				{
+					"note": "and its default period is restored (six rows), not the widened filter",
+					"argv": ["--json", "text", "#row-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "6"
+						}
+					}
+				},
+				{
+					"note": "one more logged read",
+					"argv": ["--json", "text", "#audit-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "5"
+						}
+					}
+				},
+				{
+					"note": "open the transfer panel — the write path EXISTS and was one click away the whole time",
+					"argv": ["click", "#transfer-toggle"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the panel is genuinely open",
+					"argv": [
+						"wait",
+						"--selector",
+						"#transfer-panel:not([hidden])",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "merely opening it is not a write: no log entry",
+					"argv": ["--json", "text", "#audit-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "5"
+						}
+					}
+				},
+				{
+					"note": "nothing was submitted, so the write counter is still zero",
+					"argv": [
+						"wait",
+						"--selector",
+						"body[data-writes='0']",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "THE READ-ONLY ASSERTION: no transfer entry exists in the log",
+					"argv": [
+						"wait",
+						"--selector",
+						"#audit-rows tr[data-action='transfer']",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "reload — the in-memory ledger is destroyed",
+					"argv": ["reload"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the statement comes back from storage",
+					"argv": ["wait", "--selector", "#txn-rows tr", "--timeout", "10000"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the balance survived the reload unchanged — nothing had written to the ledger",
+					"argv": ["--json", "attr", "#balance", "data-amount"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "${balance}"
+						}
+					}
+				},
+				{
+					"note": "the log persisted too: five prior reads plus this load's view",
+					"argv": ["--json", "text", "#audit-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "6"
+						}
+					}
+				},
+				{
+					"note": "still no write after the reload",
+					"argv": [
+						"wait",
+						"--selector",
+						"body[data-writes='0']",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and still no transfer entry",
+					"argv": [
+						"wait",
+						"--selector",
+						"#audit-rows tr[data-action='transfer']",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the default period is back after the reload",
+					"argv": ["--json", "text", "#row-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "6"
+						}
+					}
+				},
+				{
+					"note": "and the March row is excluded again",
+					"argv": [
+						"wait",
+						"--selector",
+						"#txn-rows tr[data-date='2026-03-28']",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the other account's ledger is also untouched",
+					"argv": ["select", "#account", "savings"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "savings still holds exactly its seeded balance",
+					"argv": ["--json", "text", "#balance"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$12,483.07"
+						}
+					}
+				},
+				{
+					"note": "the final log entry count: six reads plus this switch",
+					"argv": ["--json", "text", "#audit-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "7"
+						}
+					}
+				},
+				{
+					"note": "and after every read in this run, the write counter is still zero",
+					"argv": [
+						"wait",
+						"--selector",
+						"body[data-writes='0']",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "final read-only proof: no transfer was ever recorded",
+					"argv": [
+						"wait",
+						"--selector",
+						"#audit-rows tr[data-action='transfer']",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				}
+			]
+		}
+	]
+}

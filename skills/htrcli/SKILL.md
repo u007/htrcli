@@ -584,6 +584,13 @@ benchmark a task that aggregates (read a figure on page A, use it on page C):
   hard-coding the machine's path. Captures expand there too, which is how a
   scenario asserts "the record opened on the id I just captured"; a capture
   shadows an env var of the same name in both places.
+- A reference must look like a shell variable: `${name}` or `$name`, where the
+  name starts with a letter or underscore. **Every other `$` is literal**, so
+  currency and prices are safe (`"$4,760.50"` stays as written). This used to
+  go through `os.Expand`, which read the `$4` in `$4,760.50` as a variable named
+  `4` and rewrote it to `${4},760.50` — silently changing the expected value as
+  soon as any capture existed. An unknown name keeps its ORIGINAL form (`${x}`
+  stays `${x}`, `$x` stays `$x`), so a typo fails as an obvious mismatch.
 
 `jsonPath` reads the step's raw stdout, so the envelope decides the path:
 `--json text|attr|value` wraps the result as `{"data": ...}` (path `data`),
@@ -1223,6 +1230,40 @@ htrcli --cdp --json value "#start-date"    # "2026-04-06" — or "" if it was re
 `value` reads back `2026-04-06T14:30`). Its `min` attribute does NOT block a
 programmatic fill — only the page's own check will refuse an out-of-range
 time, so assert the page's error, not `:invalid` styling.
+
+### Multi-step forms and surveys (wizards)
+
+A survey or checkout wizard is several steps over one model. **There is no
+`checked` readback verb**, so assert a radio or checkbox through a selector that
+encodes the state, and read a `<select>` back with `--json value`:
+
+```bash
+htrcli --cdp check "#role-remote"                          # radio: same verb as a checkbox
+htrcli --cdp wait --selector "#role-remote:checked"        # state, not presence
+htrcli --cdp wait --selector "body[data-submitted='1']"    # any attribute the app exposes
+htrcli --cdp select "#q-team" "51-200"                     # native select: option VALUE
+htrcli --cdp --json value "#q-team"                        # "51-200"
+```
+
+Two traps, both of which make a passing test lie:
+
+- **A hidden step keeps its DOM values.** If the wizard hides step 1 rather than
+  re-rendering it, the radio is still checked after you navigate back, so
+  `:checked` proves nothing about whether the app restored its state. Read the
+  value from the summary/review surface the app builds from its model, after a
+  Back/Next round trip made with the app's own buttons:
+  `htrcli --cdp click "#back-3"`, `htrcli --cdp click "#next-2"`, then
+  `htrcli --cdp --json text "#review tr[data-answer=tooling] .v"`. A value there can
+  only come from the model. To check that a `:checked` restore assertion is
+  meaningful, break the restore on a scratch copy of the page and confirm the
+  assertion fails.
+- **A multi-select must accumulate.** Ticking two boxes and asserting the field
+  shows only one is a real failure; assert the full joined value, not a
+  substring, or a last-write-wins bug reads as correct.
+
+Validate at the exact boundary the page claims (a "10 characters minimum" needs
+9 refused **and** 10 accepted), and prove a submission is refused twice by
+clicking Submit again and re-reading the record count.
 
 ### Docs — edit and share (B05)
 

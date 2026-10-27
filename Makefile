@@ -9,6 +9,8 @@
 		bench-tickets \
 		bench-leave \
 		bench-social \
+		bench-survey \
+		bench-finance \
 		bench-research \
 		htrcli-build htrcli-build-all htrcli-build-linux htrcli-install htrcli-clean \
 		ext-build ext-dev ext-zip firefox-build firefox-install firefox-zip
@@ -118,6 +120,12 @@ bench-leave: htrcli-build
 
 bench-social: htrcli-build
 	$(call bench_run,BENCH_FIXTURE_SOCIAL="$(BENCH_FIXTURES)/social.html" BENCH_FIXTURE_REPORT="$(BENCH_FIXTURES)/report.txt",s20-social-fixture.json,social)
+
+bench-survey: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_SURVEY="$(BENCH_FIXTURES)/survey.html",s21-survey-fixture.json,survey)
+
+bench-finance: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_FINANCE="$(BENCH_FIXTURES)/finance.html",s22-finance-fixture.json,finance)
 
 bench-research: htrcli-build
 	$(call bench_run,BENCH_FIXTURE_RESEARCH_A="$(BENCH_FIXTURES)/research-source-a.html" BENCH_FIXTURE_RESEARCH_B="$(BENCH_FIXTURES)/research-source-b.html" BENCH_FIXTURE_RESEARCH_SUMMARY="$(BENCH_FIXTURES)/research-summary.html",s16-research-fixture.json,research)

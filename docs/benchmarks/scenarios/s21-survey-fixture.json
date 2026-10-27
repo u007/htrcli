@@ -1,0 +1,805 @@
+{
+	"scenarios": [
+		{
+			"id": "S21",
+			"ref": "B20",
+			"app": "Multi-page survey fixture (local)",
+			"goal": "Complete a three-page survey whose answers live in the page's model, not the DOM: required questions are gated per page and per question, a rating matrix records each ROW separately, going Back restores what was already answered, edits made from the review page are the only ones reflected, a 10-character minimum is enforced at the exact boundary, the submission is refused a second time, and both the confirmation and the previous-response list survive a reload — all on a fixed demo clock, leaving the seeded response untouched.",
+			"steps": [
+				{
+					"note": "open the survey fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_SURVEY}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "clear the fixture's storage so every run starts from the seed (this scenario proves a submission survives a reload, so it must not inherit the last run's response)",
+					"argv": ["eval", "localStorage.removeItem('survey-responses-v1')"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "reload so the fixture re-seeds from scratch",
+					"argv": ["reload"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "page 1 is the landing page",
+					"argv": ["wait", "--selector", "#page-1", "--timeout", "10000"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the progress label starts at page 1",
+					"argv": ["--json", "text", "#progress"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Page 1 of 3"
+						}
+					}
+				},
+				{
+					"note": "this page load does NOT know about a submission",
+					"argv": [
+						"wait",
+						"--selector",
+						"body[data-submitted='0']",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "exactly one seeded previous response",
+					"argv": ["extract", "list", "#responses tbody tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "Next with nothing answered is refused by the form, not by a disabled button",
+					"argv": ["click", "#next-1"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the error names the FIRST missing question only (work mode, not team size)",
+					"argv": ["--json", "text", "#survey-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Please answer: How do you mostly work?"
+						}
+					}
+				},
+				{
+					"note": "answer the work-mode radio",
+					"argv": ["check", "#role-remote"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "a radio is a checkbox to htrcli: the checked state is observable",
+					"argv": [
+						"wait",
+						"--selector",
+						"#role-remote:checked",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "retry Next now that work mode is answered",
+					"argv": ["click", "#next-1"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the gate moved on to the NEXT missing question instead of repeating the first",
+					"argv": ["--json", "text", "#survey-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Please answer: Team size"
+						}
+					}
+				},
+				{
+					"note": "choose a team size by option VALUE (a native select)",
+					"argv": ["select", "#q-team", "51-200"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "page 1 is now complete",
+					"argv": ["click", "#next-1"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "we are on page 2",
+					"argv": ["--json", "text", "#progress"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Page 2 of 3"
+						}
+					}
+				},
+				{
+					"note": "page 1 is actually hidden, not merely scrolled past",
+					"argv": [
+						"wait",
+						"--selector",
+						"#page-1[hidden]",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "page 2 is the visible one",
+					"argv": [
+						"wait",
+						"--selector",
+						"#page-2:not([hidden])",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "go BACK to page 1",
+					"argv": ["click", "#back-2"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "navigation really went back",
+					"argv": ["--json", "text", "#progress"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Page 1 of 3"
+						}
+					}
+				},
+				{
+					"note": "the radio answered before leaving is still checked (restored from the model)",
+					"argv": [
+						"wait",
+						"--selector",
+						"#role-remote:checked",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the select answered before leaving still holds its value",
+					"argv": ["--json", "value", "#q-team"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "51-200"
+						}
+					}
+				},
+				{
+					"note": "forward again",
+					"argv": ["click", "#next-1"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "Next on page 2 with nothing rated",
+					"argv": ["click", "#next-2"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the matrix gate names the first unrated row",
+					"argv": ["--json", "text", "#survey-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Please rate: Onboarding"
+						}
+					}
+				},
+				{
+					"note": "rate ONE row (Tooling = Agree)",
+					"argv": ["check", "#tooling-agree"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "retry with only the second row answered",
+					"argv": ["click", "#next-2"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "answering Tooling did NOT satisfy Onboarding: the rows are tracked separately",
+					"argv": ["--json", "text", "#survey-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Please rate: Onboarding"
+						}
+					}
+				},
+				{
+					"note": "rate the first row (Onboarding = Neutral)",
+					"argv": ["check", "#onboarding-neutral"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "rate the third row (Communication = Disagree)",
+					"argv": ["check", "#communication-disagree"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "retry with the whole matrix rated",
+					"argv": ["click", "#next-2"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the gate has moved past the matrix and now names the unanswered multi-select",
+					"argv": ["--json", "text", "#survey-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Please answer: Which tools do you use daily?"
+						}
+					}
+				},
+				{
+					"note": "select Slack",
+					"argv": ["check", "#tool-slack"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and Excel as well (a multi-select must ACCUMULATE)",
+					"argv": ["check", "#tool-excel"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "page 2 is complete",
+					"argv": ["click", "#next-2"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the review page is shown",
+					"argv": ["--json", "text", "#progress"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Page 3 of 3"
+						}
+					}
+				},
+				{
+					"note": "review: the page-1 radio answer",
+					"argv": ["--json", "text", "#review tr[data-answer=role] .v"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Remote"
+						}
+					}
+				},
+				{
+					"note": "review: the page-1 select answer",
+					"argv": ["--json", "text", "#review tr[data-answer=team] .v"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "51-200 people"
+						}
+					}
+				},
+				{
+					"note": "review: matrix row 1",
+					"argv": ["--json", "text", "#review tr[data-answer=onboarding] .v"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Neutral"
+						}
+					}
+				},
+				{
+					"note": "review: matrix row 2",
+					"argv": ["--json", "text", "#review tr[data-answer=tooling] .v"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Agree"
+						}
+					}
+				},
+				{
+					"note": "review: matrix row 3",
+					"argv": [
+						"--json",
+						"text",
+						"#review tr[data-answer=communication] .v"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Disagree"
+						}
+					}
+				},
+				{
+					"note": "review: BOTH tools were recorded, not just the last one clicked",
+					"argv": ["--json", "text", "#review tr[data-answer=tools] .v"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Excel, Slack"
+						}
+					}
+				},
+				{
+					"note": "go back to page 2 from the review",
+					"argv": ["click", "#back-3"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the matrix radio chosen before is still checked",
+					"argv": [
+						"wait",
+						"--selector",
+						"#tooling-agree:checked",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the other matrix rows are restored from the model too (Onboarding = Neutral)",
+					"argv": [
+						"wait",
+						"--selector",
+						"#onboarding-neutral:checked",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and Communication = Disagree",
+					"argv": [
+						"wait",
+						"--selector",
+						"#communication-disagree:checked",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the multi-select restores every box, not only the last one ticked (Slack)",
+					"argv": [
+						"wait",
+						"--selector",
+						"#tool-slack:checked",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and Excel as well",
+					"argv": [
+						"wait",
+						"--selector",
+						"#tool-excel:checked",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "remove Excel from the multi-select",
+					"argv": ["uncheck", "#tool-excel"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "back to the review",
+					"argv": ["click", "#next-2"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "review: removing a checkbox is recorded (only Slack is left)",
+					"argv": ["--json", "text", "#review tr[data-answer=tools] .v"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Slack"
+						}
+					}
+				},
+				{
+					"note": "review: the tools edit left the matrix alone",
+					"argv": ["--json", "text", "#review tr[data-answer=tooling] .v"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Agree"
+						}
+					}
+				},
+				{
+					"note": "back to page 2 once more",
+					"argv": ["click", "#back-3"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "change one matrix row (Tooling = Disagree)",
+					"argv": ["check", "#tooling-disagree"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and put Excel back",
+					"argv": ["check", "#tool-excel"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "back to the review",
+					"argv": ["click", "#next-2"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "review: the EDITED rating replaced the old one",
+					"argv": ["--json", "text", "#review tr[data-answer=tooling] .v"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Disagree"
+						}
+					}
+				},
+				{
+					"note": "review: both tools are back",
+					"argv": ["--json", "text", "#review tr[data-answer=tools] .v"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Excel, Slack"
+						}
+					}
+				},
+				{
+					"note": "review: the untouched matrix row survived every navigation",
+					"argv": ["--json", "text", "#review tr[data-answer=onboarding] .v"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Neutral"
+						}
+					}
+				},
+				{
+					"note": "review: so did the page-1 answer",
+					"argv": ["--json", "text", "#review tr[data-answer=role] .v"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Remote"
+						}
+					}
+				},
+				{
+					"note": "submit with no comment",
+					"argv": ["click", "#submit"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the free-text minimum is enforced",
+					"argv": ["--json", "text", "#survey-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Please tell us a little more (at least 10 characters)."
+						}
+					}
+				},
+				{
+					"note": "nine characters is one short",
+					"argv": ["fill", "#q-comments", "Very good"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "submit nine characters",
+					"argv": ["click", "#submit"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "still refused — the boundary is inclusive of exactly 10, not 9",
+					"argv": ["--json", "text", "#survey-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Please tell us a little more (at least 10 characters)."
+						}
+					}
+				},
+				{
+					"note": "exactly ten characters",
+					"argv": ["fill", "#q-comments", "Very good."],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "submit at the boundary",
+					"argv": ["click", "#submit"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the confirmation banner appears",
+					"argv": [
+						"wait",
+						"--selector",
+						"#confirmation.visible",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "capture the generated response id for the later selectors and expectations",
+					"argv": ["--json", "text", "#confirmation-id"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"exists": true
+						}
+					},
+					"capture": { "response_id": "data" }
+				},
+				{
+					"note": "the submission is stamped with the fixture's fixed clock, not the machine's date",
+					"argv": ["--json", "text", "#confirmation-at"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2026-04-02 10:00"
+						}
+					}
+				},
+				{
+					"note": "the new response is findable BY THE CAPTURED ID",
+					"argv": [
+						"wait",
+						"--selector",
+						"#responses tr[data-response-id='${response_id}']",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the seeded response plus the new one",
+					"argv": ["extract", "list", "#responses tbody tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "submit AGAIN on the same page load",
+					"argv": ["click", "#submit"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "a second submission is refused",
+					"argv": ["--json", "text", "#survey-error"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "This survey has already been submitted."
+						}
+					}
+				},
+				{
+					"note": "and it did not allocate a second response",
+					"argv": ["extract", "list", "#responses tbody tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "reload — the in-memory answers and the confirmation DOM are destroyed",
+					"argv": ["reload"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "this page load knows a submission exists",
+					"argv": [
+						"wait",
+						"--selector",
+						"body[data-submitted='1']",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the SAME response id is shown after the reload (persisted, not regenerated)",
+					"argv": ["--json", "text", "#confirmation-id"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "${response_id}"
+						}
+					}
+				},
+				{
+					"note": "the response list still holds exactly two rows",
+					"argv": ["extract", "list", "#responses tbody tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "the seeded response was never rewritten",
+					"argv": [
+						"wait",
+						"--selector",
+						"#responses tr[data-response-id='SUR-5001']",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and it still reads Hybrid",
+					"argv": [
+						"--json",
+						"text",
+						"#responses tr[data-response-id='SUR-5001'] .r-role"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Hybrid"
+						}
+					}
+				}
+			]
+		}
+	]
+}

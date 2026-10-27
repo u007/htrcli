@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Multi-page survey with required questions (local, no real data)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; max-width: 780px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 18px 0 8px; }
+  .sub { color: #666; font-size: 12px; margin: 0 0 14px; }
+  fieldset { border: 1px solid #ddd; padding: 8px 12px; margin: 0 0 12px; }
+  legend { font-size: 13px; font-weight: bold; }
+  label { font-size: 13px; }
+  fieldset label { display: block; padding: 2px 0; }
+  .row { margin: 8px 0; }
+  .row > label { display: inline-block; width: 110px; }
+  input, select, textarea { font-size: 13px; padding: 4px; box-sizing: border-box; }
+  textarea { width: 100%; }
+  button { padding: 6px 13px; font-size: 13px; cursor: pointer; margin-right: 6px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid #eee; font-size: 13px; }
+  #matrix th:first-child, #matrix td:first-child { width: 160px; }
+  #matrix td { text-align: center; }
+  #progress { font-weight: bold; }
+  .err { display: none; color: #c00; font-size: 13px; margin: 10px 0; padding: 6px 8px; background: #fff2f2; border: 1px solid #f3c0c0; }
+  .err.show { display: block; }
+  #confirmation { display: none; background: #eef4ff; border: 1px solid #b9cdf5; padding: 8px 10px; font-size: 13px; margin-bottom: 10px; }
+  #confirmation.visible { display: block; }
+  #confirmation-id { font-family: monospace; font-weight: bold; }
+  .muted { color: #666; font-size: 12px; }
+  .page[hidden] { display: none; }
+</style>
+</head>
+<body>
+  <h1>Employee pulse survey (fixture)</h1>
+  <p class="sub">Fixed demo clock: <span id="clock" data-now="2026-04-02T10:00">2 April 2026, 10:00</span>.
+    A submission is stamped with that clock, never the machine's date.</p>
+
+  <p>Progress: <span id="progress" data-page="1">Page 1 of 3</span></p>
+
+  <div id="confirmation">Thanks — response <span id="confirmation-id">—</span> recorded on
+    <span id="confirmation-at">—</span>.</div>
+
+  <div id="page-1" class="page" data-page="1">
+    <h2>1. About you</h2>
+    <fieldset>
+      <legend>How do you mostly work?</legend>
+      <label><input type="radio" id="role-office" name="q-role" value="office"> Office</label>
+      <label><input type="radio" id="role-remote" name="q-role" value="remote"> Remote</label>
+      <label><input type="radio" id="role-hybrid" name="q-role" value="hybrid"> Hybrid</label>
+      <label><input type="radio" id="role-field" name="q-role" value="field"> Field</label>
+    </fieldset>
+    <div class="row">
+      <label for="q-team">Team size</label>
+      <select id="q-team">
+        <option value="">— choose —</option>
+        <option value="1-10">1-10 people</option>
+        <option value="11-50">11-50 people</option>
+        <option value="51-200">51-200 people</option>
+        <option value="201+">201+ people</option>
+      </select>
+    </div>
+    <p><button id="next-1" type="button">Next</button></p>
+  </div>
+
+  <div id="page-2" class="page" data-page="2" hidden>
+    <h2>2. How we work</h2>
+    <table id="matrix">
+      <thead>
+        <tr><th></th><th>Disagree</th><th>Neutral</th><th>Agree</th></tr>
+      </thead>
+      <tbody>
+        <tr><th>Onboarding</th>
+          <td><input type="radio" id="onboarding-disagree" name="q-onboarding" value="disagree"></td>
+          <td><input type="radio" id="onboarding-neutral" name="q-onboarding" value="neutral"></td>
+          <td><input type="radio" id="onboarding-agree" name="q-onboarding" value="agree"></td>
+        </tr>
+        <tr><th>Tooling</th>
+          <td><input type="radio" id="tooling-disagree" name="q-tooling" value="disagree"></td>
+          <td><input type="radio" id="tooling-neutral" name="q-tooling" value="neutral"></td>
+          <td><input type="radio" id="tooling-agree" name="q-tooling" value="agree"></td>
+        </tr>
+        <tr><th>Communication</th>
+          <td><input type="radio" id="communication-disagree" name="q-communication" value="disagree"></td>
+          <td><input type="radio" id="communication-neutral" name="q-communication" value="neutral"></td>
+          <td><input type="radio" id="communication-agree" name="q-communication" value="agree"></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <fieldset>
+      <legend>Which tools do you use daily? (choose all that apply)</legend>
+      <label><input type="checkbox" id="tool-slack" name="q-tools" value="slack"> Slack</label>
+      <label><input type="checkbox" id="tool-jira" name="q-tools" value="jira"> Jira</label>
+      <label><input type="checkbox" id="tool-figma" name="q-tools" value="figma"> Figma</label>
+      <label><input type="checkbox" id="tool-excel" name="q-tools" value="excel"> Excel</label>
+    </fieldset>
+
+    <p>
+      <button id="back-2" type="button">Back</button>
+      <button id="next-2" type="button">Next</button>
+    </p>
+  </div>
+
+  <div id="page-3" class="page" data-page="3" hidden>
+    <h2>3. Review and submit</h2>
+    <table id="review">
+      <tbody>
+        <tr data-answer="role"><th>How do you mostly work?</th><td class="v">—</td></tr>
+        <tr data-answer="team"><th>Team size</th><td class="v">—</td></tr>
+        <tr data-answer="onboarding"><th>Onboarding</th><td class="v">—</td></tr>
+        <tr data-answer="tooling"><th>Tooling</th><td class="v">—</td></tr>
+        <tr data-answer="communication"><th>Communication</th><td class="v">—</td></tr>
+        <tr data-answer="tools"><th>Tools used daily</th><td class="v">—</td></tr>
+      </tbody>
+    </table>
+
+    <div class="row">
+      <label for="q-comments">Anything else?</label>
+      <textarea id="q-comments" rows="3" placeholder="At least 10 characters"></textarea>
+    </div>
+
+    <p>
+      <button id="back-3" type="button">Back</button>
+      <button id="submit" type="button">Submit</button>
+    </p>
+  </div>
+
+  <div id="survey-error" class="err"></div>
+
+  <h2>Previous responses</h2>
+  <table id="responses">
+    <thead>
+      <tr><th>Response</th><th>Submitted</th><th>Work mode</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <p><button id="reset-survey" type="button">Reset survey</button></p>
+
+<script>
+  var STORAGE_KEY = "survey-responses-v1";
+  var FIXTURE_NOW = "2026-04-02T10:00";
+  var MIN_COMMENT = 10;
+
+  var ROLE_LABELS = { office: "Office", remote: "Remote", hybrid: "Hybrid", field: "Field" };
+  var TEAM_LABELS = {
+    "1-10": "1-10 people",
+    "11-50": "11-50 people",
+    "51-200": "51-200 people",
+    "201+": "201+ people",
+  };
+  var RATING_LABELS = { disagree: "Disagree", neutral: "Neutral", agree: "Agree" };
+  var TOOL_LABELS = { slack: "Slack", jira: "Jira", figma: "Figma", excel: "Excel" };
+  var MATRIX_KEYS = ["onboarding", "tooling", "communication"];
+  var MATRIX_LABELS = {
+    onboarding: "Onboarding",
+    tooling: "Tooling",
+    communication: "Communication",
+  };
+
+  // Required questions per page, checked in order: the FIRST missing one is the
+  // one named, so the order here is what the scenario asserts.
+  var PAGE1_REQUIRED = [
+    { key: "role", message: "Please answer: How do you mostly work?" },
+    { key: "team", message: "Please answer: Team size" },
+  ];
+  var PAGE2_REQUIRED = MATRIX_KEYS.map((key) => ({
+    key: key,
+    message: `Please rate: ${MATRIX_LABELS[key]}`,
+  })).concat([
+    { key: "tools", message: "Please answer: Which tools do you use daily?" },
+  ]);
+
+  // Everything the survey has recorded lives here, NOT in the DOM: each page is
+  // re-rendered from this object, so going Back and returning shows what the
+  // model holds rather than whatever the inputs happened to keep.
+  var state = load();
+  var answers = emptyAnswers();
+  // True once a submission exists for this page load; a second Submit must be
+  // refused instead of allocating a second response id.
+  var done = false;
+
+  function emptyAnswers() {
+    return {
+      role: "",
+      team: "",
+      onboarding: "",
+      tooling: "",
+      communication: "",
+      tools: [],
+      comments: "",
+    };
+  }
+
+  function seed() {
+    return {
+      next: 5002,
+      responses: [{ id: "SUR-5001", at: "2026-03-15T09:12", role: "hybrid" }],
+      submitted: null,
+    };
+  }
+
+  function load() {
+    var raw;
+    var parsed;
+    try {
+      raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        parsed = JSON.parse(raw);
+        if (
+          parsed &&
+          Array.isArray(parsed.responses) &&
+          typeof parsed.next === "number"
+        ) {
+          return parsed;
+        }
+      }
+    } catch (error) {
+      console.warn("survey fixture: ignoring unreadable storage", error);
+    }
+    return seed();
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (error) {
+      console.warn("survey fixture: could not persist", error);
+    }
+  }
+
+  function displayTime(iso) {
+    return iso.replace("T", " ");
+  }
+
+  function showError(message) {
+    var el = document.getElementById("survey-error");
+    el.textContent = message;
+    el.className = "err show";
+  }
+
+  function clearError() {
+    var el = document.getElementById("survey-error");
+    el.textContent = "";
+    el.className = "err";
+  }
+
+  // Exposed on <body> so a scenario can assert that this PAGE LOAD recognised
+  // an existing submission (the state a second Submit is refused from) instead
+  // of inferring it from the banner alone.
+  function markSubmitted(value) {
+    document.body.setAttribute("data-submitted", value);
+  }
+
+  function showConfirmation(submission) {
+    document.getElementById("confirmation-id").textContent = submission.id;
+    document.getElementById("confirmation-at").textContent = displayTime(
+      submission.at,
+    );
+    document.getElementById("confirmation").className = "visible";
+  }
+
+  function renderResponses() {
+    var body = document.querySelector("#responses tbody");
+    body.innerHTML = "";
+    state.responses.forEach((response) => {
+      var tr = document.createElement("tr");
+      tr.setAttribute("data-response-id", response.id);
+      tr.innerHTML =
+        '<td class="r-id">' +
+        response.id +
+        '</td><td class="r-when">' +
+        displayTime(response.at) +
+        '</td><td class="r-role">' +
+        (ROLE_LABELS[response.role] || "—") +
+        "</td>";
+      body.appendChild(tr);
+    });
+  }
+
+  function restorePage1() {
+    document.querySelectorAll('input[name="q-role"]').forEach((el) => {
+      el.checked = answers.role === el.value;
+    });
+    document.getElementById("q-team").value = answers.team;
+  }
+
+  function restorePage2() {
+    MATRIX_KEYS.forEach((key) => {
+      document
+        .querySelectorAll(`input[name="q-${key}"]`)
+        .forEach((el) => {
+          el.checked = answers[key] === el.value;
+        });
+    });
+    document.querySelectorAll('input[name="q-tools"]').forEach((el) => {
+      el.checked = answers.tools.indexOf(el.value) !== -1;
+    });
+  }
+
+  function reviewValue(key) {
+    if (key === "role") return ROLE_LABELS[answers.role] || "—";
+    if (key === "team") return TEAM_LABELS[answers.team] || "—";
+    if (key === "tools") {
+      if (!answers.tools.length) return "—";
+      return answers.tools
+        .map((value) => TOOL_LABELS[value] || value)
+        .join(", ");
+    }
+    return RATING_LABELS[answers[key]] || "—";
+  }
+
+  function restoreReview() {
+    document.querySelectorAll("#review tr[data-answer]").forEach((tr) => {
+      tr.querySelector(".v").textContent = reviewValue(
+        tr.getAttribute("data-answer"),
+      );
+    });
+    document.getElementById("q-comments").value = answers.comments;
+  }
+
+  // A page switch re-renders the form from `answers`, the way a framework
+  // remounts a step: inputs are cleared FIRST, so anything still shown after
+  // the switch came from the model rather than from a DOM node that was merely
+  // hidden. Without this, an unanswered field would keep the value the DOM
+  // happened to hold and a missing restore would look correct.
+  function resetInputs() {
+    document
+      .querySelectorAll('input[type="radio"], input[type="checkbox"]')
+      .forEach((el) => {
+        el.checked = false;
+      });
+    document.getElementById("q-team").value = "";
+    document.getElementById("q-comments").value = "";
+  }
+
+  function renderPage(page) {
+    document.querySelectorAll(".page").forEach((el) => {
+      el.hidden = el.getAttribute("data-page") !== String(page);
+    });
+    var progress = document.getElementById("progress");
+    progress.textContent = `Page ${page} of 3`;
+    progress.setAttribute("data-page", String(page));
+    resetInputs();
+    restorePage1();
+    restorePage2();
+    restoreReview();
+  }
+
+  // "" (radio, select) and [] (multi-select) both count as unanswered.
+  function isEmpty(value) {
+    return Array.isArray(value) ? value.length === 0 : !value;
+  }
+
+  function firstMissing(required) {
+    var i;
+    for (i = 0; i < required.length; i += 1) {
+      if (isEmpty(answers[required[i].key])) return required[i].message;
+    }
+    return null;
+  }
+
+  function advanceFrom(required, page) {
+    clearError();
+    var message = firstMissing(required);
+    if (message !== null) {
+      showError(message);
+      return;
+    }
+    renderPage(page);
+  }
+
+  function nextFromPage1() {
+    advanceFrom(PAGE1_REQUIRED, 2);
+  }
+
+  function nextFromPage2() {
+    advanceFrom(PAGE2_REQUIRED, 3);
+  }
+
+  function submit() {
+    clearError();
+    if (done) {
+      showError("This survey has already been submitted.");
+      return;
+    }
+    var text = answers.comments.trim();
+    if (text.length < MIN_COMMENT) {
+      showError(
+        `Please tell us a little more (at least ${MIN_COMMENT} characters).`,
+      );
+      return;
+    }
+    var submission = { id: `SUR-${state.next}`, at: FIXTURE_NOW };
+    state.next += 1;
+    state.responses.push({
+      id: submission.id,
+      at: submission.at,
+      role: answers.role,
+    });
+    state.submitted = submission;
+    save();
+    answers = emptyAnswers();
+    done = true;
+    markSubmitted("1");
+    renderResponses();
+    showConfirmation(submission);
+    document.getElementById("q-comments").value = "";
+  }
+
+  document.querySelectorAll('input[name="q-role"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      answers.role = el.value;
+    });
+  });
+
+  document.getElementById("q-team").addEventListener("change", (el) => {
+    answers.team = el.target.value;
+  });
+
+  document.querySelectorAll("#matrix input[type=radio]").forEach((el) => {
+    el.addEventListener("change", () => {
+      // One entry per ROW: the radio's name is q-<row>, so a wrong name here
+      // overwrites a different question instead of its own.
+      answers[el.name.replace("q-", "")] = el.value;
+    });
+  });
+
+  document.querySelectorAll('input[name="q-tools"]').forEach((el) => {
+    el.addEventListener("change", () => {
+      var at = answers.tools.indexOf(el.value);
+      if (el.checked && at === -1) answers.tools.push(el.value);
+      if (!el.checked && at !== -1) answers.tools.splice(at, 1);
+      answers.tools.sort();
+    });
+  });
+
+  document.getElementById("q-comments").addEventListener("input", (el) => {
+    answers.comments = el.target.value;
+  });
+
+  document.getElementById("next-1").addEventListener("click", nextFromPage1);
+  document.getElementById("back-2").addEventListener("click", () => {
+    clearError();
+    renderPage(1);
+  });
+  document.getElementById("next-2").addEventListener("click", nextFromPage2);
+  document.getElementById("back-3").addEventListener("click", () => {
+    clearError();
+    renderPage(2);
+  });
+  document.getElementById("submit").addEventListener("click", submit);
+
+  // Clears the persisted model and reloads, so the next load is a fresh survey
+  // (the seed) instead of the locked, already-submitted one.
+  function resetSurvey() {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (error) {
+      console.warn("survey fixture: could not clear storage", error);
+    }
+    location.reload();
+  }
+
+  document.getElementById("reset-survey").addEventListener("click", resetSurvey);
+
+  renderResponses();
+  if (state.submitted) {
+    done = true;
+    showConfirmation(state.submitted);
+    markSubmitted("1");
+  } else {
+    markSubmitted("0");
+  }
+  renderPage(1);
+</script>
+</body>
+</html>

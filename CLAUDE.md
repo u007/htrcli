@@ -41,7 +41,8 @@ make bench-smoke     # Run one offline benchmark scenario (also: bench-office,
                      # bench-tasks, bench-form, bench-booking, bench-expense,
                      # bench-files, bench-mail, bench-crm, bench-messaging,
                      # bench-research, bench-tickets, bench-leave,
-                     # bench-social; all need a real Chrome on the CDP port)
+                     # bench-social, bench-survey, bench-finance; all need a
+                     # real Chrome on the CDP port)
 ```
 
 ### Benchmark harness
