@@ -35,13 +35,13 @@ bun remove <package> # Remove dependency
 ## Build Commands
 
 ```bash
-bun run build    # TypeScript check + Vite production build (outputs to build/)
+bun run build    # bun check . + Vite production build (outputs to build/)
 bun run dev      # Start Vite dev server with HMR
 bun run zip      # Build and create distributable ZIP
 bun run preview  # Preview production build
 
 # Firefox (separate workspace under firefox/)
-bun run firefox:build      # tsc -p firefox/tsconfig.json + vite build
+bun run firefox:build      # bun check . + vite build
 bun run firefox:typecheck  # bun check . (lint + format)
 bun run typecheck          # bun check . (lint + format)
 bun run firefox:dev        # Vite dev server for Firefox

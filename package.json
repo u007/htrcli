@@ -18,7 +18,7 @@
 	},
 	"scripts": {
 		"dev": "vite",
-		"build": "tsc && vite build && bun run cdp-bundle:build",
+		"build": "bun check . && vite build && bun run cdp-bundle:build",
 		"cdp-bundle:build": "vite build --config vite.cdp.config.ts",
 		"preview": "vite preview",
 		"check": "biome check .",
@@ -33,7 +33,7 @@
 		"postinstall:all": "bun run scripts/postinstall.ts all",
 
 		"firefox:dev": "vite --config firefox/vite.config.ts",
-		"firefox:build": "tsc -p firefox/tsconfig.json && vite build --config firefox/vite.config.ts && vite build --config firefox/vite.content.config.ts && vite build --config firefox/vite.consoleCapture.config.ts && vite build --config firefox/vite.dialogOverride.config.ts",
+		"firefox:build": "bun check . && vite build --config firefox/vite.config.ts && vite build --config firefox/vite.content.config.ts && vite build --config firefox/vite.consoleCapture.config.ts && vite build --config firefox/vite.dialogOverride.config.ts",
 		"firefox:typecheck": "bun check .",
 		"typecheck": "bun check .",
 		"firefox:zip": "bun run firefox:build && cd firefox/build && zip -r ../htrncontrol-firefox.xpi ."

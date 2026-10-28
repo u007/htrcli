@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Extension (Chrome)
 bun install
 bun run dev          # Vite dev server with HMR
-bun run build        # tsc + Vite production build → build/
+bun run build        # bun check . + Vite production build → build/
 bun run zip          # build + create distributable ZIP
 bun run check        # Biome lint + format check
 bun run check:fix    # Auto-fix Biome issues
@@ -16,7 +16,7 @@ bun run test         # Run tests with Bun
 bun run test:watch   # Watch mode
 
 # Extension (Firefox)
-bun run firefox:build      # tsc -p firefox/tsconfig.json + Vite build → firefox/build/
+bun run firefox:build      # bun check . + Vite build → firefox/build/
 bun run firefox:typecheck  # bun check . (lint + format)
 bun run typecheck          # bun check . (lint + format)
 bun run firefox:zip        # Build + package as .xpi
