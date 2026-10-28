@@ -488,3 +488,99 @@ describe("collectAll truncation cause", () => {
 		expect(result.truncatedBy).toBe("maxItems");
 	});
 });
+
+/**
+ * happy-dom ships no `Element.checkVisibility`, so every row under test has to
+ * carry a stub. `rendered` is a value or a getter, so a row can change state
+ * between harvests.
+ */
+function setRendered(el: Element, rendered: boolean | (() => boolean)) {
+	Object.defineProperty(el, "checkVisibility", {
+		value: typeof rendered === "function" ? rendered : () => rendered,
+		configurable: true,
+	});
+}
+
+describe("collectAll — visibleOnly", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("keeps every row when the flag is off", async () => {
+		document.body.innerHTML = `<div class="row">a</div><div class="row">b</div><div class="row">c</div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		setRendered(rows[0], true);
+		setRendered(rows[1], false);
+		setRendered(rows[2], true);
+		const result = await collectAll({ selector: ".row" });
+		expect(result.elements.map((e) => e.text)).toEqual(["a", "b", "c"]);
+	});
+
+	it("drops rows checkVisibility reports hidden", async () => {
+		document.body.innerHTML = `<div class="row">a</div><div class="row">b</div><div class="row">c</div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		setRendered(rows[0], true);
+		setRendered(rows[1], false);
+		setRendered(rows[2], true);
+		const result = await collectAll(
+			{ selector: ".row" },
+			{ visibleOnly: true },
+		);
+		expect(result.elements.map((e) => e.text)).toEqual(["a", "c"]);
+	});
+
+	it("collects a row that is hidden on the first pass and rendered later", async () => {
+		// The row must not be marked as seen while it is hidden: doing so would
+		// lock it out of the pass that actually renders it.
+		document.body.innerHTML = `<div id="scroller" style="overflow-y:auto"><div id="rows"><div class="row" id="r0">a</div><div class="row" id="r1">b</div><div class="row" id="r2">c</div></div></div>`;
+		const scroller = document.getElementById("scroller");
+		const r0 = document.getElementById("r0");
+		const r1 = document.getElementById("r1");
+		const r2 = document.getElementById("r2");
+		if (!scroller || !r0 || !r1 || !r2) throw new Error("missing fixtures");
+
+		let rowZeroRendered = false;
+		setRendered(r0, () => rowZeroRendered);
+		setRendered(r1, true);
+		setRendered(r2, true);
+
+		let top = 0;
+		Object.defineProperty(scroller, "scrollHeight", {
+			value: 600,
+			configurable: true,
+		});
+		Object.defineProperty(scroller, "clientHeight", {
+			value: 200,
+			configurable: true,
+		});
+		Object.defineProperty(scroller, "scrollTop", {
+			get: () => top,
+			set: (v: number) => {
+				top = Math.max(0, Math.min(v, 400));
+				// The scroll re-renders the row into view.
+				rowZeroRendered = true;
+			},
+			configurable: true,
+		});
+
+		const result = await collectAll(
+			{ selector: ".row" },
+			{ visibleOnly: true, stepDelayMs: 0, maxSteps: 5 },
+		);
+		const texts = result.elements.map((e) => e.text);
+		expect(texts).toEqual(["b", "c", "a"]);
+		expect(new Set(texts).size).toBe(3);
+	});
+
+	it("refuses to guess when the host has no checkVisibility", async () => {
+		document.body.innerHTML = `<div class="row">a</div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		Object.defineProperty(rows[0], "checkVisibility", {
+			value: undefined,
+			configurable: true,
+		});
+		await expect(
+			collectAll({ selector: ".row" }, { visibleOnly: true }),
+		).rejects.toThrow(/visibleOnly requires Element.checkVisibility/);
+	});
+});

@@ -15,6 +15,7 @@ var (
 	collectStepDelay int
 	collectMaxItems  int
 	collectRef       bool
+	collectVisible   bool
 )
 
 var collectCmd = &cobra.Command{
@@ -29,7 +30,14 @@ sees the rows currently in the DOM, collect scrolls and accumulates them.
 Output: a JSON object with "elements" (array of element info), "steps" (scroll
 steps performed), "truncated" (true when collection stopped before the list
 ended), "truncatedBy" ("maxItems" or "maxSteps", null when not truncated) and
-"scrolled" (false when no scrollable container was found).`,
+"scrolled" (false when no scrollable container was found).
+
+With --visible, rows that are not rendered are dropped. An SPA keeps its
+previous view in the DOM (Gmail: 87 tr.zA matches for 37 conversations), so a
+collection can otherwise accumulate rows the user cannot see. A hidden row is
+not marked as seen, so it is still collected if a later pass renders it. Also
+works as a safety net with --ref: a ref to a hidden row is a ref to something
+the user cannot act on.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := checkFrameTarget(parseSelector(args[0])); err != nil {
@@ -48,7 +56,9 @@ ended), "truncatedBy" ("maxItems" or "maxSteps", null when not truncated) and
 		if collectRef {
 			options["assignRef"] = true
 		}
-
+		if collectVisible {
+			options["visibleOnly"] = true
+		}
 		if UseCDP() {
 			if err := runCollectCDP(args[0], options); err != nil {
 				return err
@@ -149,5 +159,6 @@ func init() {
 	collectCmd.Flags().IntVar(&collectStepDelay, "step-delay", 120, "Milliseconds between scroll steps")
 	collectCmd.Flags().IntVar(&collectMaxItems, "max-items", 0, "Stop after collecting N elements (0 = no limit)")
 	collectCmd.Flags().BoolVar(&collectRef, "ref", false, "mint persistent element refs for every collected row")
+	collectCmd.Flags().BoolVar(&collectVisible, "visible", false, "drop rows that are not rendered (hidden by an SPA's previous view)")
 	rootCmd.AddCommand(collectCmd)
 }

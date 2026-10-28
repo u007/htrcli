@@ -673,6 +673,7 @@
     const stepDelayMs = options.stepDelayMs ?? DEFAULT_STEP_DELAY_MS;
     const maxItems = options.maxItems ?? 0;
     const onRow = options.onRow;
+    const visibleOnly = options.visibleOnly === true;
     const seen = /* @__PURE__ */ new Map();
     const nodes = [];
     const nodeIds = /* @__PURE__ */ new WeakMap();
@@ -692,6 +693,7 @@
     const harvest = () => {
       const elements2 = findAllElements(target);
       for (const el of elements2) {
+        if (visibleOnly && !isRendered(el)) continue;
         if (maxItems > 0 && seen.size >= maxItems) {
           truncatedBy = "maxItems";
           break;
@@ -1591,6 +1593,7 @@
       maxSteps: typeof (options == null ? void 0 : options.maxSteps) === "number" ? options.maxSteps : void 0,
       stepDelayMs: typeof (options == null ? void 0 : options.stepDelayMs) === "number" ? options.stepDelayMs : void 0,
       maxItems: typeof (options == null ? void 0 : options.maxItems) === "number" ? options.maxItems : void 0,
+      visibleOnly: (options == null ? void 0 : options.visibleOnly) === true,
       // Mint each ref at HARVEST time, while the row's node is still live.
       // Minting after the loop gave every row a detached node, or (with a
       // recycling virtualizer) the same node for several different rows.

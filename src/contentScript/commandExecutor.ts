@@ -519,6 +519,7 @@ async function handleCollectAll(
 				: undefined,
 		maxItems:
 			typeof options?.maxItems === "number" ? options.maxItems : undefined,
+		visibleOnly: options?.visibleOnly === true,
 		// Mint each ref at HARVEST time, while the row's node is still live.
 		// Minting after the loop gave every row a detached node, or (with a
 		// recycling virtualizer) the same node for several different rows.

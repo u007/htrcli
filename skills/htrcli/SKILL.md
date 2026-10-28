@@ -691,6 +691,7 @@ htrcli collect <selector> --max-items 100        # Stop after N rows
 htrcli collect <selector> --max-steps 200        # Scroll-step ceiling (default 200)
 htrcli collect <selector> --step-delay 120       # ms between scroll steps (default 120)
 htrcli collect <selector> --ref      # Mint refs for every collected row, at harvest time
+htrcli collect <selector> --visible  # Drop rows that are not rendered (SPA kept the old view)
 htrcli extract table <selector>     # HTML table -> {columns, rows}
 htrcli extract list <selector>       # List of items -> {items}
 htrcli extract list <selector> --fields "name:.name,age:.age"
@@ -728,6 +729,18 @@ It reports `steps`, `truncated`, `truncatedBy`, `scrolled` and `keyStrategy`:
 cap) or `maxSteps` (the step limit, raise `--max-steps`). It is `null` when the
 list was read to its end. The caveats are printed as warnings on stderr in the
 default output, so check them before trusting a row count.
+
+Add `--visible` when the list sits on a page that keeps old rows mounted (Gmail
+does: 87 `tr.zA` matches for 37 conversations). Hidden rows are dropped at
+harvest time and are NOT marked as seen, so a row that a later scroll renders is
+still collected — the filter cannot silently lose a row:
+
+```bash
+htrcli collect "tr.zA" --visible --json
+```
+
+A host without `Element.checkVisibility` (Chrome <105, Firefox <125) makes
+`--visible` fail rather than return hidden rows, so a real browser is required.
 
 ## Tab management
 
@@ -1142,8 +1155,11 @@ by row state, which is why the fields use `||` alternatives:
 - `@<css>@<attr>` asks for a DESCENDANT's attribute
   (`date:@td.xW span@title`). The dot in the help's `@.link@href` example is the
   CSS class marker, not syntax.
-- `collect` has no `--visible` yet — it can still return hidden rows (tracked).
-  When you use `collect`, de-dupe on a stable field such as the thread id.
+- `collect` accepts `--visible` too: an SPA keeps its previous view in the
+  DOM, so a collection can accumulate rows the user cannot see (Gmail: 87
+  matches for 37 conversations). A row hidden on one pass is NOT marked as
+  seen, so it is still collected if a later scroll renders it. With `--ref` it
+  also stops you minting refs to rows that cannot be clicked.
 
 `extract list` returns `{"count": N, "items": [{sender, subject, date}]}`.
 A selector that names the ROWS (`.row`, `tr`) returns one item per match; a

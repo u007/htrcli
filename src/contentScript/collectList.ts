@@ -18,7 +18,7 @@
  */
 
 import type { RemoteElementInfo, TargetSelector } from "../types/commands";
-import { findAllElements, getElementInfo } from "./elementFinder";
+import { findAllElements, getElementInfo, isRendered } from "./elementFinder";
 
 export interface CollectOptions {
 	/** Maximum scroll steps before giving up. */
@@ -29,6 +29,16 @@ export interface CollectOptions {
 	maxItems?: number;
 	/** Emit a ref for every collected element. */
 	assignRef?: boolean;
+	/**
+	 * Drop rows that are not rendered. An SPA keeps its previous view in the DOM
+	 * (Gmail is the extreme case: 87 `tr.zA` matches for 37 conversations), so a
+	 * collection can accumulate rows the user cannot see.
+	 *
+	 * The check runs at HARVEST time, before a row is marked as seen: a row that
+	 * is hidden on one pass and visible on a later one must still be collected
+	 * once, and marking it seen first would silently drop it.
+	 */
+	visibleOnly?: boolean;
 	/**
 	 * Called for every newly collected row WHILE its node is still live and
 	 * attached. Minting a ref after the scroll loop is unsound: a virtualized
@@ -169,6 +179,7 @@ export async function collectAll(
 	const stepDelayMs = options.stepDelayMs ?? DEFAULT_STEP_DELAY_MS;
 	const maxItems = options.maxItems ?? 0;
 	const onRow = options.onRow;
+	const visibleOnly = options.visibleOnly === true;
 
 	const seen = new Map<string, RemoteElementInfo>();
 	const nodes: Element[] = [];
@@ -196,6 +207,10 @@ export async function collectAll(
 		// list whose rows are already in the DOM is fully collected by the
 		// first harvest, so a loop-level break would never bound the result.
 		for (const el of elements) {
+			// Hidden rows are skipped BEFORE the cap and before `seen`, so they
+			// neither consume the item budget nor get locked out of a later pass
+			// that renders them.
+			if (visibleOnly && !isRendered(el)) continue;
 			if (maxItems > 0 && seen.size >= maxItems) {
 				truncatedBy = "maxItems";
 				break;

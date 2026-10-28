@@ -77,7 +77,9 @@ scenarios, not assertions.
   `sender:span.yP||span.zF` alternatives), verified end-to-end over CDP against
   a probe page (3 rows with one inside `display:none`: 3 returned without the
   flag, 2 with it). The live Gmail re-check is pending an extension reload,
-  since that tab is extension transport.
+  since that tab is extension transport. The collector had the same hole and
+  now takes `--visible` as well (`collect` runs many harvests, so it could
+  accumulate stale rows mid-scroll as well as at the start).
 - **Metrics**: success, commands, wall_ms, retries, failure_mode.
 
 ### B02 — Reply to an email (Gmail) — P0
@@ -479,6 +481,12 @@ scenarios, not assertions.
 - [x] Captures expand inside expectations (`stdoutContains`, `stdoutNotContains`,
   `jsonPath.equals`), so a scenario can assert that a record opened on the id it
   just captured (B17).
+- [x] Visibility filtering for both list verbs (`extract list --visible`,
+  `collect --visible`). An SPA keeps its previous view in the DOM — live Gmail
+  answered 87 `tr.zA` matches for 37 conversations — so a list read has to drop
+  unrendered rows instead of reporting them as data. `collect` re-checks at
+  every harvest, so a row hidden on one pass and rendered on a later one is
+  still collected once.
 
 ## Running the benchmark
 
