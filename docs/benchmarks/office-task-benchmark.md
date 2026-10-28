@@ -48,10 +48,36 @@ scenarios, not assertions.
   (sender, subject, date, snippet).
 - **Start state**: logged-in inbox; query string provided.
 - **Pass/fail**: ≥1 result with sender+subject+date; no wrong-folder rows.
-- **Likely htrcli gaps**: RESOLVED — `wait` (DOM condition) and `collect`
-  (virtualized list) both exist; `extract list` turns rows into
-  sender/subject/date records. Verified against the local Gmail fixture
-  (scenario S02).
+- **Likely htrcli gaps**: PARTIALLY resolved. `wait` (DOM condition),
+  `collect` (virtualized list) and `extract list --fields` all exist and work
+  against the local fixture (scenario S02), but the fixture hides two defects a
+  live inbox exposes.
+- **Live run (2026-10-27, read-only, extension transport)**: search + structure
+  PASS, the "no wrong-folder rows" criterion FAILS.
+  `fill "input[name=q]" "is:unread"` then `press Enter` drove Gmail's own search
+  (`#search/is%3Aunread`; Gmail's header read "1–37 of 37"), and
+  `extract list "tr.zA" --fields "sender:span.yP,subject:span.bog,date:@td.xW span@title"`
+  returned structured `{sender, subject, date}` rows. Two measured defects:
+  (1) **stale rows** — Gmail's SPA leaves the previous view in the DOM, so
+  `tr.zA` matched **87** rows for 37 conversations. The 37 VISIBLE rows were the
+  correct unread results, but 50 HIDDEN rows remained from the previous view:
+  36 of them read (a stale-state violation of `is:unread`) plus 14 duplicate
+  unread rows, giving 73 unique thread ids across 87 rows. A visibility filter
+  is required; no CSS selector alone fixes it.
+  (2) **one selector per field** — live Gmail varies markup by row state:
+  sender is `span.yP` (carrying an `email` attribute) or `span.zF`, subject is
+  `span.bog` (read) or `span.bqe` (unread), the date is `td.xW span[title]` or
+  `span.bq3`. Only **36 of 50** inbox rows came back with all three fields.
+  Field-form note: a descendant attribute is written `@<css>@<attr>`
+  (e.g. `@td.xW span@title`). The help's `@.link@href` example reads as a `@.`
+  prefix but the dot is the CSS class marker
+  (`src/contentScript/extractData.ts:283`); a valid-but-unmatched selector
+  yields `""` rather than an error.
+  **Both defects are now fixed in code** (`extract list --visible`;
+  `sender:span.yP||span.zF` alternatives), verified end-to-end over CDP against
+  a probe page (3 rows with one inside `display:none`: 3 returned without the
+  flag, 2 with it). The live Gmail re-check is pending an extension reload,
+  since that tab is extension transport.
 - **Metrics**: success, commands, wall_ms, retries, failure_mode.
 
 ### B02 — Reply to an email (Gmail) — P0
@@ -271,6 +297,40 @@ scenarios, not assertions.
 - **Goal**: Reorder a previous purchase; capture order number.
 - **Pass/fail**: order confirmation number captured.
 - **Safety**: use test store / cancel if possible; never enter real card.
+- **Likely gaps**: a re-order is not a copy of an order, and the benchmark has to
+  be able to tell the difference. Three observable state facts decide it: a NEW
+  order id (never the source id), exactly one additional order in the history
+  with the source row unchanged, and a cleared cart — "items re-added to the
+  cart but never checked out" must not read as done. Prices and quantities part
+  company: the quantities carry over from the old order, the prices come from
+  TODAY's catalogue. A fixture whose price never moved cannot distinguish those,
+  so the history keeps what was PAID per line while the catalogue carries the
+  current price, and the two disagree on one line. A discontinued line is the
+  third case: still visible in the cart (with the reason on the page), excluded
+  from the subtotal, and absent from the review page.
+  Safety is part of the task, not a footnote: a decoy "Buy again (1-click)"
+  button sits beside "Reorder" and would place an order with no cart, address or
+  review step. The scenario clicks Reorder, and proves the decoy was reachable
+  but never used (an audit log that records it, plus write counters) and that
+  the new-card form was never opened (saved test token only, last four digits
+  shown). A two-step cancel is then exercised, including backing out of it.
+  OFFLINE PROXY verified via S23 (`fixtures/store.html`): a fresh run clears the
+  seeded state, then re-orders ORD-1042 — two buyable lines with quantities 2
+  and 1, the discontinued organiser shown as unavailable and absent from the
+  subtotal, the pen pack priced $7.25 today against $6.00 in the history,
+  subtotal $24.25 + $4.95 shipping = $29.20, a quantity edit to 2 recomputing to
+  $31.50/$36.45 and back, checkout gated one field at a time (address, then
+  payment, each naming itself), the review page dropping the unavailable line
+  and showing the grand total plus the office address and `•••• 4242`, order
+  ORD-2031 captured from the confirmation, one write and zero 1-click entries,
+  the source order still $42.95/Delivered, then a cancel that must be confirmed
+  (Keep order leaves it Processing; confirming makes it Cancelled, removes the
+  control, keeps the row) and survives a `reload`. htrcli needed no new command:
+  `check` drives the radios, `--json value` reads the carried quantities,
+  `--json attr` reads the status/write counters, and `extract table|list` covers
+  the cart/review/history counts. 13 mutants caught, including reorder-mutates-
+  the-source-order and reorder-reuses-the-source-id. Live store run stays
+  BLOCKED (test store or cancel; never a real card).
 
 ### B17 — Support ticket create / update — P3
 - **App**: helpdesk web
@@ -507,6 +567,7 @@ a three-step survey wizard whose answers live in the page's model).
 | S20 | `scenarios/s20-social-fixture.json` | B15 hard 280 cap proven by an ACCEPTED 280-char post and refused 281/300, live counter, fixed demo clock making past/now/future deterministic, scheduled vs published states surviving `reload`, reschedule in place without duplication |
 | S21 | `scenarios/s21-survey-fixture.json` | B20 three-page survey: per-question and per-row gates, Back restoring radio/select from the model, multi-select add and remove, 10-character boundary (9 refused, 10 accepted), second submission refused, confirmation + response list survive `reload` |
 | S22 | `scenarios/s22-finance-fixture.json` | B18 read-only statement: current vs available balance, period filter moving rows/total but never the balance, running balance reconciling with the header, account-scoped reads, and a live access log proving NO write (zero transfer entries, `data-writes` 0) across a `reload` |
+| S23 | `scenarios/s23-store-fixture.json` | B16 re-order: quantities carried over while prices come from today's catalogue (one line disagrees), a discontinued line shown but excluded from subtotal and review, shipping included in the grand total, sequential address-then-payment gates, a NEW order id captured (source order untouched), zero 1-click and zero new-card use, and a two-step cancel that survives a `reload` |
 
 ```bash
 make bench-smoke      # S01
@@ -525,6 +586,7 @@ make bench-leave      # S19
 make bench-social     # S20
 make bench-survey     # S21
 make bench-finance    # S22
+make bench-store      # S23
 ```
 
 Both need a Chrome on the CDP port (9555 by default in

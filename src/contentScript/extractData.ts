@@ -13,6 +13,8 @@
  * Both are read-only and never mutate the page.
  */
 
+import { isRendered } from "./elementFinder";
+
 export interface ExtractedTable {
 	columns: string[];
 	rows: Record<string, string>[];
@@ -167,6 +169,15 @@ function isContainerElement(el: Element): boolean {
 export interface ExtractListOptions {
 	/** Force container semantics: the match's children are the items. */
 	container?: boolean;
+	/**
+	 * Drop items that `checkVisibility` reports as hidden, e.g. ones inside a
+	 * `display:none` subtree (an SPA that keeps its previous view in the DOM).
+	 *
+	 * Opt-in on purpose: it needs `Element.checkVisibility`, which older hosts
+	 * lack, so defaulting this on would fail every extraction there. Without
+	 * the API this throws instead of keeping hidden items.
+	 */
+	visibleOnly?: boolean;
 }
 
 /**
@@ -197,12 +208,32 @@ export function extractListFrom(
 		items = isContainerElement(roots[0]) ? listItemsOf(roots[0]) : [roots[0]];
 	}
 
+	if (options?.visibleOnly) {
+		items = items.filter(isRendered);
+	}
+
+	// Split and validate every field selector once, before the item loop, so a
+	// zero-item result still rejects a malformed selector.
+	const fieldPlans =
+		fields && Object.keys(fields).length > 0
+			? Object.entries(fields).map(([name, sel]) => ({
+					name,
+					sel,
+					alternatives: alternativesOf(name, sel),
+				}))
+			: [];
+
 	const out: Record<string, string>[] = [];
 	for (const item of items) {
-		if (fields && Object.keys(fields).length > 0) {
+		if (fieldPlans.length > 0) {
 			const row: Record<string, string> = {};
-			for (const [name, sel] of Object.entries(fields)) {
-				row[name] = readFieldValue(item, sel, name);
+			for (const plan of fieldPlans) {
+				row[plan.name] = readFieldValue(
+					item,
+					plan.alternatives,
+					plan.sel,
+					plan.name,
+				);
 			}
 			out.push(row);
 		} else {
@@ -222,18 +253,44 @@ export function extractListFrom(
  *   "[data-due]"     an attribute value (the first match: a descendant, else
  *                    the item itself)
  *
+ * Several forms can be offered as alternatives with `||`, e.g.
+ * "span.yP||span.zF": the first alternative that yields a NON-EMPTY value
+ * wins. A `||` inside a quoted attribute value is not a separator.
+ *
  * A plain selector matches a DESCENDANT only. When the selector also matches
  * the item itself (e.g. "[data-due]" on the <li> that carries it), the
  * descendant lookup finds nothing and the field comes back empty — the
  * item's own value is the one the caller meant. So the item itself is
  * consulted when no descendant matched.
  */
-function readFieldValue(item: Element, sel: string, name: string): string {
+/** Split a field selector into its alternatives, rejecting an empty one. */
+function alternativesOf(name: string, sel: string): string[] {
+	const alternatives = splitFieldAlternatives(sel);
+	if (alternatives.length === 0) {
+		throw new Error(`invalid selector for field "${name}": ${sel} (empty)`);
+	}
+	return alternatives;
+}
+
+function readFieldValue(
+	item: Element,
+	alternatives: string[],
+	sel: string,
+	name: string,
+): string {
 	// A malformed selector throws a bare DOMException that names neither the
 	// field nor the caller's intent, and aborts every other field with it.
 	// Re-throw with the field name so the caller can fix the typo.
 	try {
-		return readFieldValueUnsafe(item, sel);
+		// The first alternative that yields a NON-EMPTY value wins. That is the
+		// point of the fallback: the earlier form does not exist on this row
+		// (Gmail renders the sender in span.yP for some rows and span.zF for
+		// others), and an empty string is not a value worth reporting.
+		for (const alternative of alternatives) {
+			const value = readFieldValueUnsafe(item, alternative);
+			if (value !== "") return value;
+		}
+		return "";
 	} catch (err) {
 		const detail = err instanceof Error ? err.message : String(err);
 		// Preserve the cause chain and the original stack for the caller.
@@ -244,6 +301,48 @@ function readFieldValue(item: Element, sel: string, name: string): string {
 			},
 		);
 	}
+}
+
+/**
+ * Split a field selector into alternatives on `||`, ignoring separators that
+ * sit inside a quoted attribute value.
+ *
+ * `||` rather than `|` because a single pipe is live CSS: `[lang|=en]` would be
+ * torn in half. Even `||` can appear inside a quoted value (`[title="a||b"]`),
+ * so quotes are tracked and their contents are never treated as a separator.
+ */
+function splitFieldAlternatives(sel: string): string[] {
+	const parts: string[] = [];
+	let current = "";
+	let quote = "";
+	for (let i = 0; i < sel.length; i++) {
+		const ch = sel[i];
+		if (quote !== "") {
+			current += ch;
+			if (ch === "\\" && i + 1 < sel.length) {
+				// An escaped character (`\"`) does not close the quote.
+				i++;
+				current += sel[i];
+			} else if (ch === quote) {
+				quote = "";
+			}
+			continue;
+		}
+		if (ch === '"' || ch === "'") {
+			quote = ch;
+			current += ch;
+			continue;
+		}
+		if (ch === "|" && sel[i + 1] === "|") {
+			parts.push(current);
+			current = "";
+			i++;
+			continue;
+		}
+		current += ch;
+	}
+	parts.push(current);
+	return parts.map((part) => part.trim()).filter((part) => part !== "");
 }
 
 function readFieldValueUnsafe(item: Element, sel: string): string {

@@ -575,6 +575,7 @@ async function handleExtractList(
 			: undefined;
 	return extractListFrom(roots, fields, {
 		container: options?.container === true,
+		visibleOnly: options?.visibleOnly === true,
 	});
 }
 

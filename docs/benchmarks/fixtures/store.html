@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Test store — order history and reorder (local fixture, no real payments)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; }
+  header { display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #ddd; padding-bottom: 8px; margin-bottom: 12px; }
+  header h1 { font-size: 18px; margin: 0; }
+  .banner { background: #fff4d6; border: 1px solid #e0b64a; padding: 6px 10px; font-size: 12px; margin-bottom: 12px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  th, td { text-align: left; padding: 5px; border-bottom: 1px solid #eee; font-size: 13px; }
+  td.num, th.num { text-align: right; }
+  input, select, button { padding: 5px; font-size: 13px; box-sizing: border-box; }
+  button { cursor: pointer; }
+  .view { display: none; }
+  .view.visible { display: block; }
+  .muted { color: #777; }
+  .unavailable { color: #999; }
+  .unavailable td { text-decoration: line-through; }
+  .err { color: #d00; font-size: 12px; margin-top: 6px; }
+  .err:empty { display: none; }
+  .notice { background: #eef4ff; border: 1px solid #6f9fe0; padding: 8px 10px; font-size: 12px; margin: 8px 0; }
+  .notice:empty { display: none; }
+  .totals { margin-top: 8px; font-size: 13px; }
+  .totals div { padding: 2px 0; }
+  .totals .grand { font-weight: bold; border-top: 1px solid #ccc; margin-top: 4px; padding-top: 4px; }
+  fieldset { border: 1px solid #ddd; margin: 10px 0; padding: 8px 12px; }
+  legend { font-size: 13px; font-weight: bold; }
+  fieldset label { display: block; font-size: 13px; padding: 3px 0; }
+  .qty { width: 60px; }
+  #order-number { font-family: monospace; font-weight: bold; font-size: 20px; }
+  #cancel-confirm { display: none; border: 1px solid #d00; padding: 10px; margin-top: 12px; }
+  #cancel-confirm.visible { display: block; }
+  #card-entry { display: none; border: 1px dashed #999; padding: 10px; margin-top: 10px; }
+  #card-entry.visible { display: block; }
+  #audit-rows { font-family: monospace; font-size: 11px; list-style: none; padding: 0; }
+  .status-Processing { color: #1a73e8; font-weight: bold; }
+  .status-Cancelled { color: #d00; }
+  .status-Delivered { color: #2a7a2a; }
+</style>
+</head>
+<body data-now="2026-08-15T09:30:00" data-view="history" data-writes="0" data-one-clicks="0" data-card-entries="0">
+
+<header>
+  <h1>Test Store (fixture)</h1>
+  <button id="nav-orders" type="button" data-action="nav-orders">Orders</button>
+  <button id="nav-cart" type="button" data-action="nav-cart">Cart <span id="cart-count">0 items</span></button>
+</header>
+
+<div class="banner">
+  Local test store. No real products, no real payments, no network. The saved cards are
+  fixture tokens — there is nothing to charge.
+</div>
+
+<!-- ---------------------------------------------------------------- history -->
+<section id="view-history" class="view visible">
+  <h2>Your orders</h2>
+  <table>
+    <thead>
+      <tr><th>Order</th><th>Placed</th><th>Items</th><th class="num">Total</th><th>Status</th><th>Actions</th></tr>
+    </thead>
+    <tbody id="order-rows"></tbody>
+  </table>
+  <p class="muted">Re-ordering adds the same products (and the same quantities) to the cart at today's prices.</p>
+  <div id="cancel-confirm"></div>
+</section>
+
+<!-- ------------------------------------------------------------------- cart -->
+<section id="view-cart" class="view">
+  <h2>Cart</h2>
+  <p id="cart-empty" class="muted">Your cart is empty.</p>
+  <div id="cart-body">
+    <div id="reorder-notice" class="notice"></div>
+    <table id="cart-table">
+      <thead>
+        <tr><th>Item</th><th>Qty</th><th class="num">Unit price</th><th class="num">Line total</th></tr>
+      </thead>
+      <tbody id="cart-rows"></tbody>
+    </table>
+    <div class="totals">
+      <div>Subtotal: <span id="subtotal">$0.00</span></div>
+      <div>Shipping: <span id="shipping">$0.00</span></div>
+      <div class="grand">Total: <span id="cart-total">$0.00</span></div>
+    </div>
+    <p>
+      <button id="to-checkout" type="button" data-action="to-checkout">Continue to checkout</button>
+    </p>
+  </div>
+</section>
+
+<!-- --------------------------------------------------------------- checkout -->
+<section id="view-checkout" class="view">
+  <h2>Checkout</h2>
+  <fieldset>
+    <legend>Delivery address</legend>
+    <label><input type="radio" name="address" id="addr-home" value="ADDR-1"> Home — 12 Example Lane, Testville</label>
+    <label><input type="radio" name="address" id="addr-office" value="ADDR-2"> Office — 88 Market Street, Testville</label>
+  </fieldset>
+  <fieldset>
+    <legend>Payment method</legend>
+    <label><input type="radio" name="payment" id="pay-visa" value="tok_visa_4242"> Visa &bull;&bull;&bull;&bull; 4242 (saved)</label>
+    <label><input type="radio" name="payment" id="pay-master" value="tok_master_5555"> Mastercard &bull;&bull;&bull;&bull; 5555 (saved)</label>
+  </fieldset>
+  <p>Deliver to: <span id="address-summary" class="muted">—</span></p>
+  <p>Paying with: <span id="payment-summary" class="muted">—</span></p>
+  <p>
+    <button id="continue-review" type="button" data-action="continue-review">Continue to review</button>
+    <button id="show-card-entry" type="button" data-action="show-card-entry">Add a new card</button>
+  </p>
+  <div id="card-entry">
+    <label>Card number <input id="card-number" type="text" placeholder="0000 0000 0000 0000"></label>
+  </div>
+  <div id="checkout-err" class="err"></div>
+</section>
+
+<!-- ----------------------------------------------------------------- review -->
+<section id="view-review" class="view">
+  <h2>Review your order</h2>
+  <table id="review-table">
+    <thead>
+      <tr><th>Item</th><th>Qty</th><th class="num">Line total</th></tr>
+    </thead>
+    <tbody id="review-rows"></tbody>
+  </table>
+  <div class="totals">
+    <div>Subtotal: <span id="review-subtotal">$0.00</span></div>
+    <div>Shipping: <span id="review-shipping">$0.00</span></div>
+    <div class="grand">Total: <span id="review-total">$0.00</span></div>
+  </div>
+  <p>Deliver to: <span id="review-address">—</span></p>
+  <p>Paying with: <span id="review-payment">—</span></p>
+  <p><button id="place-order" type="button" data-action="place-order">Place order</button></p>
+</section>
+
+<!-- ----------------------------------------------------------- confirmation -->
+<section id="view-confirmation" class="view">
+  <h2>Order placed</h2>
+  <p>Thanks — your order number is <span id="order-number"></span></p>
+  <p>Status: <span id="confirmation-status"></span></p>
+  <p>Total charged: <span id="confirmation-total"></span></p>
+  <p>Deliver to: <span id="confirmation-address"></span></p>
+  <p>Paying with: <span id="confirmation-payment"></span></p>
+  <p><button id="view-orders" type="button" data-action="view-orders">View orders</button></p>
+</section>
+
+<h2>Activity log</h2>
+<ul id="audit-rows"></ul>
+
+<script>
+(() => {
+  "use strict";
+
+  var STORAGE_KEY = "store-state-v1";
+  var FIXTURE_NOW = document.body.getAttribute("data-now");
+  var SHIPPING = 495;
+
+  // Today's catalogue. `price` is what a re-order charges; the order history
+  // keeps the `paid` price of each historical line separately, so the two can
+  // disagree (Gel Pen Pack was $6.00, now $7.25).
+  var CATALOG = {
+    "NB-A4": { name: "A4 Notebook", price: 850, stock: 40 },
+    "PEN-GEL": { name: "Gel Pen Pack", price: 725, stock: 12 },
+    "ORG-DESK": { name: "Desk Organiser", price: 1500, stock: 0, discontinued: true },
+    "NOTE-STICKY": { name: "Sticky Notes", price: 350, stock: 100 }
+  };
+
+  var ADDRESSES = {
+    "ADDR-1": "Home — 12 Example Lane, Testville",
+    "ADDR-2": "Office — 88 Market Street, Testville"
+  };
+
+  var PAYMENTS = {
+    "tok_visa_4242": "Visa •••• 4242",
+    "tok_master_5555": "Mastercard •••• 5555"
+  };
+
+  function seed() {
+    return {
+      version: 1,
+      nextId: 2031,
+      writes: 0,
+      audit: [],
+      orders: [
+        {
+          id: "ORD-1042",
+          placed: "2026-07-15",
+          status: "Delivered",
+          total: 4295,
+          lines: [
+            { sku: "NB-A4", qty: 2, paid: 850 },
+            { sku: "PEN-GEL", qty: 1, paid: 600 },
+            { sku: "ORG-DESK", qty: 1, paid: 1500 }
+          ]
+        },
+        {
+          id: "ORD-1031",
+          placed: "2026-06-02",
+          status: "Delivered",
+          total: 1895,
+          lines: [{ sku: "NOTE-STICKY", qty: 4, paid: 350 }]
+        }
+      ],
+      cart: null,
+      address: null,
+      payment: null,
+      placed: null,
+      cancelTarget: null
+    };
+  }
+
+  function load() {
+    var raw;
+    var parsed;
+    try {
+      raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return seed();
+      parsed = JSON.parse(raw);
+      if (!parsed || parsed.version !== 1) return seed();
+      return parsed;
+    } catch (_e) {
+      return seed();
+    }
+  }
+
+  var state = load();
+
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function money(cents) {
+    return `$${(cents / 100).toFixed(2)}`;
+  }
+
+  function orderById(id) {
+    for (let i = 0; i < state.orders.length; i++) {
+      if (state.orders[i].id === id) return state.orders[i];
+    }
+    return null;
+  }
+
+  function isAvailable(sku) {
+    var item = CATALOG[sku];
+    return !!item && !item.discontinued && item.stock > 0;
+  }
+
+  function audit(action, extra) {
+    var entry = { action: action, at: FIXTURE_NOW };
+    if (extra) {
+      for (var k in extra) {
+        if (Object.hasOwn(extra, k)) entry[k] = extra[k];
+      }
+    }
+    state.audit.push(entry);
+  }
+
+  function auditCount(action) {
+    var n = 0;
+    for (let i = 0; i < state.audit.length; i++) {
+      if (state.audit[i].action === action) n += 1;
+    }
+    return n;
+  }
+
+  // ---------------------------------------------------------------- cart math
+
+  // Only the lines that can actually be bought today. The discontinued line
+  // stays visible in the cart as an unavailable row but never contributes to a
+  // total and never reaches the review page.
+  function availableLines() {
+    if (!state.cart) return [];
+    var out = [];
+    for (let i = 0; i < state.cart.lines.length; i++) {
+      const line = state.cart.lines[i];
+      if (isAvailable(line.sku)) {
+        out.push({ sku: line.sku, qty: line.qty, price: CATALOG[line.sku].price });
+      }
+    }
+    return out;
+  }
+
+  function subtotalCents() {
+    var lines = availableLines();
+    var total = 0;
+    for (let i = 0; i < lines.length; i++) total += lines[i].price * lines[i].qty;
+    return total;
+  }
+
+  function shippingCents() {
+    return availableLines().length > 0 ? SHIPPING : 0;
+  }
+
+  function totalCents() {
+    return subtotalCents() + shippingCents();
+  }
+
+  function availableCount() {
+    return availableLines().length;
+  }
+
+  // ------------------------------------------------------------------- views
+
+  function show(view) {
+    var views = document.querySelectorAll(".view");
+    for (let i = 0; i < views.length; i++) {
+      views[i].classList.toggle("visible", views[i].id === `view-${view}`);
+    }
+    document.body.setAttribute("data-view", view);
+  }
+
+  function el(tag, attrs, text) {
+    var node = document.createElement(tag);
+    if (attrs) {
+      for (var k in attrs) {
+        if (Object.hasOwn(attrs, k)) node.setAttribute(k, attrs[k]);
+      }
+    }
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function cell(tag, attrs, text) {
+    var node = el(tag, attrs, text);
+    return node;
+  }
+
+  // -------------------------------------------------------------- header/nav
+
+  function renderChrome() {
+    var n = availableCount();
+    var label = n === 1 ? "1 item" : `${n} items`;
+    document.getElementById("cart-count").textContent = label;
+
+    var body = document.body;
+    body.setAttribute("data-writes", String(state.writes));
+    body.setAttribute("data-one-clicks", String(auditCount("one_click")));
+    body.setAttribute("data-card-entries", String(auditCount("card_entry")));
+  }
+
+  // ----------------------------------------------------------------- history
+
+  function renderHistory() {
+    var tbody = document.getElementById("order-rows");
+    tbody.innerHTML = "";
+    state.orders.forEach((order) => {
+      var tr = el("tr", { "data-order-id": order.id, "data-status": order.status });
+      tr.appendChild(cell("td", null, order.id));
+      tr.appendChild(cell("td", null, order.placed));
+      var items = 0;
+      order.lines.forEach((line) => { items += line.qty; });
+      tr.appendChild(cell("td", null, items === 1 ? "1 item" : `${items} items`));
+      tr.appendChild(cell("td", { "class": "num" }, money(order.total)));
+      var statusCell = el("td", null);
+      statusCell.appendChild(cell("span", { "class": `status-${order.status}` }, order.status));
+      tr.appendChild(statusCell);
+
+      var actions = el("td", null);
+      var reorder = el("button", { type: "button", "data-action": "reorder", "data-order": order.id }, "Reorder");
+      actions.appendChild(reorder);
+      // Deliberate decoy: places an order immediately, bypassing cart, address
+      // and review. A scenario must use Reorder, never this.
+      var oneClick = el("button", { type: "button", "data-action": "one-click", "data-order": order.id }, "Buy again (1-click)");
+      actions.appendChild(oneClick);
+      if (order.status === "Processing") {
+        actions.appendChild(el("button", { type: "button", "data-action": "cancel-order", "data-order": order.id }, "Cancel order"));
+      }
+      tr.appendChild(actions);
+      tbody.appendChild(tr);
+    });
+  }
+
+  // -------------------------------------------------------------------- cart
+
+  function renderCart() {
+    var tbody = document.getElementById("cart-rows");
+    tbody.innerHTML = "";
+    var empty = document.getElementById("cart-empty");
+    var body = document.getElementById("cart-body");
+    var notice = document.getElementById("reorder-notice");
+    notice.textContent = "";
+
+    if (!state.cart || state.cart.lines.length === 0) {
+      empty.style.display = "block";
+      body.style.display = "none";
+      return;
+    }
+    empty.style.display = "none";
+    body.style.display = "block";
+
+    var skipped = [];
+    state.cart.lines.forEach((line) => {
+      var item = CATALOG[line.sku];
+      var tr = el("tr", { "data-sku": line.sku });
+      if (!isAvailable(line.sku)) {
+        tr.setAttribute("data-unavailable", "1");
+        tr.setAttribute("class", "unavailable");
+        tr.appendChild(cell("td", null, item ? item.name : line.sku));
+        tr.appendChild(cell("td", null, "—"));
+        tr.appendChild(cell("td", { "class": "num" }, money(item ? item.price : 0)));
+        const unavailable = cell("td", { "class": "num" }, "No longer available");
+        tr.appendChild(unavailable);
+        skipped.push(item ? item.name : line.sku);
+      } else {
+        tr.appendChild(cell("td", null, item.name));
+        const qtyCell = el("td", null);
+        const input = el("input", {
+          type: "number",
+          min: "1",
+          max: String(item.stock),
+          id: `qty-${line.sku}`,
+          "class": "qty",
+          "data-sku": line.sku
+        });
+        input.value = String(line.qty);
+        qtyCell.appendChild(input);
+        tr.appendChild(qtyCell);
+        tr.appendChild(cell("td", { "class": "num" }, money(item.price)));
+        tr.appendChild(cell("td", { "class": "num" }, money(item.price * line.qty)));
+      }
+      tbody.appendChild(tr);
+    });
+
+    if (skipped.length > 0) {
+      notice.textContent = `${skipped.join(", ")} is no longer available and was not added to the cart.`;
+    }
+
+    document.getElementById("subtotal").textContent = money(subtotalCents());
+    document.getElementById("shipping").textContent = money(shippingCents());
+    document.getElementById("cart-total").textContent = money(totalCents());
+  }
+
+  // ---------------------------------------------------------------- checkout
+
+  function renderCheckout() {
+    var radios = document.querySelectorAll("input[name='address']");
+    for (let i = 0; i < radios.length; i++) {
+      radios[i].checked = radios[i].value === state.address;
+    }
+    var pays = document.querySelectorAll("input[name='payment']");
+    for (let j = 0; j < pays.length; j++) {
+      pays[j].checked = pays[j].value === state.payment;
+    }
+    document.getElementById("address-summary").textContent = state.address ? ADDRESSES[state.address] : "—";
+    document.getElementById("payment-summary").textContent = state.payment ? PAYMENTS[state.payment] : "—";
+  }
+
+  function setCheckoutError(message) {
+    document.getElementById("checkout-err").textContent = message || "";
+  }
+
+  // ------------------------------------------------------------------ review
+
+  function renderReview() {
+    var tbody = document.getElementById("review-rows");
+    tbody.innerHTML = "";
+    availableLines().forEach((line) => {
+      var tr = el("tr", { "data-sku": line.sku });
+      tr.appendChild(cell("td", null, CATALOG[line.sku].name));
+      tr.appendChild(cell("td", null, String(line.qty)));
+      tr.appendChild(cell("td", { "class": "num" }, money(line.price * line.qty)));
+      tbody.appendChild(tr);
+    });
+    document.getElementById("review-subtotal").textContent = money(subtotalCents());
+    document.getElementById("review-shipping").textContent = money(shippingCents());
+    document.getElementById("review-total").textContent = money(totalCents());
+    document.getElementById("review-address").textContent = state.address ? ADDRESSES[state.address] : "—";
+    document.getElementById("review-payment").textContent = state.payment ? PAYMENTS[state.payment] : "—";
+    document.getElementById("place-order").textContent = `Place order — ${money(totalCents())}`;
+  }
+
+  // ------------------------------------------------------------ confirmation
+
+  function renderConfirmation() {
+    var order = state.placed ? orderById(state.placed) : null;
+    document.getElementById("order-number").textContent = order ? order.id : "";
+    document.getElementById("confirmation-status").textContent = order ? order.status : "";
+    document.getElementById("confirmation-total").textContent = order ? money(order.total) : "";
+    document.getElementById("confirmation-address").textContent = order?.address ? ADDRESSES[order.address] : "—";
+    document.getElementById("confirmation-payment").textContent = order?.payment ? PAYMENTS[order.payment] : "—";
+  }
+
+  function renderCancelConfirm() {
+    var box = document.getElementById("cancel-confirm");
+    box.classList.toggle("visible", !!state.cancelTarget);
+    if (state.cancelTarget) {
+      box.innerHTML = "";
+      box.appendChild(el("p", null, `Cancel ${state.cancelTarget}? This cannot be undone.`));
+      box.appendChild(el("button", { type: "button", "data-action": "confirm-cancel" }, "Yes, cancel order"));
+      box.appendChild(el("button", { type: "button", "data-action": "keep-order" }, "Keep order"));
+    }
+  }
+
+  function renderAudit() {
+    var list = document.getElementById("audit-rows");
+    list.innerHTML = "";
+    state.audit.forEach((entry) => {
+      var attrs = { "data-action": entry.action };
+      if (entry.path) attrs["data-path"] = entry.path;
+      if (entry.order) attrs["data-order"] = entry.order;
+      var li = el("li", attrs, `${entry.at}  ${entry.action}${entry.order ? ` ${entry.order}` : ""}`);
+      list.appendChild(li);
+    });
+  }
+
+  function render() {
+    renderChrome();
+    renderHistory();
+    renderCart();
+    renderCheckout();
+    renderReview();
+    renderConfirmation();
+    renderCancelConfirm();
+    renderAudit();
+  }
+
+  // ----------------------------------------------------------------- actions
+
+  function startReorder(orderId) {
+    var order = orderById(orderId);
+    if (!order) return;
+    state.cart = {
+      fromOrder: order.id,
+      lines: order.lines.map((line) => ({ sku: line.sku, qty: line.qty }))
+    };
+    state.address = null;
+    state.payment = null;
+    setCheckoutError("");
+    audit("reorder", { order: order.id });
+    save();
+    render();
+    show("cart");
+  }
+
+  function placeOneClick(orderId) {
+    var order = orderById(orderId);
+    if (!order) return;
+    var id = `ORD-${state.nextId}`;
+    state.nextId += 1;
+    var lines = order.lines
+      .filter((line) => isAvailable(line.sku))
+      .map((line) => ({ sku: line.sku, qty: line.qty, paid: CATALOG[line.sku].price }));
+    var total = 0;
+    lines.forEach((line) => { total += line.paid * line.qty; });
+    if (!lines.length) return;
+    state.orders.unshift({
+      id: id,
+      placed: FIXTURE_NOW.slice(0, 10),
+      status: "Processing",
+      total: total + SHIPPING,
+      address: "ADDR-1",
+      payment: "tok_visa_4242",
+      lines: lines
+    });
+    state.writes += 1;
+    state.placed = id;
+    audit("one_click", { order: id, path: "one_click" });
+    save();
+    render();
+    show("confirmation");
+  }
+
+  function continueToReview() {
+    if (!state.cart || !availableLines().length) {
+      setCheckoutError("Your cart has nothing available to order.");
+      return;
+    }
+    if (!state.address) {
+      setCheckoutError("Choose a delivery address before continuing.");
+      return;
+    }
+    if (!state.payment) {
+      setCheckoutError("Choose a payment method before continuing.");
+      return;
+    }
+    setCheckoutError("");
+    renderReview();
+    show("review");
+  }
+
+  function placeOrder() {
+    if (!state.cart || !availableLines().length) return;
+    if (!state.address || !state.payment) return;
+    var id = `ORD-${state.nextId}`;
+    state.nextId += 1;
+    var lines = availableLines().map((line) => ({ sku: line.sku, qty: line.qty, paid: line.price }));
+    state.orders.unshift({
+      id: id,
+      placed: FIXTURE_NOW.slice(0, 10),
+      status: "Processing",
+      total: totalCents(),
+      address: state.address,
+      payment: state.payment,
+      lines: lines
+    });
+    state.writes += 1;
+    state.placed = id;
+    state.cart = null;
+    audit("place_order", { order: id, path: "review" });
+    save();
+    render();
+    show("confirmation");
+  }
+
+  function confirmCancel() {
+    var order = state.cancelTarget ? orderById(state.cancelTarget) : null;
+    if (!order || order.status !== "Processing") {
+      state.cancelTarget = null;
+      render();
+      return;
+    }
+    order.status = "Cancelled";
+    state.writes += 1;
+    audit("cancel", { order: order.id });
+    state.cancelTarget = null;
+    save();
+    render();
+    show("history");
+  }
+
+  document.addEventListener("click", (event) => {
+    var target = event.target.closest ? event.target.closest("[data-action]") : null;
+    if (!target) return;
+    var action = target.getAttribute("data-action");
+    var orderId = target.getAttribute("data-order");
+
+    if (action === "nav-orders" || action === "view-orders") {
+      show("history");
+      return;
+    }
+    if (action === "nav-cart") {
+      show("cart");
+      return;
+    }
+    if (action === "reorder") {
+      startReorder(orderId);
+      return;
+    }
+    if (action === "one-click") {
+      placeOneClick(orderId);
+      return;
+    }
+    if (action === "to-checkout") {
+      if (!state.cart || !availableLines().length) {
+        setCheckoutError("Your cart has nothing available to order.");
+        return;
+      }
+      setCheckoutError("");
+      renderCheckout();
+      show("checkout");
+      return;
+    }
+    if (action === "continue-review") {
+      continueToReview();
+      return;
+    }
+    if (action === "show-card-entry") {
+      document.getElementById("card-entry").classList.add("visible");
+      audit("card_entry", { path: "new_card" });
+      save();
+      renderAudit();
+      renderChrome();
+      return;
+    }
+    if (action === "place-order") {
+      placeOrder();
+      return;
+    }
+    if (action === "cancel-order") {
+      state.cancelTarget = orderId;
+      renderCancelConfirm();
+      return;
+    }
+    if (action === "keep-order") {
+      audit("cancel_kept", { order: state.cancelTarget });
+      state.cancelTarget = null;
+      save();
+      render();
+      return;
+    }
+    if (action === "confirm-cancel") {
+      confirmCancel();
+    }
+  });
+
+  document.addEventListener("change", (event) => {
+    var target = event.target;
+    if (!target) return;
+
+    if (target.name === "address") {
+      state.address = target.value;
+      audit("address_selected", { path: target.value });
+      save();
+      renderCheckout();
+      return;
+    }
+    if (target.name === "payment") {
+      state.payment = target.value;
+      audit("payment_selected", { path: target.value });
+      save();
+      renderCheckout();
+      return;
+    }
+    if (target.getAttribute?.("data-sku") && target.classList.contains("qty")) {
+      const sku = target.getAttribute("data-sku");
+      let qty = parseInt(target.value, 10);
+      if (Number.isNaN(qty) || qty < 1) qty = 1;
+      if (!state.cart) return;
+      state.cart.lines.forEach((line) => {
+        if (line.sku === sku) line.qty = qty;
+      });
+      audit("qty_change", { path: `${sku}=${qty}` });
+      save();
+      renderCart();
+      renderChrome();
+    }
+  });
+
+  render();
+  show("history");
+})();
+</script>
+</body>
+</html>

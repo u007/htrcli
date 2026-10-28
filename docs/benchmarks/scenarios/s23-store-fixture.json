@@ -1,0 +1,1095 @@
+{
+	"scenarios": [
+		{
+			"id": "S23",
+			"ref": "B16",
+			"app": "Test store fixture (local, no real payments)",
+			"goal": "Re-order the most recent order (ORD-1042) and capture the new order number. The re-order must be a NEW order built from today's catalogue, not a copy of the old one: quantities carry over (2 notebooks, 1 pen pack) but prices do not (the pen pack was $6.00, today it is $7.25), and the discontinued Desk Organiser is shown as unavailable instead of being added. Checkout is gated one field at a time (address, then payment), the review page drops the unavailable line and shows the grand total including shipping, the decoy 1-click path is never used, and the order is then cancelled through a two-step confirmation.",
+			"steps": [
+				{
+					"note": "open the store fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_STORE}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "clear the fixture's state so every run starts from the seed (order ids, cart and audit log are all persisted)",
+					"argv": ["eval", "localStorage.removeItem('store-state-v1')"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "reload so the fixture re-seeds from scratch",
+					"argv": ["reload"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the default view is the order history",
+					"argv": [
+						"wait",
+						"--selector",
+						"#view-history.visible",
+						"--timeout",
+						"10000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "exactly two seeded orders",
+					"argv": ["extract", "list", "#order-rows tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "ORD-1042 is the most recent order and is delivered",
+					"argv": [
+						"--json",
+						"attr",
+						"tr[data-order-id='ORD-1042']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Delivered"
+						}
+					}
+				},
+				{
+					"note": "its historical total is what was actually charged, shipping included",
+					"argv": ["--json", "text", "tr[data-order-id='ORD-1042'] td.num"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$42.95"
+						}
+					}
+				},
+				{
+					"note": "four units across three lines (2 notebooks, 1 pen pack, 1 organiser)",
+					"argv": [
+						"--json",
+						"text",
+						"tr[data-order-id='ORD-1042'] td:nth-child(3)"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "4 items"
+						}
+					}
+				},
+				{
+					"note": "the older order is the decoy: a blind re-order of the wrong row would be visible in the total",
+					"argv": ["--json", "text", "tr[data-order-id='ORD-1031'] td.num"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$18.95"
+						}
+					}
+				},
+				{
+					"note": "a delivered order cannot be cancelled, so no cancel control is rendered on it",
+					"argv": [
+						"wait",
+						"--selector",
+						"tr[data-order-id='ORD-1042'] [data-action='cancel-order']",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "POSITIVE CONTROL for never using the 1-click path: that button really is rendered and is reachable (it is simply not clicked)",
+					"argv": [
+						"wait",
+						"--selector",
+						"tr[data-order-id='ORD-1042'] [data-action='one-click']",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "nothing is in the cart before re-ordering",
+					"argv": ["--json", "text", "#cart-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0 items"
+						}
+					}
+				},
+				{
+					"note": "and nothing has been written yet",
+					"argv": ["--json", "attr", "body", "data-writes"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0"
+						}
+					}
+				},
+				{
+					"note": "re-order the most recent order (NOT the adjacent 1-click button)",
+					"argv": [
+						"click",
+						"tr[data-order-id='ORD-1042'] [data-action='reorder']"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the cart view opens",
+					"argv": [
+						"wait",
+						"--selector",
+						"#view-cart.visible",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "two items are buyable today (the third line is unavailable and is not counted)",
+					"argv": ["--json", "text", "#cart-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2 items"
+						}
+					}
+				},
+				{
+					"note": "all three historical lines are represented in the cart table",
+					"argv": ["extract", "table", "#cart-table"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "rowCount",
+							"equals": "3"
+						}
+					}
+				},
+				{
+					"note": "the notebook quantity carries over from the order (not reset to 1)",
+					"argv": ["--json", "value", "#qty-NB-A4"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "and so does the pen pack quantity",
+					"argv": ["--json", "value", "#qty-PEN-GEL"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "the discontinued line is marked unavailable",
+					"argv": [
+						"wait",
+						"--selector",
+						"#cart-table tr[data-sku='ORG-DESK'][data-unavailable='1']",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and the reason is on the page, not only in the styling",
+					"argv": ["--json", "text", "#reorder-notice"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Desk Organiser is no longer available and was not added to the cart."
+						}
+					}
+				},
+				{
+					"note": "an unavailable line has no quantity control at all",
+					"argv": [
+						"wait",
+						"--selector",
+						"#qty-ORG-DESK",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the notebook price is today's price",
+					"argv": [
+						"--json",
+						"text",
+						"#cart-table tr[data-sku='NB-A4'] td:nth-child(3)"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$8.50"
+						}
+					}
+				},
+				{
+					"note": "CRITICAL: the pen pack was paid at $6.00 but is $7.25 today — a copied order would show $6.00",
+					"argv": [
+						"--json",
+						"text",
+						"#cart-table tr[data-sku='PEN-GEL'] td:nth-child(3)"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$7.25"
+						}
+					}
+				},
+				{
+					"note": "line totals use the carried quantity and today's price",
+					"argv": [
+						"--json",
+						"text",
+						"#cart-table tr[data-sku='NB-A4'] td:nth-child(4)"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$17.00"
+						}
+					}
+				},
+				{
+					"note": "pen pack line total",
+					"argv": [
+						"--json",
+						"text",
+						"#cart-table tr[data-sku='PEN-GEL'] td:nth-child(4)"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$7.25"
+						}
+					}
+				},
+				{
+					"note": "subtotal is buyable lines only (the $15 organiser is excluded)",
+					"argv": ["--json", "text", "#subtotal"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$24.25"
+						}
+					}
+				},
+				{
+					"note": "shipping is its own line",
+					"argv": ["--json", "text", "#shipping"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$4.95"
+						}
+					}
+				},
+				{
+					"note": "the cart total is subtotal + shipping, not the subtotal",
+					"argv": ["--json", "text", "#cart-total"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$29.20"
+						}
+					}
+				},
+				{
+					"note": "the decoy order's item was not pulled in by mistake",
+					"argv": [
+						"wait",
+						"--selector",
+						"#cart-table tr[data-sku='NOTE-STICKY']",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "raise the pen pack quantity to 2",
+					"argv": ["fill", "#qty-PEN-GEL", "2"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the subtotal recomputes on the change event",
+					"argv": ["--json", "text", "#subtotal"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$31.50"
+						}
+					}
+				},
+				{
+					"note": "and so does the total",
+					"argv": ["--json", "text", "#cart-total"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$36.45"
+						}
+					}
+				},
+				{
+					"note": "put it back to the historical quantity for the rest of the run",
+					"argv": ["fill", "#qty-PEN-GEL", "1"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the subtotal returns to the carried-over amount",
+					"argv": ["--json", "text", "#subtotal"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$24.25"
+						}
+					}
+				},
+				{
+					"note": "browsing and editing the cart wrote nothing",
+					"argv": ["--json", "attr", "body", "data-writes"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0"
+						}
+					}
+				},
+				{
+					"note": "continue to checkout",
+					"argv": ["click", "#to-checkout"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the checkout view is shown",
+					"argv": [
+						"wait",
+						"--selector",
+						"#view-checkout.visible",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "continuing with nothing selected is refused",
+					"argv": ["click", "#continue-review"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and the error names the missing field specifically",
+					"argv": ["--json", "text", "#checkout-err"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Choose a delivery address before continuing."
+						}
+					}
+				},
+				{
+					"note": "the gates are sequential: we are still on checkout, not on review",
+					"argv": ["--json", "attr", "body", "data-view"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "checkout"
+						}
+					}
+				},
+				{
+					"note": "choose the office address",
+					"argv": ["check", "#addr-office"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the delivery summary reflects it",
+					"argv": ["--json", "text", "#address-summary"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Office — 88 Market Street, Testville"
+						}
+					}
+				},
+				{
+					"note": "with an address but no payment method the next gate fires",
+					"argv": ["click", "#continue-review"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and it names the payment method, not the address again",
+					"argv": ["--json", "text", "#checkout-err"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Choose a payment method before continuing."
+						}
+					}
+				},
+				{
+					"note": "select the saved Visa test token",
+					"argv": ["check", "#pay-visa"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "only the last four digits are ever shown",
+					"argv": ["--json", "text", "#payment-summary"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Visa •••• 4242"
+						}
+					}
+				},
+				{
+					"note": "now the review page opens",
+					"argv": ["click", "#continue-review"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "review view is visible",
+					"argv": [
+						"wait",
+						"--selector",
+						"#view-review.visible",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the review lists only the two buyable lines",
+					"argv": ["extract", "table", "#review-table"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "rowCount",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "the discontinued item never reaches the review page",
+					"argv": [
+						"wait",
+						"--selector",
+						"#review-table tr[data-sku='ORG-DESK']",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "review subtotal",
+					"argv": ["--json", "text", "#review-subtotal"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$24.25"
+						}
+					}
+				},
+				{
+					"note": "review total includes shipping",
+					"argv": ["--json", "text", "#review-total"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$29.20"
+						}
+					}
+				},
+				{
+					"note": "the review carries the chosen address",
+					"argv": ["--json", "text", "#review-address"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Office — 88 Market Street, Testville"
+						}
+					}
+				},
+				{
+					"note": "and the chosen card",
+					"argv": ["--json", "text", "#review-payment"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Visa •••• 4242"
+						}
+					}
+				},
+				{
+					"note": "the commit button states the GRAND total (a subtotal-only label would be $24.25)",
+					"argv": ["--json", "text", "#place-order"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Place order — $29.20"
+						}
+					}
+				},
+				{
+					"note": "place the order",
+					"argv": ["click", "#place-order"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the confirmation view is shown",
+					"argv": [
+						"wait",
+						"--selector",
+						"#view-confirmation.visible",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the new order number is deterministic after a fresh seed, and it is captured for reuse below",
+					"argv": ["--json", "text", "#order-number"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "ORD-2031"
+						}
+					},
+					"capture": {
+						"order": "data"
+					}
+				},
+				{
+					"note": "the charged total matches the review total",
+					"argv": ["--json", "text", "#confirmation-total"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$29.20"
+						}
+					}
+				},
+				{
+					"note": "a brand new order starts as Processing",
+					"argv": ["--json", "text", "#confirmation-status"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Processing"
+						}
+					}
+				},
+				{
+					"note": "exactly one write happened",
+					"argv": ["--json", "attr", "body", "data-writes"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "SAFETY: the 1-click path was never used",
+					"argv": ["--json", "attr", "body", "data-one-clicks"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0"
+						}
+					}
+				},
+				{
+					"note": "SAFETY: no new-card form was opened, only the saved token was used",
+					"argv": ["--json", "attr", "body", "data-card-entries"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0"
+						}
+					}
+				},
+				{
+					"note": "the audit log really records the checkout (positive control for the two SAFETY zeros above)",
+					"argv": [
+						"wait",
+						"--selector",
+						"#audit-rows li[data-action='place_order'][data-path='review']",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and it has no 1-click entry at all",
+					"argv": [
+						"wait",
+						"--selector",
+						"#audit-rows li[data-action='one_click']",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "placing the order emptied the cart",
+					"argv": ["--json", "text", "#cart-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0 items"
+						}
+					}
+				},
+				{
+					"note": "go back to the order history",
+					"argv": ["click", "#view-orders"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "history is visible again",
+					"argv": [
+						"wait",
+						"--selector",
+						"#view-history.visible",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "exactly one order was added (not two, and nothing was edited in place)",
+					"argv": ["extract", "list", "#order-rows tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "3"
+						}
+					}
+				},
+				{
+					"note": "the captured order number is in the history",
+					"argv": [
+						"wait",
+						"--selector",
+						"tr[data-order-id='${order}']",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "its status is Processing",
+					"argv": [
+						"--json",
+						"attr",
+						"tr[data-order-id='${order}']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Processing"
+						}
+					}
+				},
+				{
+					"note": "its total is the charged total",
+					"argv": ["--json", "text", "tr[data-order-id='${order}'] td.num"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$29.20"
+						}
+					}
+				},
+				{
+					"note": "the source order is untouched: a copy-in-place would have changed this",
+					"argv": ["--json", "text", "tr[data-order-id='ORD-1042'] td.num"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$42.95"
+						}
+					}
+				},
+				{
+					"note": "and it is still Delivered",
+					"argv": [
+						"--json",
+						"text",
+						"tr[data-order-id='ORD-1042'] .status-Delivered"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Delivered"
+						}
+					}
+				},
+				{
+					"note": "the older decoy order is also untouched",
+					"argv": ["--json", "text", "tr[data-order-id='ORD-1031'] td.num"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$18.95"
+						}
+					}
+				},
+				{
+					"note": "a Processing order can be cancelled",
+					"argv": [
+						"wait",
+						"--selector",
+						"tr[data-order-id='${order}'] [data-action='cancel-order']",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "request the cancellation",
+					"argv": [
+						"click",
+						"tr[data-order-id='${order}'] [data-action='cancel-order']"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the confirmation step appears",
+					"argv": [
+						"wait",
+						"--selector",
+						"#cancel-confirm.visible",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "nothing has changed yet — the first click only opens the confirmation",
+					"argv": [
+						"--json",
+						"attr",
+						"tr[data-order-id='${order}']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Processing"
+						}
+					}
+				},
+				{
+					"note": "back out of the cancellation",
+					"argv": ["click", "#cancel-confirm [data-action='keep-order']"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the confirmation is dismissed",
+					"argv": [
+						"wait",
+						"--selector",
+						"#cancel-confirm.visible",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and the order is still Processing, so the two-step is real",
+					"argv": [
+						"--json",
+						"attr",
+						"tr[data-order-id='${order}']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Processing"
+						}
+					}
+				},
+				{
+					"note": "request the cancellation again",
+					"argv": [
+						"click",
+						"tr[data-order-id='${order}'] [data-action='cancel-order']"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "and confirm it",
+					"argv": ["click", "#cancel-confirm [data-action='confirm-cancel']"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the order is now Cancelled",
+					"argv": [
+						"--json",
+						"attr",
+						"tr[data-order-id='${order}']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Cancelled"
+						}
+					}
+				},
+				{
+					"note": "a cancelled order cannot be cancelled twice",
+					"argv": [
+						"wait",
+						"--selector",
+						"tr[data-order-id='${order}'] [data-action='cancel-order']",
+						"--timeout",
+						"3000",
+						"--gone"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "but it is still listed — cancelling is a status change, not a delete",
+					"argv": ["extract", "list", "#order-rows tr"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "3"
+						}
+					}
+				},
+				{
+					"note": "two writes total: place + cancel",
+					"argv": ["--json", "attr", "body", "data-writes"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "reload to prove the state is persisted",
+					"argv": ["reload"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the history is the landing view",
+					"argv": [
+						"wait",
+						"--selector",
+						"#view-history.visible",
+						"--timeout",
+						"10000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the cancelled order survives the reload",
+					"argv": [
+						"--json",
+						"attr",
+						"tr[data-order-id='${order}']",
+						"data-status"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Cancelled"
+						}
+					}
+				},
+				{
+					"note": "the original order still reads as it did before the re-order",
+					"argv": ["--json", "text", "tr[data-order-id='ORD-1042'] td.num"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$42.95"
+						}
+					}
+				},
+				{
+					"note": "the cart stays empty",
+					"argv": ["--json", "text", "#cart-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0 items"
+						}
+					}
+				},
+				{
+					"note": "exactly one cancellation was recorded",
+					"argv": ["extract", "list", "#audit-rows li[data-action='cancel']"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "1"
+						}
+					}
+				}
+			]
+		}
+	]
+}

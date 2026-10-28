@@ -177,6 +177,141 @@ describe("extractListFrom", () => {
 	});
 });
 
+describe("extractListFrom — alternative field selectors", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("falls back to the second form when the first is absent", () => {
+		document.body.innerHTML = `
+			<div class="row"><span class="yP">Alice</span></div>
+			<div class="row"><span class="zF">Bob</span></div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		const r = extractListFrom(rows, { sender: "span.yP||span.zF" });
+		expect(r.items).toEqual([{ sender: "Alice" }, { sender: "Bob" }]);
+	});
+
+	it("prefers the first form when both exist", () => {
+		document.body.innerHTML = `
+			<div class="row"><span class="yP">Primary</span><span class="zF">Secondary</span></div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		const r = extractListFrom(rows, { sender: "span.yP||span.zF" });
+		expect(r.items).toEqual([{ sender: "Primary" }]);
+	});
+
+	it("treats an EMPTY first match as absent and keeps looking", () => {
+		document.body.innerHTML = `
+			<div class="row"><span class="yP"></span><span class="zF">Fallback</span></div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		const r = extractListFrom(rows, { sender: "span.yP||span.zF" });
+		expect(r.items).toEqual([{ sender: "Fallback" }]);
+	});
+
+	it("supports alternatives in the attribute form", () => {
+		document.body.innerHTML = `
+			<div class="row"><span class="yP" email="a@example.test">Alice</span></div>
+			<div class="row"><span class="zF" data-email="b@example.test">Bob</span></div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		const r = extractListFrom(rows, {
+			email: "@span.yP@email||@span.zF@data-email",
+		});
+		expect(r.items).toEqual([
+			{ email: "a@example.test" },
+			{ email: "b@example.test" },
+		]);
+	});
+
+	it("does not split a single pipe used by the CSS |= operator", () => {
+		document.body.innerHTML = `
+			<div class="row"><span lang="en-GB"><b class="val">7</b></span></div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		const r = extractListFrom(rows, { v: "[lang|=en] .val" });
+		expect(r.items).toEqual([{ v: "7" }]);
+	});
+
+	it("does not split || inside a quoted attribute value", () => {
+		document.body.innerHTML = `
+			<div class="row"><span title="a||b"><b class="val">X</b></span></div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		const r = extractListFrom(rows, { t: '[title="a||b"] .val' });
+		expect(r.items).toEqual([{ t: "X" }]);
+	});
+
+	it("does not end a quoted value at an escaped quote before ||", () => {
+		// Two alternatives exactly when the escaped quote keeps the value open:
+		// the first matches nothing, the second supplies "X". Splitting inside the
+		// quote would leave a malformed first selector and throw instead.
+		document.body.innerHTML = `
+			<div class="row"><b class="val">X</b></div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		const r = extractListFrom(rows, { t: '[data-x="a\\"||b"] .val||.val' });
+		expect(r.items).toEqual([{ t: "X" }]);
+	});
+
+	it("rejects a field whose selector is only separators", () => {
+		document.body.innerHTML = `<div class="row"><span>A</span></div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		expect(() => extractListFrom(rows, { x: "||" })).toThrow(/field "x"/);
+	});
+
+	it("rejects a malformed field selector even when no items match", () => {
+		document.body.innerHTML = `<div class="row"><span>A</span></div>`;
+		expect(() => extractListFrom([], { x: "||" })).toThrow(/field "x"/);
+	});
+});
+
+describe("extractListFrom — visibleOnly", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	function stubCheckVisibility(el: Element, rendered: boolean): void {
+		Object.defineProperty(el, "checkVisibility", {
+			value: () => rendered,
+			configurable: true,
+		});
+	}
+
+	it("drops items that checkVisibility reports as hidden", () => {
+		document.body.innerHTML = `
+			<div class="row">one</div>
+			<div class="row">two</div>
+			<div class="row">three</div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		stubCheckVisibility(rows[0], true);
+		stubCheckVisibility(rows[1], false);
+		stubCheckVisibility(rows[2], true);
+		const r = extractListFrom(rows, undefined, { visibleOnly: true });
+		expect(r.items).toEqual([{ text: "one" }, { text: "three" }]);
+		expect(r.count).toBe(2);
+	});
+
+	it("keeps every item when visibleOnly is off", () => {
+		document.body.innerHTML = `
+			<div class="row">one</div>
+			<div class="row">two</div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		stubCheckVisibility(rows[0], true);
+		stubCheckVisibility(rows[1], false);
+		const r = extractListFrom(rows);
+		expect(r.count).toBe(2);
+	});
+
+	it("refuses to guess when the host has no checkVisibility", () => {
+		document.body.innerHTML = `<div class="row">one</div>`;
+		const rows = Array.from(document.querySelectorAll(".row"));
+		Object.defineProperty(rows[0], "checkVisibility", {
+			value: undefined,
+			configurable: true,
+		});
+		// Fail loud, not open: returning the row would report a filtered list
+		// that was never filtered.
+		expect(() =>
+			extractListFrom(rows, undefined, { visibleOnly: true }),
+		).toThrow(/visibleOnly requires Element.checkVisibility/);
+	});
+});
+
 describe("extractListFrom — attribute fields", () => {
 	beforeEach(() => {
 		document.body.innerHTML = "";

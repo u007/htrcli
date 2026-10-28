@@ -1110,17 +1110,40 @@ htrcli --cdp open "file://$PWD/docs/benchmarks/fixtures/gmail.html"
 
 ### Gmail — find emails (B01)
 
-Gmail virtualizes the message list: only the visible rows exist in the DOM, so
-`findAll` returns a partial slice. Use `collect` (scrolls and accumulates),
-then `extract` to turn rows into records.
+Gmail's SPA leaves the PREVIOUS view's rows in the DOM: after an `is:unread` search a plain `tr.zA` matched **87 rows for 37
+conversations** (37 visible, 50 hidden — 36 of the hidden ones read). Pass
+`--visible` so hidden rows are dropped; no CSS selector can do it.
 
 ```bash
 htrcli --cdp open "https://mail.google.com/mail/u/0/#search/is%3Aunread"
 htrcli --cdp wait --selector "div[role='main']" --timeout 15000
-htrcli --cdp collect "div[role='main'] tr"          # every row, scrolls the list
-htrcli --cdp extract list "div[role='main'] tr" \
-  --fields "sender:.yW .span,subject:.yP .span,date:.xW .span"
+htrcli --cdp extract list "tr.zA" --visible \
+  --fields "sender:span.yP||span.zF,subject:span.bog||span.bqe,date:@td.xW span@title"
 ```
+
+Selectors verified against a live inbox (2026-10-27) — the class names differ
+by row state, which is why the fields use `||` alternatives:
+
+| Field | Forms |
+|---|---|
+| sender | `span.yP` (carries `email`), `span.zF` (name only) |
+| sender address | `@span.yP@email` |
+| subject | `span.bog` (read), `span.bqe` (unread) |
+| snippet | `span.y2` |
+| date | `@td.xW span@title` (full), `span.bq3` (short) |
+
+- `--visible` drops items that `checkVisibility` reports as hidden (Chrome 105+,
+  Firefox 125+). It is **opt-in** because older hosts lack that API. A host
+  without it makes `--visible` fail with an error instead of returning hidden
+  rows as if the list had been filtered.
+- `A||B` = alternatives, first NON-EMPTY value wins. `||` is used rather than
+  `|` because `|` is live CSS (`[lang|=en]`); a `||` inside a quoted attribute
+  value is not a separator.
+- `@<css>@<attr>` asks for a DESCENDANT's attribute
+  (`date:@td.xW span@title`). The dot in the help's `@.link@href` example is the
+  CSS class marker, not syntax.
+- `collect` has no `--visible` yet — it can still return hidden rows (tracked).
+  When you use `collect`, de-dupe on a stable field such as the thread id.
 
 `extract list` returns `{"count": N, "items": [{sender, subject, date}]}`.
 A selector that names the ROWS (`.row`, `tr`) returns one item per match; a

@@ -402,6 +402,26 @@ function isOnlyOffscreen(element: Element): boolean {
 }
 
 /**
+ * Whether an element is rendered, hidden ANCESTORS, `visibility` and `opacity`
+ * included, via `Element.checkVisibility` (Chrome 105+, Firefox 125+). An SPA
+ * that leaves its previous view in the DOM looks like this.
+ *
+ * Throws when the host lacks the API: the caller asked to exclude hidden
+ * elements, so keeping them would report an unverified result as filtered.
+ */
+export function isRendered(element: Element): boolean {
+	const check = (
+		element as Element & { checkVisibility?: (opts?: object) => boolean }
+	).checkVisibility;
+	if (typeof check !== "function") {
+		throw new Error(
+			"visibleOnly requires Element.checkVisibility (Chrome 105+, Firefox 125+)",
+		);
+	}
+	return check.call(element, { checkOpacity: true, checkVisibilityCSS: true });
+}
+
+/**
  * Check if an element is enabled (not disabled)
  */
 function isEnabled(element: Element): boolean {

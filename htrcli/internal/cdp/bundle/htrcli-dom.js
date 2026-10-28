@@ -436,6 +436,15 @@
     if (rect.width === 0 || rect.height === 0) return false;
     return !isVisible(element);
   }
+  function isRendered(element) {
+    const check = element.checkVisibility;
+    if (typeof check !== "function") {
+      throw new Error(
+        "visibleOnly requires Element.checkVisibility (Chrome 105+, Firefox 125+)"
+      );
+    }
+    return check.call(element, { checkOpacity: true, checkVisibilityCSS: true });
+  }
   function isEnabled(element) {
     if (element instanceof HTMLInputElement) return !element.disabled;
     if (element instanceof HTMLSelectElement) return !element.disabled;
@@ -860,12 +869,25 @@
     } else if (roots.length === 1) {
       items = isContainerElement(roots[0]) ? listItemsOf(roots[0]) : [roots[0]];
     }
+    if (options == null ? void 0 : options.visibleOnly) {
+      items = items.filter(isRendered);
+    }
+    const fieldPlans = fields && Object.keys(fields).length > 0 ? Object.entries(fields).map(([name, sel]) => ({
+      name,
+      sel,
+      alternatives: alternativesOf(name, sel)
+    })) : [];
     const out = [];
     for (const item of items) {
-      if (fields && Object.keys(fields).length > 0) {
+      if (fieldPlans.length > 0) {
         const row = {};
-        for (const [name, sel] of Object.entries(fields)) {
-          row[name] = readFieldValue(item, sel, name);
+        for (const plan of fieldPlans) {
+          row[plan.name] = readFieldValue(
+            item,
+            plan.alternatives,
+            plan.sel,
+            plan.name
+          );
         }
         out.push(row);
       } else {
@@ -874,9 +896,20 @@
     }
     return { items: out, count: out.length };
   }
-  function readFieldValue(item, sel, name) {
+  function alternativesOf(name, sel) {
+    const alternatives = splitFieldAlternatives(sel);
+    if (alternatives.length === 0) {
+      throw new Error(`invalid selector for field "${name}": ${sel} (empty)`);
+    }
+    return alternatives;
+  }
+  function readFieldValue(item, alternatives, sel, name) {
     try {
-      return readFieldValueUnsafe(item, sel);
+      for (const alternative of alternatives) {
+        const value = readFieldValueUnsafe(item, alternative);
+        if (value !== "") return value;
+      }
+      return "";
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       throw new Error(
@@ -886,6 +919,38 @@
         }
       );
     }
+  }
+  function splitFieldAlternatives(sel) {
+    const parts = [];
+    let current = "";
+    let quote = "";
+    for (let i = 0; i < sel.length; i++) {
+      const ch = sel[i];
+      if (quote !== "") {
+        current += ch;
+        if (ch === "\\" && i + 1 < sel.length) {
+          i++;
+          current += sel[i];
+        } else if (ch === quote) {
+          quote = "";
+        }
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        current += ch;
+        continue;
+      }
+      if (ch === "|" && sel[i + 1] === "|") {
+        parts.push(current);
+        current = "";
+        i++;
+        continue;
+      }
+      current += ch;
+    }
+    parts.push(current);
+    return parts.map((part) => part.trim()).filter((part) => part !== "");
   }
   function readFieldValueUnsafe(item, sel) {
     const attr = parseAttributeField(sel);
@@ -1560,7 +1625,8 @@
     }
     const fields = (options == null ? void 0 : options.fields) && typeof options.fields === "object" ? options.fields : void 0;
     return extractListFrom(roots, fields, {
-      container: (options == null ? void 0 : options.container) === true
+      container: (options == null ? void 0 : options.container) === true,
+      visibleOnly: (options == null ? void 0 : options.visibleOnly) === true
     });
   }
   function isAbsent(target) {
