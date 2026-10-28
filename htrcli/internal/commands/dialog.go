@@ -60,9 +60,10 @@ func formatDialogEntries(resp *api.EventsResponse) string {
 }
 
 var (
-	dialogHandleAction string
-	dialogHandleText   string
-	dialogListSince    int
+	dialogHandleAction    string
+	dialogHandleText      string
+	dialogHandleTimeoutMS int
+	dialogListSince       int
 )
 
 var dialogCmd = &cobra.Command{
@@ -74,12 +75,12 @@ var dialogHandleCmd = &cobra.Command{
 	Use:   "handle",
 	Short: "Arm a policy for the next JavaScript dialog(s)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if UseCDP() {
-			return errUnsupportedCDP("dialog handle")
-		}
 		action, err := parseDialogAction(dialogHandleAction)
 		if err != nil {
 			return err
+		}
+		if UseCDP() {
+			return runDialogHandleCDP(action, dialogHandleText, dialogHandleTimeoutMS)
 		}
 		tabID, err := GetTabID()
 		if err != nil {
@@ -114,7 +115,7 @@ var dialogListCmd = &cobra.Command{
 	Short: "List handled dialogs",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
-			return errUnsupportedCDP("dialog list")
+			return fmt.Errorf("dialog list is not supported over --cdp: each --cdp command is a new CDP session with no dialog buffer, so earlier dialogs cannot be listed; use `dialog handle --cdp` in the background before the action that opens the dialog, or run with --transport ext")
 		}
 		tabID, err := GetTabID()
 		if err != nil {
@@ -137,6 +138,7 @@ var dialogListCmd = &cobra.Command{
 func init() {
 	dialogHandleCmd.Flags().StringVar(&dialogHandleAction, "action", "accept", "accept, dismiss, or respond")
 	dialogHandleCmd.Flags().StringVar(&dialogHandleText, "text", "", "response text (used with --action respond)")
+	dialogHandleCmd.Flags().IntVar(&dialogHandleTimeoutMS, "timeout", 10000, "over --cdp: how long to wait for a dialog to open, in ms (no effect on the extension transport)")
 	dialogListCmd.Flags().IntVar(&dialogListSince, "since", 0, "cursor to list after")
 
 	dialogCmd.AddCommand(dialogHandleCmd)

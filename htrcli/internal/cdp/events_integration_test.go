@@ -50,7 +50,7 @@ func startEventsBrowser(t *testing.T, port int) string {
 		t.Skipf("no Chrome available: %v", err)
 	}
 	t.Setenv("HOME", t.TempDir())
-	st, err := StartBrowser(chrome, port, true)
+	st, err := StartBrowser(chrome, port, true, strings.Fields(os.Getenv("HTRCLI_CHROME_ARGS")))
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}

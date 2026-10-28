@@ -170,6 +170,20 @@ Supported `--action` values: `accept`, `dismiss`, `respond`. With `respond`,
 pass `--text` with the prompt answer. `dialog list` prints a warning when the
 buffer evicted older entries.
 
+Over `--cdp` there is no daemon buffer, so `dialog handle` becomes a foreground
+waiter: it blocks until the next dialog opens or `--timeout` (ms, default
+10000) passes, answers it, prints what it was, and exits. Start it in the
+background before the action that opens the dialog:
+
+```bash
+htrcli --cdp dialog handle --action accept --timeout 10000 &
+htrcli --cdp click "#delete"
+wait
+```
+
+`--timeout` has no effect on the extension transport, which only arms the policy. `dialog list` is rejected
+over `--cdp`, because no dialog buffer survives between `--cdp` commands.
+
 The daemon pings each relay every 15s (`{"type":"ping"}`); the extension
 replies with `{"type":"heartbeat"}`. Any relay silent for 45s is force-closed
 and its tabs dropped, so stale/duplicate relays (e.g. a browser respawned its
@@ -216,6 +230,7 @@ htrcli --cdp click "#submit"
 htrcli --cdp screenshot out.png
 htrcli --cdp eval "document.title"
 htrcli --cdp tabs list               # CDP page targets (no "Active" column)
+htrcli --cdp cdp Browser.getVersion  # raw DevTools method (see Inspection)
 ```
 
 ### Tab-ID namespace
@@ -251,6 +266,62 @@ htrcli config set-chrome-path /path/to/chrome   # if not auto-detected
 Flags override config in both directions: `--transport ext` beats a
 `transport=cdp` config, and `--cdp` beats a `transport=ext` config. If both
 flags are passed, `--transport` wins (`--cdp` is only shorthand).
+
+Chrome discovery covers macOS, Linux (`google-chrome` or `chromium` on `PATH`, then `/usr/bin` and `/snap/bin`) and Windows (`Program Files`, `Program Files (x86)`, `LOCALAPPDATA`). `set-chrome-path` is tried first; if it cannot be run, discovery continues and a warning names the path and why.
+
+Extra Chrome arguments apply to every Chrome htrcli launches. Set them in config, or add one for a single start with the repeatable `--chrome-arg` flag:
+
+```bash
+htrcli config set-chrome-args -- --no-sandbox --disable-dev-shm-usage
+htrcli browser start --chrome-arg --window-size=390,844
+HTRCLI_CHROME_ARGS="--no-sandbox --disable-dev-shm-usage" htrcli browser start
+```
+
+Flag values are appended after the config list. `HTRCLI_CHROME_ARGS` replaces the config list instead, and it splits on whitespace, so an argument containing a space cannot pass through it. A Chrome that is already running keeps the arguments it started with. htrcli rejects `--remote-debugging-port`, `--remote-debugging-address` and `--user-data-dir` in any form, because the debugging port must stay on localhost and `browser stop` relies on the profile directory.
+
+Containers without user namespaces need Chrome's sandbox off: `htrcli config set-chrome-args -- --no-sandbox --disable-dev-shm-usage`.
+
+Chrome's stdout and stderr go to `chrome-stderr.log` inside that Chrome's profile directory (`~/.htrcli/chrome-profile/` by default, `~/.htrcli/contexts/<name>/` for a named context), truncated on each launch of that profile. A failed start quotes the last lines of that log in its error, and `htrcli browser status` prints the path (for `--context`, that context's path).
+
+### Emulation over `--cdp`
+
+```bash
+htrcli --cdp emulate viewport 390x844 --scale 3 --mobile   # phone viewport, device scale 3, mobile + touch
+htrcli --cdp emulate color-scheme dark                     # prefers-color-scheme: dark (none removes it)
+htrcli --cdp emulate user-agent "Mozilla/5.0 (iPhone; …)"  # empty string removes it
+htrcli --cdp emulate show                                  # stored emulation for this port (--json works)
+htrcli --cdp emulate reset                                 # remove everything for this port
+```
+
+Each setting is saved to `~/.htrcli/emulation.json`, keyed by CDP port, and
+re-applied at the start of every `--cdp` page command. CDP emulation lasts only as
+long as one DevTools session, and each page command opens its own. Browser-level
+commands (`tabs new`, `tabs close`, `browser hide`, `browser show`) open a
+browser session instead and do not apply it. The
+setting command prints what the page reports after applying it: `innerWidth`,
+`innerHeight`, `prefers-color-scheme`, and the user agent.
+
+- `screenshot` and `page` reflect the emulated viewport on the next call.
+- `tabs new` opens a tab that gets the emulation on its first htrcli command, not before. A page loaded in between may need `reload`.
+- Emulation is per CDP port, not per tab. `browser stop` does not clear it, so a restarted browser is emulated again. Run `emulate reset` to clear it.
+- A value the browser rejects is not saved. The command fails, and later `--cdp` commands keep the setting stored before it. A stored entry that cannot be applied fails only its own port, and `HTRCLI_CDP_PORT=<port> htrcli --cdp emulate reset` clears it.
+- `emulate` is CDP-only. The extension transport rejects it.
+
+### Navigation, scroll, PDF and annotated screenshots over `--cdp`
+
+`scroll`, `back`, `forward`, `printpdf`, `screenshot --annotate` and
+`dialog handle` run over `--cdp` as well as on the extension transport.
+
+```bash
+htrcli --cdp scroll down 300                    # window.scrollBy; reports the position it lands on
+htrcli --cdp back                               # Page.navigateToHistoryEntry; waits for readyState complete
+htrcli --cdp screenshot --annotate "h1,#submit" out.png
+htrcli --cdp printpdf out.pdf                   # Page.printToPDF with backgrounds
+```
+
+- `scroll` takes `up`, `down`, `left` or `right`; any other direction is rejected before the browser is contacted.
+- `back` and `forward` wait for the destination document to report `readyState` `complete` at the history entry's URL. They do not wait for `load`, because a page restored from the back-forward cache fires no load event.
+- `--annotate` resolves each selector with the same resolver `click` uses. Boxes are numbered in argument order and removed after the capture, including on failure.
 
 ### Forms over `--cdp`: `pick`, `fill-form`, `--frame`
 
@@ -469,7 +540,10 @@ htrcli command '{"action":"findAll","target":{"selector":"a"}}'  # multiple elem
 htrcli page                                # Get page info
 htrcli eval <javascript>                   # Execute JS in the page's main world
 htrcli command <json>                      # Raw JSON command (any action)
+htrcli --cdp cdp <Domain.method> [params-json]  # Raw DevTools method (--cdp only)
 ```
+
+`command` sends htrcli's extension action JSON and is not available over `--cdp`. Over `--cdp`, `cdp <Domain.method> [params-json]` sends one raw DevTools Protocol method and prints its result. Each `cdp` call opens its own session, so session-scoped state such as `Emulation.*` lasts only for that call; use `emulate` for persistent emulation.
 
 `eval` accepts both single expressions (`htrcli eval "document.title"`) and
 **multi-statement scripts with an explicit `return`** (e.g.
@@ -522,6 +596,7 @@ Priority: flags > env vars (`HTRCLI_SERVER`, `HTRCLI_TOKEN`) > config file > def
 - [HTR NControl](https://github.com/u007/htrncontrol) extension installed (Chrome or Firefox)
 - The native-messaging daemon on :3845 (`htrcli serve`)
 - Go 1.22+ (for building from source)
+- Chrome for `htrcli browser start`: auto-discovered on macOS, Linux and Windows, or set with `htrcli config set-chrome-path`
 - **ffmpeg ≥ 6** on `PATH` for video recording (`htrcli record`; `brew install ffmpeg`). Missing ffmpeg produces an explicit error at both `record start` and `record stop` — never a hang.
 
 ## Named Browser Contexts

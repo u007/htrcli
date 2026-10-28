@@ -114,7 +114,7 @@ func TestEnsureContextReusesLivePort(t *testing.T) {
 	}
 
 	// chromePath "" is fine: a live port means EnsureContext never launches.
-	got, err := EnsureContext("work", "", false)
+	got, err := EnsureContext("work", "", false, nil)
 	if err != nil {
 		t.Fatalf("EnsureContext: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestEnsureContextReusesLivePort(t *testing.T) {
 }
 
 func TestEnsureContextRejectsEmptyName(t *testing.T) {
-	if _, err := EnsureContext("", "", false); err == nil {
+	if _, err := EnsureContext("", "", false, nil); err == nil {
 		t.Fatal("expected error for empty context name")
 	}
 }
@@ -142,7 +142,7 @@ func TestEnsureContextCleansUpWhenRegistryWriteFails(t *testing.T) {
 		terminateProcessFn = origTerminate
 	}()
 
-	launchChromeFn = func(_ string, port int, _ string, _ bool) (int, error) {
+	launchChromeFn = func(_ string, port int, _ string, _ bool, _ []string) (int, error) {
 		return 4242, nil
 	}
 	upsertContextFn = func(ContextEntry) error {
@@ -157,7 +157,7 @@ func TestEnsureContextCleansUpWhenRegistryWriteFails(t *testing.T) {
 		return nil
 	}
 
-	port, err := EnsureContext("work", "/tmp/chrome", false)
+	port, err := EnsureContext("work", "/tmp/chrome", false, nil)
 	if err == nil {
 		t.Fatal("expected EnsureContext to fail when registry write fails")
 	}
@@ -171,7 +171,7 @@ func TestEnsureContextCleansUpWhenRegistryWriteFails(t *testing.T) {
 
 // stubEnsureContextSeams swaps the launch/listen seams for one test and
 // restores them on cleanup.
-func stubEnsureContextSeams(t *testing.T, launch func(string, int, string, bool) (int, error), listen func(int) (int, error)) {
+func stubEnsureContextSeams(t *testing.T, launch func(string, int, string, bool, []string) (int, error), listen func(int) (int, error)) {
 	t.Helper()
 	origLaunch := launchChromeFn
 	origListening := listeningPIDFn
@@ -188,11 +188,11 @@ func TestEnsureContextAdoptsLiveListenerPID(t *testing.T) {
 	// launchChrome reports the port as already answered (pid 0): the registry
 	// must record the real listener instead of 0.
 	stubEnsureContextSeams(t,
-		func(string, int, string, bool) (int, error) { return 0, nil },
+		func(string, int, string, bool, []string) (int, error) { return 0, nil },
 		func(int) (int, error) { return 4242, nil },
 	)
 
-	if _, err := EnsureContext("work", "/tmp/chrome", false); err != nil {
+	if _, err := EnsureContext("work", "/tmp/chrome", false, nil); err != nil {
 		t.Fatalf("EnsureContext: %v", err)
 	}
 	entry, err := FindContext("work")
@@ -202,16 +202,38 @@ func TestEnsureContextAdoptsLiveListenerPID(t *testing.T) {
 	if entry.PID != 4242 {
 		t.Fatalf("want adopted pid 4242, got %d", entry.PID)
 	}
+	if entry.StderrLog != "" {
+		t.Fatalf("an adopted listener's log is not ours to record, got %q", entry.StderrLog)
+	}
+}
+
+func TestEnsureContextRecordsStderrLogWhenLaunched(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	stubEnsureContextSeams(t,
+		func(string, int, string, bool, []string) (int, error) { return 4242, nil },
+		func(int) (int, error) { return 0, errors.New("listener must not be consulted for a launched Chrome") },
+	)
+
+	if _, err := EnsureContext("work", "/tmp/chrome", false, nil); err != nil {
+		t.Fatalf("EnsureContext: %v", err)
+	}
+	entry, err := FindContext("work")
+	if err != nil || entry == nil {
+		t.Fatalf("FindContext: %+v %v", entry, err)
+	}
+	if want := ChromeStderrLogPath(entry.ProfileDir); entry.StderrLog != want {
+		t.Fatalf("stderr_log = %q, want %q", entry.StderrLog, want)
+	}
 }
 
 func TestEnsureContextRefusesUnidentifiableListener(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	stubEnsureContextSeams(t,
-		func(string, int, string, bool) (int, error) { return 0, nil },
+		func(string, int, string, bool, []string) (int, error) { return 0, nil },
 		func(int) (int, error) { return 0, errors.New("no listener") },
 	)
 
-	if _, err := EnsureContext("work", "/tmp/chrome", false); err == nil {
+	if _, err := EnsureContext("work", "/tmp/chrome", false, nil); err == nil {
 		t.Fatal("expected an error when the listener pid cannot be resolved")
 	}
 	entries, err := ReadContexts()
@@ -226,7 +248,7 @@ func TestEnsureContextRefusesUnidentifiableListener(t *testing.T) {
 func TestEnsureContextDoesNotKillAdoptedListenerOnRegistryFailure(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	stubEnsureContextSeams(t,
-		func(string, int, string, bool) (int, error) { return 0, nil },
+		func(string, int, string, bool, []string) (int, error) { return 0, nil },
 		func(int) (int, error) { return 4242, nil },
 	)
 
@@ -243,7 +265,7 @@ func TestEnsureContextDoesNotKillAdoptedListenerOnRegistryFailure(t *testing.T) 
 		return nil
 	}
 
-	if _, err := EnsureContext("work", "/tmp/chrome", false); err == nil {
+	if _, err := EnsureContext("work", "/tmp/chrome", false, nil); err == nil {
 		t.Fatal("expected failure when the registry write fails")
 	}
 	if killed {

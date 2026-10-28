@@ -3,10 +3,12 @@ package commands
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -14,14 +16,57 @@ import (
 )
 
 type configData struct {
-	Server       string            `json:"server"`
-	Token        string            `json:"token"`
-	AMOAPIKey    string            `json:"amo-api-key"`
-	AMOAPISecret string            `json:"amo-api-secret"`
-	Transport    string            `json:"transport,omitempty"`
-	CDPPort      int               `json:"cdp-port,omitempty"`
-	ChromePath   string            `json:"chrome-path,omitempty"`
-	ExtensionID  map[string]string `json:"extension-id,omitempty"`
+	Server       string       `json:"server"`
+	Token        string       `json:"token"`
+	AMOAPIKey    string       `json:"amo-api-key"`
+	AMOAPISecret string       `json:"amo-api-secret"`
+	Transport    string       `json:"transport,omitempty"`
+	CDPPort      int          `json:"cdp-port,omitempty"`
+	ChromePath   string       `json:"chrome-path,omitempty"`
+	ChromeArgs   []string     `json:"chrome-args,omitempty"`
+	ExtensionID  extensionIDs `json:"extension-id,omitempty"`
+}
+
+// defaultExtensionIDKey is the extensionIDs key that holds the ID for every
+// browser. No browser is named "", so it cannot clash with a per-browser ID.
+const defaultExtensionIDKey = ""
+
+// extensionIDs maps a browser to its extension ID. The all-browsers ID is stored
+// as a plain JSON string (what set-extension-id writes by default) and per-browser
+// IDs as an object. Each shape marshals back to the shape it was read from.
+// Anything else is an error, so an unreadable value is never rewritten away.
+type extensionIDs map[string]string
+
+func (e extensionIDs) MarshalJSON() ([]byte, error) {
+	if id, ok := e[defaultExtensionIDKey]; ok && len(e) == 1 {
+		return json.Marshal(id)
+	}
+	return json.Marshal(map[string]string(e))
+}
+
+func (e *extensionIDs) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	switch {
+	case strings.HasPrefix(trimmed, `"`):
+		var id string
+		if err := json.Unmarshal([]byte(trimmed), &id); err != nil {
+			return fmt.Errorf("extension-id string: %w", err)
+		}
+		*e = extensionIDs{defaultExtensionIDKey: id}
+		return nil
+	case strings.HasPrefix(trimmed, "{"):
+		var ids map[string]string
+		if err := json.Unmarshal([]byte(trimmed), &ids); err != nil {
+			return fmt.Errorf("extension-id object: %w", err)
+		}
+		if _, ok := ids[defaultExtensionIDKey]; ok {
+			return errors.New(`extension-id object must not name a browser ""; set the all-browsers ID as a plain string`)
+		}
+		*e = ids
+		return nil
+	default:
+		return fmt.Errorf("extension-id must be a string or an object of browser IDs, got %s", trimmed)
+	}
 }
 
 var configCmd = &cobra.Command{
@@ -41,6 +86,7 @@ var configShowCmd = &cobra.Command{
 			Transport:    viper.GetString("transport"),
 			CDPPort:      viper.GetInt("cdp-port"),
 			ChromePath:   viper.GetString("chrome-path"),
+			ChromeArgs:   viper.GetStringSlice("chrome-args"),
 			ExtensionID:  viper.GetStringMapString("extension-id"),
 		}
 		if cfg.Server == "" {
@@ -63,6 +109,7 @@ var configShowCmd = &cobra.Command{
 		fmt.Printf("Transport: %s\n", cmp.Or(cfg.Transport, "ext"))
 		fmt.Printf("CDP port: %d\n", cmp.Or(cfg.CDPPort, 9222))
 		fmt.Printf("Chrome path: %s\n", cmp.Or(cfg.ChromePath, "(autodetect)"))
+		fmt.Printf("Chrome args: %s\n", cmp.Or(strings.Join(cfg.ChromeArgs, " "), "(none)"))
 		if extID := viper.GetString("extension-id"); extID != "" {
 			fmt.Printf("Extension ID: %s\n", extID)
 		} else if len(cfg.ExtensionID) > 0 {
@@ -93,72 +140,79 @@ var configSetTokenCmd = &cobra.Command{
 }
 
 func setConfigValue(key, value string) error {
+	var stored any = value
+	err := updateConfigFile(func(cfg *configData) error {
+		switch key {
+		case "server":
+			cfg.Server = value
+		case "token":
+			cfg.Token = value
+		case "amo-api-key":
+			cfg.AMOAPIKey = value
+		case "amo-api-secret":
+			cfg.AMOAPISecret = value
+		case "transport":
+			cfg.Transport = value
+		case "cdp-port":
+			p, err := strconv.Atoi(value)
+			if err != nil || p < 1 || p > 65535 {
+				return fmt.Errorf("cdp-port must be a port number, got %q", value)
+			}
+			cfg.CDPPort = p
+			stored = p
+		case "chrome-path":
+			cfg.ChromePath = value
+		default:
+			return fmt.Errorf("unknown config key %q", key)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	viper.Set(key, stored)
+	fmt.Printf("Set %s to %v\n", key, stored)
+	return nil
+}
+
+// updateConfigFile loads ~/.htrcli/config.json, applies mutate, and writes the
+// result back. A missing file is the first-run case and starts from an empty
+// config. A file that exists but does not parse is an error, so a broken config
+// is never rewritten without the keys it could not read. When mutate fails,
+// nothing is written.
+func updateConfigFile(mutate func(*configData) error) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
-
 	configDir := filepath.Join(home, ".htrcli")
 	if err := os.MkdirAll(configDir, 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
-
 	configFile := filepath.Join(configDir, "config.json")
 
-	// Read existing config.
 	var cfg configData
-	if data, err := os.ReadFile(configFile); err == nil {
-		_ = json.Unmarshal(data, &cfg)
-	}
-
-	// Update value.
-	switch key {
-	case "server":
-		cfg.Server = value
-	case "token":
-		cfg.Token = value
-	case "amo-api-key":
-		cfg.AMOAPIKey = value
-	case "amo-api-secret":
-		cfg.AMOAPISecret = value
-	case "transport":
-		cfg.Transport = value
-	case "cdp-port":
-		p, err := strconv.Atoi(value)
-		if err != nil || p < 1 || p > 65535 {
-			return fmt.Errorf("cdp-port must be a port number, got %q", value)
+	data, err := os.ReadFile(configFile)
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return fmt.Errorf("failed to parse %s: %w", configFile, err)
 		}
-		cfg.CDPPort = p
-		viper.Set(key, p)
-		data, err := json.MarshalIndent(cfg, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal config: %w", err)
-		}
-		if err := os.WriteFile(configFile, data, 0600); err != nil {
-			return fmt.Errorf("failed to write config: %w", err)
-		}
-		fmt.Printf("Set %s to %d\n", key, p)
-		return nil
-	case "chrome-path":
-		cfg.ChromePath = value
+	case errors.Is(err, os.ErrNotExist):
+		// intentionally not logged: no config file yet, the write below creates it
 	default:
-		return fmt.Errorf("unknown config key %q", key)
+		return fmt.Errorf("failed to read %s: %w", configFile, err)
 	}
-
-	// Write config.
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err := mutate(&cfg); err != nil {
+		return err
+	}
+	out, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
-
-	if err := os.WriteFile(configFile, data, 0600); err != nil {
+	if err := os.WriteFile(configFile, out, 0600); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
-
-	// Also update viper.
-	viper.Set(key, value)
-
-	fmt.Printf("Set %s to %s\n", key, value)
 	return nil
 }
 
@@ -226,6 +280,36 @@ var configSetChromePathCmd = &cobra.Command{
 	},
 }
 
+var configSetChromeArgsCmd = &cobra.Command{
+	Use:   "set-chrome-args [arg...]",
+	Short: "Set extra Chrome arguments for every htrcli-launched Chrome (no args clears them)",
+	Long: `Set extra Chrome command-line arguments for every Chrome htrcli launches.
+Arguments that start with a dash need the -- separator:
+  htrcli config set-chrome-args -- --no-sandbox --disable-dev-shm-usage`,
+	Args: cobra.ArbitraryArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setConfigChromeArgs(args)
+	},
+}
+
+// setConfigChromeArgs replaces the chrome-args list in config.json. A nil list
+// clears the key, which omitempty then drops from the file.
+func setConfigChromeArgs(args []string) error {
+	if err := updateConfigFile(func(cfg *configData) error {
+		cfg.ChromeArgs = args
+		return nil
+	}); err != nil {
+		return err
+	}
+	viper.Set("chrome-args", args)
+	if len(args) == 0 {
+		fmt.Println("Cleared chrome-args")
+		return nil
+	}
+	fmt.Printf("Set chrome-args to: %s\n", strings.Join(args, " "))
+	return nil
+}
+
 func init() {
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configSetServerCmd)
@@ -235,6 +319,7 @@ func init() {
 	configCmd.AddCommand(configSetTransportCmd)
 	configCmd.AddCommand(configSetCDPPortCmd)
 	configCmd.AddCommand(configSetChromePathCmd)
+	configCmd.AddCommand(configSetChromeArgsCmd)
 	configCmd.AddCommand(setExtensionIDCmd)
 	setExtensionIDCmd.Flags().StringVar(&setExtensionIDBrowser, "browser", "", "Browser this ID applies to (chrome, firefox). Empty = default for all.")
 	rootCmd.AddCommand(configCmd)
@@ -248,51 +333,38 @@ var setExtensionIDCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get home directory: %w", err)
-		}
-		configDir := filepath.Join(home, ".htrcli")
-		if err := os.MkdirAll(configDir, 0700); err != nil {
-			return fmt.Errorf("failed to create config directory: %w", err)
-		}
-		configFile := filepath.Join(configDir, "config.json")
-
-		// Read the existing config as a raw map so we never drop keys
-		// owned by other subcommands (e.g. token, server).
-		raw := map[string]any{}
-		if data, rerr := os.ReadFile(configFile); rerr == nil {
-			_ = json.Unmarshal(data, &raw)
-		}
-
-		extID := map[string]string{}
-		if existing, ok := raw["extension-id"].(map[string]any); ok {
-			for k, v := range existing {
-				if s, ok := v.(string); ok {
-					extID[k] = s
+		var droppedDefault *string
+		err := updateConfigFile(func(cfg *configData) error {
+			if setExtensionIDBrowser == "" {
+				// Default ID applies to all browsers: stored as a plain string.
+				cfg.ExtensionID = extensionIDs{defaultExtensionIDKey: id}
+				return nil
+			}
+			ids := extensionIDs{}
+			for browser, existing := range cfg.ExtensionID {
+				if browser != defaultExtensionIDKey {
+					ids[browser] = existing
 				}
 			}
+			if existing, ok := cfg.ExtensionID[defaultExtensionIDKey]; ok {
+				droppedDefault = &existing
+			}
+			ids[setExtensionIDBrowser] = id
+			cfg.ExtensionID = ids
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-
+		if droppedDefault != nil {
+			fmt.Fprintf(os.Stderr, "[htrcli] the all-browsers extension-id %s was dropped: per-browser IDs are stored as an object, which cannot also hold it. Run set-extension-id <id> again to restore it for the other browsers.\n", *droppedDefault)
+		}
 		if setExtensionIDBrowser == "" {
-			// Default ID applies to all browsers: stored as a plain string.
-			raw["extension-id"] = id
 			viper.Set("extension-id", id)
 		} else {
-			extID[setExtensionIDBrowser] = id
-			raw["extension-id"] = extID
-			viper.Set("extension-id", extID)
 			// Also set the dotted key so `viper.GetString("extension-id.<browser>")`
 			// resolves directly.
 			viper.Set("extension-id."+setExtensionIDBrowser, id)
-		}
-
-		out, merr := json.MarshalIndent(raw, "", "  ")
-		if merr != nil {
-			return fmt.Errorf("failed to marshal config: %w", merr)
-		}
-		if werr := os.WriteFile(configFile, out, 0600); werr != nil {
-			return fmt.Errorf("failed to write config: %w", werr)
 		}
 
 		which := setExtensionIDBrowser

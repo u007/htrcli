@@ -48,7 +48,7 @@ var backCmd = &cobra.Command{
 	Short: "Go back",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
-			return errUnsupportedCDP("back")
+			return runHistoryCDP(-1)
 		}
 		c := GetClient()
 		tabID, err := GetTabID()
@@ -81,7 +81,7 @@ var forwardCmd = &cobra.Command{
 	Short: "Go forward",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
-			return errUnsupportedCDP("forward")
+			return runHistoryCDP(1)
 		}
 		c := GetClient()
 		tabID, err := GetTabID()

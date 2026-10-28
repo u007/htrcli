@@ -114,3 +114,33 @@ func TestResolveDragTargetCDPReportsStaleRefs(t *testing.T) {
 		}
 	}
 }
+
+func TestScrollDelta(t *testing.T) {
+	cases := []struct {
+		direction string
+		pixels    int
+		dx, dy    int
+		wantErr   bool
+	}{
+		{"down", 300, 0, 300, false},
+		{"up", 300, 0, -300, false},
+		{"left", 50, -50, 0, false},
+		{"right", 50, 50, 0, false},
+		{"sideways", 50, 0, 0, true},
+	}
+	for _, tc := range cases {
+		dx, dy, err := scrollDelta(tc.direction, tc.pixels)
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("scrollDelta(%q) error = nil, want error", tc.direction)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("scrollDelta(%q): %v", tc.direction, err)
+		}
+		if dx != tc.dx || dy != tc.dy {
+			t.Fatalf("scrollDelta(%q, %d) = (%d, %d), want (%d, %d)", tc.direction, tc.pixels, dx, dy, tc.dx, tc.dy)
+		}
+	}
+}

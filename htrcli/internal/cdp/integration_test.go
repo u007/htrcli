@@ -95,7 +95,7 @@ func startIntegrationBrowser(t *testing.T, port int) (*Session, string) {
 	}
 	t.Setenv("HOME", t.TempDir()) // fresh profile + state file
 
-	st, err := StartBrowser(chrome, port, true /* headless */)
+	st, err := StartBrowser(chrome, port, true /* headless */, strings.Fields(os.Getenv("HTRCLI_CHROME_ARGS")))
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}

@@ -21,12 +21,13 @@
 - Resolved 2026-10-08: cross-realm args in `--frame` scoped calls — `scopedExpr` now ships the args as a JSON string and parses them with the frame realm's own `JSON.parse`, so the objects a frame function receives carry frame-realm prototypes (pinned by `TestScopedExpr`).
 - `fill-form` rejects a selector that matches several elements (incl. a whole checkbox/radio group); a "choose radio by value" form is not implemented.
 - Resolved 2026-10-07: `pick` types the full requested text as the query (decision: "type the full text"; no `--query` flag).
-- Integration tests set a temp `HOME`, and on macOS headless Chrome then cannot reach the login keychain: once the OS shows its keychain dialog, every network load in the test browser hangs (seen 2026-10-07; `about:blank`-only `TestCDPEndToEnd` is unaffected). Workaround: run with `HTRCLI_CHROME_PATH` pointing at a wrapper that execs Chrome with `--use-mock-keychain`. A proper fix needs a test-only launch-args hook in `StartBrowser`.
+- Integration tests set a temp `HOME`, and on macOS headless Chrome then cannot reach the login keychain: once the OS shows its keychain dialog, every network load in the test browser hangs (seen 2026-10-07; `about:blank`-only `TestCDPEndToEnd` is unaffected). Workaround: run with `HTRCLI_CHROME_ARGS=--use-mock-keychain`; the integration tests pass that variable to `StartBrowser`.
 
 ## htrcli dialog handling — known limitations
 
 - The Firefox MAIN-world override is racy against dialogs a page fires before it lands at document_start, and cannot intercept native beforeunload dialogs (Chrome CDP handles beforeunload; Firefox does not).
 - Dialog handling shares the refcounted debuggerManager with network capture; the "Already attached" limitation from the network plan's TODO applies here too.
+- Over `--cdp`, `dialog list` is not available, and persistent dialog policies are not available either. Each `--cdp` command opens and closes its own session, so there is no long-lived session to hold a policy or a dialog buffer. `dialog handle --cdp` is a foreground waiter that must be started before the action that opens the dialog.
 
 ## Low-level input primitives — known limitations (2026-08-24)
 
@@ -270,3 +271,18 @@ regression test that failed beforehand (or, where noted, a real-Chromium check).
 
 - CDP `@eN` refs are not translated for `wait`: `waitCDPSelector` sends the ref straight to the page bundle, whose refRegistry only knows refs minted in-page, so `wait @eN` on `--cdp` fails with "not known on this page" on every tick. The detached-element branch (`isDetachedRefError` in `htrcli/internal/commands/wait.go`) is therefore unreachable on CDP until refs are resolved through the CLI ref store (backendNodeId) inside the wait loop. Found by code reading; not run against a browser.
 - Extension compatibility is checked by response shape (`wait --gone` requires `data.gone == true`), because the `identify` handshake carries no protocol or capability version. Add a version/capability field so an old extension is refused by name rather than by its answer.
+
+## emulate (--cdp) — known limitations (2026-10-28)
+
+- Emulation is stored per CDP port, not per tab. Every tab on a port gets the same viewport, color scheme, and user agent, and `--tab` cannot scope it.
+- Only viewport, device scale, mobile and touch, `prefers-color-scheme`, and user agent are implemented. Locale, timezone, geolocation, and network conditions are not.
+- `tabs new`, `tabs close`, and `browser hide`/`show` use a browser-level session, so they do not apply emulation. A tab from `tabs new` is emulated from its first page command, so it may load once unemulated.
+- A value the browser rejects is not saved. The command fails, and later `--cdp` commands keep the setting stored before it. Validation catches malformed input before it reaches the browser, not every value Chrome may refuse.
+
+## htrcli Chrome launch — known limitations (2026-10-28)
+
+- A Chrome that exits during startup still waits the full launch timeout (15s) before the error appears, because the launch loop polls the port rather than the child's exit.
+
+## htrcli raw CDP verb (`cdp`) — known limitations (2026-10-28)
+
+- `cdp <Domain.method>` is stateless per invocation: each call opens and closes its own CDP session. Keeping one session open across invocations, so `Emulation.*`, `Fetch.enable` or `Network.setExtraHTTPHeaders` persist between commands, is out of scope. Persistent emulation uses the `emulate` verb group.

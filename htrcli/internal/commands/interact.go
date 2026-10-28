@@ -191,10 +191,6 @@ var scrollCmd = &cobra.Command{
 	Short: "Scroll page (up, down, left, right)",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if UseCDP() {
-			return errUnsupportedCDP("scroll")
-		}
-		c := GetClient()
 		pixels := 500
 		if len(args) > 1 {
 			p, err := strconv.Atoi(args[1])
@@ -203,6 +199,10 @@ var scrollCmd = &cobra.Command{
 			}
 			pixels = p
 		}
+		if UseCDP() {
+			return runScrollCDP(args[0], pixels)
+		}
+		c := GetClient()
 
 		tabID, err := GetTabID()
 		if err != nil {

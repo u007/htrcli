@@ -483,6 +483,7 @@ var evalCmd = &cobra.Command{
 var commandCmd = &cobra.Command{
 	Use:   "command <json>",
 	Short: "Send raw JSON command",
+	Long:  "Sends the extension action JSON. Not available over --cdp; use `cdp <Domain.method> [params-json]` for a raw DevTools Protocol method.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if UseCDP() {
@@ -598,10 +599,10 @@ var printPDFCmd = &cobra.Command{
 	Short: "Print current tab to PDF via CDP (no save-as prompt)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if UseCDP() {
-			return errUnsupportedCDP("printpdf")
-		}
 		outputPath := args[0]
+		if UseCDP() {
+			return runPrintPDFCDP(outputPath)
+		}
 
 		c := GetClient()
 		tabID, err := GetTabID()
@@ -921,7 +922,7 @@ func init() {
 	rootCmd.AddCommand(snapshotCmd)
 	rootCmd.AddCommand(screenshotCmd)
 	screenshotCmd.Flags().BoolVar(&screenshotFullPage, "full-page", false, "capture the entire scrollable page, not just the viewport")
-	screenshotCmd.Flags().StringVar(&screenshotAnnotate, "annotate", "", "comma-separated selectors to draw numbered overlay boxes on before capture (extension transport only)")
+	screenshotCmd.Flags().StringVar(&screenshotAnnotate, "annotate", "", "comma-separated selectors to draw numbered overlay boxes on before capture")
 	rootCmd.AddCommand(pageInfoCmd)
 	rootCmd.AddCommand(evalCmd)
 	rootCmd.AddCommand(commandCmd)

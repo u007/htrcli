@@ -1,1 +1,2 @@
-- [CDP integration keychain hang](project_cdp_integration_keychain.md) — temp-HOME Chrome hangs on network loads on macOS; use --use-mock-keychain wrapper + unsandboxed Bash
+- [CDP integration keychain hang](project_cdp_integration_keychain.md) — temp-HOME Chrome hangs on network loads on macOS; set HTRCLI_CHROME_ARGS=--use-mock-keychain + unsandboxed Bash
+- [Browser smoke port](project_browser_smoke_port.md) — user's Chrome holds 9222; smoke on HTRCLI_CDP_PORT=9333, never kill it

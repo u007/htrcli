@@ -2,13 +2,18 @@ package commands
 
 import (
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/u007/htrcli/internal/cdp"
 	"github.com/u007/htrcli/internal/output"
 )
 
-var browserHeadless bool
+var (
+	browserHeadless   bool
+	browserChromeArgs []string
+)
 
 var browserCmd = &cobra.Command{
 	Use:   "browser",
@@ -27,7 +32,7 @@ var browserStartCmd = &cobra.Command{
 			return err
 		}
 		port := GetCDPPort()
-		st, err := cdp.StartBrowser(chrome, port, browserHeadless)
+		st, err := cdp.StartBrowser(chrome, port, browserHeadless, slices.Concat(GetChromeArgs(), browserChromeArgs))
 		if err != nil {
 			return err
 		}
@@ -69,12 +74,21 @@ var browserStatusCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		logPath, err := stderrLogForStatus(st)
+		if err != nil {
+			return err
+		}
 		if output.JSONOutput {
-			output.PrintJSON(map[string]any{"running": alive, "port": port, "state": st})
+			output.PrintJSON(map[string]any{"running": alive, "port": port, "state": st, "stderr_log": logPath})
 			return nil
+		}
+		logText := logPath
+		if logPath == "" {
+			logText = "not recorded (Chrome was adopted or started before stderr_log existed)"
 		}
 		if !alive {
 			fmt.Printf("Browser: not running (port %d)\n", port)
+			fmt.Printf("Chrome stderr log: %s\n", logText)
 			return nil
 		}
 		fmt.Printf("Browser: running on port %d\n", port)
@@ -84,6 +98,9 @@ var browserStatusCmd = &cobra.Command{
 				mode = "headless"
 			}
 			fmt.Printf("PID: %d (%s), started %s\n", st.PID, mode, st.StartedAt.Format("15:04:05"))
+			if len(st.Args) > 0 {
+				fmt.Printf("Args: %s\n", strings.Join(st.Args, " "))
+			}
 		}
 		if st != nil && !st.Headless {
 			if ws, err := cdp.GetWindowState(port, ""); err == nil {
@@ -94,6 +111,31 @@ var browserStatusCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// stderrLogForStatus returns the Chrome stderr log status reports: the named
+// context's when --context is set, else the default browser's. With no state
+// file it is the log the default profile would write. It is "" when the state
+// records no log.
+func stderrLogForStatus(st *cdp.BrowserState) (string, error) {
+	if contextName != "" {
+		entry, err := cdp.FindContext(contextName)
+		if err != nil {
+			return "", err
+		}
+		if entry == nil {
+			return "", fmt.Errorf("context %s is not registered", contextName)
+		}
+		return entry.StderrLog, nil
+	}
+	if st != nil {
+		return st.StderrLog, nil
+	}
+	profile, err := cdp.ProfileDir()
+	if err != nil {
+		return "", err
+	}
+	return cdp.ChromeStderrLogPath(profile), nil
 }
 
 var browserHideCmd = &cobra.Command{
@@ -128,6 +170,7 @@ var browserShowCmd = &cobra.Command{
 
 func init() {
 	browserStartCmd.Flags().BoolVar(&browserHeadless, "headless", false, "run without a window (sign in visible first — see GUIDE)")
+	browserStartCmd.Flags().StringArrayVar(&browserChromeArgs, "chrome-arg", nil, "extra Chrome command-line argument, repeatable (appended after config chrome-args)")
 	browserCmd.AddCommand(browserStartCmd)
 	browserCmd.AddCommand(browserStopCmd)
 	browserCmd.AddCommand(browserStatusCmd)

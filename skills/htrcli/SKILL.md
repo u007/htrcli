@@ -43,7 +43,7 @@ each probe costs a round trip.
    `fill-form`, below), finish with a single read-back, and fix only what the read-back shows wrong.
 6. **Scrolling is automatic.** An element that is rendered but below the fold is scrolled into view before
    `fill`/`click`/`check`/... act. "not visible" now means hidden/collapsed/zero-size (open its step, accordion or
-   menu first), not "off screen". `scroll` itself is not available over `--cdp`.
+   menu first), not "off screen".
 7. **Pick the right verb for the widget** (table below), and **verify**: read values back, submit **once**, then
    confirm from the outcome (confirmation text/URL, or `network wait`, see below).
 8. **Never** fill a field you were not given data for, solve a CAPTCHA, enter card details, or submit when told
@@ -53,7 +53,7 @@ each probe costs a round trip.
 
 | Works | Not available over `--cdp` (use `eval` or the extension transport) |
 |---|---|
-| open, find/findAll, snapshot, text/value/attr/html, click/dblclick/rightclick, fill, type, select, check/uncheck, clear, press/keydown/keyup, mouse*, drag, upload, eval, screenshot, tabs list/get/new/close (Chrome only), **pick**, **fill-form**, **--frame**, console read/watch, network read/watch/wait | scroll, back/forward, dialog handle/list, fetch, printpdf, network mock/block/unmock, trace export, screenshot --annotate |
+| open, find/findAll, snapshot, text/value/attr/html, click/dblclick/rightclick, fill, type, select, check/uncheck, clear, press/keydown/keyup, mouse*, drag, upload, eval, screenshot (incl. `--annotate`), tabs list/get/new/close (Chrome only), **pick**, **fill-form**, **--frame**, console read/watch, network read/watch/wait, **emulate** (viewport, color-scheme, user-agent), **cdp** (raw DevTools method), **scroll**, **back/forward**, **printpdf**, **dialog handle** (foreground waiter, see Dialog handling) | dialog list (no buffer survives between `--cdp` commands), fetch, network mock/block/unmock, trace export |
 
 ### Filling forms: verb per widget
 
@@ -201,6 +201,7 @@ CDP use it directly.
 # Start a dedicated Chrome controlled by htrcli
 htrcli browser start                 # visible window
 htrcli browser start --headless      # no window
+htrcli browser start --chrome-arg --no-sandbox   # extra Chrome flag for this start (repeatable)
 
 htrcli browser status                # probe the debugging port
 htrcli browser stop                  # kill the managed Chrome
@@ -226,7 +227,29 @@ htrcli --cdp eval "document.title"
 htrcli config set-transport cdp        # make --cdp the default
 htrcli config set-cdp-port 9222        # debugging port (default 9222)
 htrcli config set-chrome-path /path/to/chrome   # if not auto-detected
+htrcli config set-chrome-args -- --no-sandbox   # extra flags for every htrcli-launched Chrome (no args clears)
 ```
+
+Extra Chrome flags are also settable per start with `--chrome-arg` (repeatable). `HTRCLI_CHROME_ARGS` replaces the config list and is whitespace-split. `--remote-debugging-port`, `--remote-debugging-address` and `--user-data-dir` are rejected. Containers without user namespaces need `--no-sandbox --disable-dev-shm-usage`. Chrome's output goes to `chrome-stderr.log` in its profile directory (`~/.htrcli/chrome-profile/`, or `~/.htrcli/contexts/<name>/` for a context), and a failed start quotes its tail in the error.
+
+**Emulation (`--cdp` only):**
+
+```bash
+htrcli --cdp emulate viewport 390x844 --scale 3 --mobile   # viewport, device scale, mobile + touch
+htrcli --cdp emulate color-scheme dark                     # light | dark | none
+htrcli --cdp emulate user-agent "<string>"                 # empty string removes it
+htrcli --cdp emulate show                                  # stored emulation for this port
+htrcli --cdp emulate reset                                 # remove it all for this port
+```
+
+Settings persist in `~/.htrcli/emulation.json` per CDP port and re-apply at
+the start of every `--cdp` page command, because CDP emulation ends with each
+session. Browser-level commands (`tabs new`, `tabs close`, `browser hide`,
+`browser show`) skip it. Each set command prints the values the page reports back. Emulation is
+per port, not per tab. A tab opened by `tabs new` is emulated from its first
+htrcli command. A value the browser rejects is not saved. The command fails, and later
+commands keep the setting stored before it. A stored entry that cannot be applied
+fails only its own port; clear it with `HTRCLI_CDP_PORT=<port> htrcli --cdp emulate reset`.
 
 ## Global flags
 
@@ -665,7 +688,7 @@ htrcli screenshot --full-page --annotate "#nav,.content"   # full page + annotat
 ```
 
 `--annotate` takes a comma-separated list of selectors to draw numbered
-overlay boxes on before capture (extension transport only).
+overlay boxes on before capture. Over `--cdp` a selector that matches nothing fails the command, and the overlay is removed after the capture.
 
 ### Format options
 
@@ -828,8 +851,7 @@ htrcli fetch <url> --json                # raw JSON output
 htrcli printpdf output.pdf               # save current page as PDF
 ```
 
-Uses the extension path to generate a PDF without a save-as dialog.
-Extension-only; not available in direct `--cdp` mode.
+Generates a PDF without a save-as dialog, with backgrounds. Works on both transports.
 
 ### Upload files (no file picker)
 
@@ -932,6 +954,21 @@ htrcli dialog handle --action respond --text "my answer"
 # List handled dialogs since cursor 0
 htrcli dialog list --since 0
 ```
+
+Over `--cdp` there is no daemon to arm a policy in, so `dialog handle` is a
+foreground waiter. It blocks until the next dialog opens or `--timeout` (ms,
+default 10000) passes, answers it, prints what it was, and exits. Start it in
+the background before the action that opens the dialog:
+
+```bash
+htrcli --cdp dialog handle --action accept --timeout 10000 &
+htrcli --cdp click "#delete"      # opens confirm(); the waiter accepts it
+wait
+```
+
+`--timeout` has no effect on the extension transport, which only arms the policy. `dialog list` is not
+available over `--cdp`: each `--cdp` command is a new session, so no dialog
+buffer survives between commands.
 
 ## Video recording (Chrome/CDP only)
 
@@ -1106,6 +1143,8 @@ htrcli command '{"action":"fill","target":{"name":"email"},"value":"test@example
 htrcli command '{"action":"findAll","target":{"selector":"a"}}'
 htrcli command '{"action":"wait","target":{"selector":".loaded"},"options":{"timeout":5000}}'
 ```
+
+`command` sends htrcli's extension action JSON and is not available over `--cdp`. Over `--cdp`, use `cdp <Domain.method> [params-json]` to send one raw DevTools Protocol method, for example `htrcli --cdp cdp Page.getLayoutMetrics`. Each `cdp` call opens its own session, so session-scoped state such as `Emulation.*` lasts only for that call. Use `emulate` for persistent emulation.
 
 ## Office apps: Gmail, Calendar, Docs, Sheets, Tasks
 
@@ -1649,6 +1688,7 @@ after the page loads.
 | `htrcli config set-transport <type>` | Set default transport (ext/cdp) |
 | `htrcli config set-cdp-port <port>` | Set CDP debugging port |
 | `htrcli config set-chrome-path <path>` | Set Chrome binary path |
+| `htrcli config set-chrome-args [arg...]` | Set extra Chrome args for htrcli-launched Chrome (no args clears) |
 | `htrcli config set-amo-api-key <key>` | Set AMO API key |
 | `htrcli config set-amo-api-secret <secret>` | Set AMO API secret |
 | `htrcli config show` | Show current config |
@@ -1692,6 +1732,7 @@ after the page loads.
 | `htrcli snapshot` | Accessibility snapshot tree with refs |
 | `htrcli eval <js>` | Execute JavaScript (page main world) |
 | `htrcli command <json>` | Send raw JSON command |
+| `htrcli --cdp cdp <Domain.method> [params-json]` | Send one raw DevTools Protocol method (--cdp only; stateless per call) |
 | `htrcli fetch <url>` | Fetch URL via background (includes cookies) |
 | `htrcli printpdf <path>` | Print page to PDF via the extension path (no save-as prompt) |
 | `htrcli upload <sel> <file>` | Set files on a file input (no file picker) |

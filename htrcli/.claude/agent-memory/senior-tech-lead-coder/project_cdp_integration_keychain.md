@@ -1,6 +1,6 @@
 ---
 name: cdp-integration-keychain-hang
-description: htrcli CDP integration tests (temp HOME) hang on any network load on macOS once a keychain dialog appears; run with a --use-mock-keychain Chrome wrapper and sandbox disabled
+description: htrcli CDP integration tests (temp HOME) hang on any network load on macOS once a keychain dialog appears; run with HTRCLI_CHROME_ARGS=--use-mock-keychain and sandbox disabled
 metadata:
   type: project
 ---
@@ -9,4 +9,4 @@ metadata:
 
 **Why:** Chrome derives cookie-encryption keys from the keychain located via $HOME.
 
-**How to apply:** run integration tests with `HTRCLI_CHROME_PATH=<script that execs Chrome with --use-mock-keychain "$@">`, and with the Bash sandbox disabled (sandbox blocks localhost to the debugging port). A timed-out run leaks Chrome on its port; `pkill -9 -f remote-debugging-port=922x` before rerunning, else the next run adopts the hung browser.
+**How to apply:** run integration tests with `HTRCLI_CHROME_ARGS=--use-mock-keychain` (the integration tests pass it to `StartBrowser`; replaces the old wrapper-script workaround, which is no longer needed), and with the Bash sandbox disabled (sandbox blocks localhost to the debugging port). A timed-out run leaks Chrome on its port; `pkill -9 -f remote-debugging-port=922x` before rerunning, else the next run adopts the hung browser.

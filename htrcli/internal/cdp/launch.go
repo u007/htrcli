@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -19,6 +24,10 @@ type BrowserState struct {
 	Port      int       `json:"port"`
 	StartedAt time.Time `json:"started_at"`
 	Headless  bool      `json:"headless"`
+	Args      []string  `json:"args,omitempty"`
+	// StderrLog is the file Chrome's stdout and stderr go to. Empty when htrcli
+	// did not launch the Chrome this state describes (an adopted listener).
+	StderrLog string `json:"stderr_log"`
 }
 
 const macChromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -88,9 +97,11 @@ func writeState(st *BrowserState) error {
 	return nil
 }
 
-// LaunchArgs builds the Chrome argument list. Security: never add
-// --remote-debugging-address — the port must stay bound to localhost.
-func LaunchArgs(port int, profileDir string, headless bool) []string {
+// LaunchArgs builds the Chrome argument list. extra is appended last, after the
+// fixed list and --headless; callers validate it with validateExtraChromeArgs
+// first. Security: never add --remote-debugging-address — the port must stay
+// bound to localhost.
+func LaunchArgs(port int, profileDir string, headless bool, extra []string) []string {
 	args := []string{
 		fmt.Sprintf("--remote-debugging-port=%d", port),
 		"--user-data-dir=" + profileDir,
@@ -101,23 +112,129 @@ func LaunchArgs(port int, profileDir string, headless bool) []string {
 	if headless {
 		args = append(args, "--headless")
 	}
-	return args
+	return append(args, extra...)
 }
 
-// FindChrome returns the configured binary or the standard macOS path.
-func FindChrome(configured string) (string, error) {
-	candidates := []string{configured, macChromePath}
-	for _, c := range candidates {
-		if c == "" {
-			continue
+// forbiddenChromeSwitches are the switches htrcli owns. The debugging port must
+// stay on localhost (see LaunchArgs), and StopBrowser verifies the profile dir
+// before it kills a Chrome.
+var forbiddenChromeSwitches = []string{
+	"remote-debugging-port",
+	"remote-debugging-address",
+	"user-data-dir",
+}
+
+// validateExtraChromeArgs rejects an extra argument that sets a switch htrcli
+// owns. Chrome accepts one or two leading dashes, so every leading dash is
+// stripped before the name is compared; any =value is ignored.
+func validateExtraChromeArgs(extra []string) error {
+	for _, arg := range extra {
+		name := strings.TrimLeft(arg, "-/")
+		if i := strings.IndexByte(name, '='); i >= 0 {
+			name = name[:i]
 		}
-		if _, err := os.Stat(c); err == nil {
-			return c, nil
+		if slices.Contains(forbiddenChromeSwitches, name) {
+			return fmt.Errorf("chrome arg %q is managed by htrcli and cannot be set (not allowed: --remote-debugging-port, --remote-debugging-address, --user-data-dir)", arg)
 		}
 	}
+	return nil
+}
+
+// warnExtraArgsIgnored says so when extra args cannot reach a Chrome that was
+// already listening on port, so they are never dropped silently.
+func warnExtraArgsIgnored(port int, extra []string) {
+	if len(extra) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[htrcli] Chrome already answers on port %d; chrome args %q were not applied (run htrcli browser stop, then start again)\n", port, extra)
+}
+
+// chromeCandidates lists the Chrome locations to try for goos, in search order.
+// A bare name is resolved through PATH by FindChrome. getenv supplies the
+// Windows install roots; an unset root contributes no candidate.
+func chromeCandidates(goos string, getenv func(string) string) []string {
+	switch goos {
+	case "darwin":
+		return []string{
+			macChromePath,
+			"/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+			"/Applications/Chromium.app/Contents/MacOS/Chromium",
+		}
+	case "linux":
+		names := []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser"}
+		out := append([]string{}, names...)
+		for _, dir := range []string{"/usr/bin", "/snap/bin"} {
+			for _, name := range names {
+				out = append(out, dir+"/"+name)
+			}
+		}
+		return out
+	case "windows":
+		var out []string
+		for _, root := range []string{getenv("ProgramFiles"), getenv("ProgramFiles(x86)"), getenv("LOCALAPPDATA")} {
+			if root == "" {
+				continue // unset install root: nothing to search there
+			}
+			out = append(out, root+`\Google\Chrome\Application\chrome.exe`)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// FindChrome returns the configured binary, else the first Chrome found in the
+// candidate list for this OS. A candidate that cannot be run is skipped; the
+// not-found error quotes every candidate with the reason it was rejected.
+func FindChrome(configured string) (string, error) {
+	candidates := chromeCandidates(runtime.GOOS, os.Getenv)
+	if configured != "" {
+		candidates = append([]string{configured}, candidates...)
+	}
+	return resolveChrome(configured, candidates)
+}
+
+// resolveChrome returns the first candidate that exec.LookPath accepts.
+// configured is the user's setting ("" when unset) and, when set, is the first
+// candidate. A rejected configured path is reported on stderr, so a fallback to
+// a later Chrome never hides the user's own mistake.
+func resolveChrome(configured string, candidates []string) (string, error) {
+	var rejected []string
+	var configuredReason string
+	for i, c := range candidates {
+		path, err := exec.LookPath(c)
+		if err != nil {
+			reason := lookPathReason(err)
+			rejected = append(rejected, strconv.Quote(c)+": "+reason)
+			if i == 0 && configured != "" {
+				configuredReason = reason
+			}
+			continue
+		}
+		if configuredReason != "" {
+			fmt.Fprintf(os.Stderr, "[htrcli] configured Chrome path %q was skipped (%s); using %s\n", configured, configuredReason, path)
+		}
+		return path, nil
+	}
 	return "", fmt.Errorf(
-		"Chrome binary not found (tried %q, %q) — set it with: htrcli config set-chrome-path <path>",
-		configured, macChromePath)
+		"Chrome binary not found (tried %s) — set it with: htrcli config set-chrome-path <path>",
+		strings.Join(rejected, ", "))
+}
+
+// lookPathReason says in a few words why exec.LookPath rejected a candidate.
+func lookPathReason(err error) string {
+	switch {
+	case errors.Is(err, exec.ErrNotFound):
+		return "not found in PATH"
+	case errors.Is(err, fs.ErrNotExist):
+		return "no such file"
+	case errors.Is(err, syscall.EISDIR):
+		return "is a directory"
+	case errors.Is(err, fs.ErrPermission):
+		return "permission denied"
+	default:
+		return err.Error()
+	}
 }
 
 // PortAlive reports whether /json/version answers on the port.
@@ -142,9 +259,14 @@ func adoptListenerPID(port int) (int, error) {
 // waits for the debugging port to answer. It does NOT persist any state file —
 // callers record the result where appropriate (browser.json vs contexts.json).
 // If the port already answers it returns pid 0 (an already-running owner, e.g.
-// Chrome's singleton-lock handoff).
-func launchChrome(chromePath string, port int, profileDir string, headless bool) (int, error) {
+// Chrome's singleton-lock handoff). extra is validated before anything else, so
+// a forbidden arg fails even when Chrome is already up.
+func launchChrome(chromePath string, port int, profileDir string, headless bool, extra []string) (int, error) {
+	if err := validateExtraChromeArgs(extra); err != nil {
+		return 0, err
+	}
 	if PortAlive(port) {
+		warnExtraArgsIgnored(port, extra)
 		return 0, nil
 	}
 	if err := os.MkdirAll(profileDir, 0700); err != nil {
@@ -155,7 +277,22 @@ func launchChrome(chromePath string, port int, profileDir string, headless bool)
 	} else if removed {
 		fmt.Fprintf(os.Stderr, "[htrcli] removed stale Chrome singleton lock in %s (owner process is gone)\n", profileDir)
 	}
-	cmd := exec.Command(chromePath, LaunchArgs(port, profileDir, headless)...)
+	// Chrome outlives htrcli, so its stdout and stderr must be a real file, never
+	// a pipe: a pipe closed by htrcli would SIGPIPE Chrome later. Truncated per
+	// launch of this profile; the profile dir was created above.
+	logPath := ChromeStderrLogPath(profileDir)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return 0, fmt.Errorf("opening Chrome stderr log %s: %w", logPath, err)
+	}
+	defer func() {
+		if err := logFile.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "[htrcli] closing Chrome stderr log %s: %v\n", logPath, err)
+		}
+	}()
+	cmd := exec.Command(chromePath, LaunchArgs(port, profileDir, headless, extra)...)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 	configureDetachedProcess(cmd) // detach where the platform supports it
 	if err := cmd.Start(); err != nil {
 		return 0, fmt.Errorf("launching Chrome %s: %w", chromePath, err)
@@ -167,7 +304,7 @@ func launchChrome(chromePath string, port int, profileDir string, headless bool)
 	go func() {
 		defer close(reaped)
 		if err := cmd.Wait(); err != nil {
-			fmt.Fprintf(os.Stderr, "[htrcli] Chrome exited: %v\n", err)
+			fmt.Fprintf(os.Stderr, "[htrcli] Chrome exited: %v%s\n", err, stderrSuffix(logPath))
 		}
 	}()
 
@@ -191,7 +328,64 @@ func launchChrome(chromePath string, port int, profileDir string, headless bool)
 	case <-time.After(5 * time.Second):
 		fmt.Fprintf(os.Stderr, "[htrcli] Chrome (pid %d) did not reap within 5s after kill\n", pid)
 	}
-	return 0, fmt.Errorf("Chrome (pid %d) did not answer on port %d within %s (killed)", pid, port, launchTimeout)
+	return 0, fmt.Errorf("Chrome (pid %d) did not answer on port %d within %s (killed)%s", pid, port, launchTimeout, stderrSuffix(logPath))
+}
+
+// stderrTailBytes caps how much of the Chrome stderr log an error quotes.
+const stderrTailBytes = 2048
+
+// ChromeStderrLogPath returns <profileDir>/chrome-stderr.log, where the Chrome
+// launched on that profile writes its stdout and stderr. Each profile has its
+// own log, so launching one context never truncates another's.
+func ChromeStderrLogPath(profileDir string) string {
+	return filepath.Join(profileDir, "chrome-stderr.log")
+}
+
+// readStderrTail returns the last whole lines of the log, within about
+// stderrTailBytes. A cut that lands mid-line drops that partial line, and a
+// window holding no complete line returns "".
+func readStderrTail(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("opening %s: %w", path, err)
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "[htrcli] closing %s: %v\n", path, err)
+		}
+	}()
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("statting %s: %w", path, err)
+	}
+	start := max(info.Size()-stderrTailBytes, 0)
+	buf := make([]byte, info.Size()-start)
+	if _, err := f.ReadAt(buf, start); err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("reading %s: %w", path, err)
+	}
+	text := string(buf)
+	if start > 0 {
+		i := strings.IndexByte(text, '\n')
+		if i < 0 {
+			return "", nil
+		}
+		text = text[i+1:]
+	}
+	return strings.TrimRight(text, "\n"), nil
+}
+
+// stderrSuffix returns the text appended to a Chrome error that quotes the tail
+// of the stderr log. A log that cannot be read is reported inside the message,
+// never dropped.
+func stderrSuffix(path string) string {
+	tail, err := readStderrTail(path)
+	if err != nil {
+		return fmt.Sprintf("\nlast stderr: unavailable: %v", err)
+	}
+	if tail == "" {
+		return "\nlast stderr: (no lines captured)"
+	}
+	return "\nlast stderr:\n" + tail
 }
 
 // singletonLockFiles are the per-profile lock artefacts Chrome leaves behind
@@ -267,14 +461,15 @@ func terminateProcess(pid int) error {
 	return nil
 }
 
-// StartBrowser launches the default-profile Chrome, waits for the port, and
-// persists advisory state to browser.json.
-func StartBrowser(chromePath string, port int, headless bool) (*BrowserState, error) {
+// StartBrowser launches the default-profile Chrome with extra arguments, waits
+// for the port, and persists advisory state to browser.json. Args records the
+// argv this launch used; an adopted listener's argv is unknown, so Args stays empty.
+func StartBrowser(chromePath string, port int, headless bool, extra []string) (*BrowserState, error) {
 	profile, err := ProfileDir()
 	if err != nil {
 		return nil, err
 	}
-	pid, err := launchChrome(chromePath, port, profile, headless)
+	pid, err := launchChrome(chromePath, port, profile, headless, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +498,7 @@ func StartBrowser(chromePath string, port int, headless bool) (*BrowserState, er
 		}
 		return st, nil
 	}
-	st := &BrowserState{PID: pid, Port: port, StartedAt: time.Now(), Headless: headless}
+	st := &BrowserState{PID: pid, Port: port, StartedAt: time.Now(), Headless: headless, Args: LaunchArgs(port, profile, headless, extra), StderrLog: ChromeStderrLogPath(profile)}
 	if err := writeState(st); err != nil {
 		return nil, err
 	}

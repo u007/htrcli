@@ -1,6 +1,7 @@
 package cdp
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -93,5 +94,200 @@ func TestReloadWaitsForLoadEvent(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed < 100*time.Millisecond {
 		t.Fatalf("gave up after %s — it never waited for the event", elapsed)
+	}
+}
+
+func TestHistoryTarget(t *testing.T) {
+	cases := []struct {
+		name              string
+		current, n, delta int
+		want              int
+		wantErr           string
+	}{
+		{"back from second entry", 1, 2, -1, 0, ""},
+		{"forward from first entry", 0, 2, 1, 1, ""},
+		{"back past the first entry", 0, 2, -1, 0, "no history entry to go back to"},
+		{"forward past the last entry", 1, 2, 1, 0, "no history entry to go forward to"},
+		{"back with a single entry", 0, 1, -1, 0, "no history entry to go back to"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := historyTarget(tc.current, tc.n, tc.delta)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("target = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHistoryStepNavigatesToPreviousEntry(t *testing.T) {
+	var mu sync.Mutex
+	var navigatedEntry float64
+	url := fakeCDP(t, func(m fakeMsg, conn *websocket.Conn) {
+		switch m.Method {
+		case "Page.getNavigationHistory":
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"currentIndex": 1,
+				"entries": []map[string]any{
+					{"id": 10, "url": "https://example.com/"},
+					{"id": 11, "url": "https://example.org/"},
+				},
+			}})
+		case "Page.navigateToHistoryEntry":
+			var params struct {
+				EntryID float64 `json:"entryId"`
+			}
+			json.Unmarshal(m.Params, &params)
+			mu.Lock()
+			navigatedEntry = params.EntryID
+			mu.Unlock()
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		case "Runtime.evaluate":
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"result": map[string]any{"type": "object", "value": map[string]any{"href": "https://example.com/", "state": "complete"}},
+			}})
+		default:
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		}
+	})
+
+	s, err := Dial(url)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer s.Close()
+
+	if err := HistoryStep(s, -1, 2000); err != nil {
+		t.Fatalf("HistoryStep: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if navigatedEntry != 10 {
+		t.Fatalf("navigated to entry %v, want 10 (the entry before currentIndex 1)", navigatedEntry)
+	}
+}
+
+func TestHistoryStepErrorsWithoutNavigatingAtStartOfHistory(t *testing.T) {
+	var mu sync.Mutex
+	navigated := false
+	url := fakeCDP(t, func(m fakeMsg, conn *websocket.Conn) {
+		switch m.Method {
+		case "Page.getNavigationHistory":
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"currentIndex": 0,
+				"entries":      []map[string]any{{"id": 10, "url": "https://example.com/"}},
+			}})
+		case "Page.navigateToHistoryEntry":
+			mu.Lock()
+			navigated = true
+			mu.Unlock()
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		default:
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		}
+	})
+
+	s, err := Dial(url)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer s.Close()
+
+	err = HistoryStep(s, -1, 2000)
+	if err == nil || !strings.Contains(err.Error(), "no history entry to go back to") {
+		t.Fatalf("err = %v, want no-history-entry error", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if navigated {
+		t.Fatalf("Page.navigateToHistoryEntry was sent although there is no entry to go back to")
+	}
+}
+
+func TestHistoryStepAcceptsDestinationThatRewritesItsURL(t *testing.T) {
+	var mu sync.Mutex
+	navigated := false
+	url := fakeCDP(t, func(m fakeMsg, conn *websocket.Conn) {
+		switch m.Method {
+		case "Page.getNavigationHistory":
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"currentIndex": 1,
+				"entries": []map[string]any{
+					{"id": 10, "url": "https://example.com/"},
+					{"id": 11, "url": "https://example.org/"},
+				},
+			}})
+		case "Page.navigateToHistoryEntry":
+			mu.Lock()
+			navigated = true
+			mu.Unlock()
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		case "Runtime.evaluate":
+			// Before the step the page is on example.org. Once the entry is
+			// navigated to, it completes on a URL the entry does not name.
+			mu.Lock()
+			done := navigated
+			mu.Unlock()
+			href := "https://example.org/"
+			if done {
+				href = "https://example.com/?nonce=7"
+			}
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"result": map[string]any{"type": "object", "value": map[string]any{"href": href, "state": "complete"}},
+			}})
+		default:
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		}
+	})
+
+	s, err := Dial(url)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer s.Close()
+
+	if err := HistoryStep(s, -1, 2000); err != nil {
+		t.Fatalf("HistoryStep must accept a page that loaded at a rewritten URL: %v", err)
+	}
+}
+
+func TestHistoryStepTimesOutWhenDocumentNeverCompletes(t *testing.T) {
+	url := fakeCDP(t, func(m fakeMsg, conn *websocket.Conn) {
+		switch m.Method {
+		case "Page.getNavigationHistory":
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"currentIndex": 1,
+				"entries": []map[string]any{
+					{"id": 10, "url": "https://example.com/"},
+					{"id": 11, "url": "https://example.org/"},
+				},
+			}})
+		case "Runtime.evaluate":
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{
+				"result": map[string]any{"type": "object", "value": map[string]any{"href": "https://example.org/", "state": "complete"}},
+			}})
+		default:
+			conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+		}
+	})
+
+	s, err := Dial(url)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer s.Close()
+
+	err = HistoryStep(s, -1, 150)
+	if err == nil || !strings.Contains(err.Error(), "page did not finish loading") {
+		t.Fatalf("err = %v, want a load timeout when the document stays on the wrong URL", err)
 	}
 }

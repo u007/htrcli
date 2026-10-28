@@ -282,6 +282,12 @@ func GetChromePath() string {
 	return viper.GetString("chrome-path")
 }
 
+// GetChromeArgs returns the configured extra Chrome arguments: the chrome-args
+// config list, or HTRCLI_CHROME_ARGS split on whitespace. Nil when unset.
+func GetChromeArgs() []string {
+	return viper.GetStringSlice("chrome-args")
+}
+
 // resolveContext ensures the named context's Chrome process is running and
 // caches its debugging port. Called from PersistentPreRunE when --context is set.
 func resolveContext() error {
@@ -289,7 +295,7 @@ func resolveContext() error {
 	if err != nil {
 		return fmt.Errorf("--context %s: %w", contextName, err)
 	}
-	port, err := cdp.EnsureContext(contextName, chrome, false)
+	port, err := cdp.EnsureContext(contextName, chrome, false, GetChromeArgs())
 	if err != nil {
 		return fmt.Errorf("--context %s: %w", contextName, err)
 	}

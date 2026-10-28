@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -120,18 +121,35 @@ func checkFrameTarget(sel *api.TargetSelector) error {
 	return nil
 }
 
-// cdpSession opens the target page session for the current --tab/--cdp-port.
+// cdpSession opens the target page session for the current --tab/--cdp-port
+// and re-applies the emulation stored for that port. CDP emulation overrides
+// die with each session, so they are re-applied on every open.
 func cdpSession() (*cdp.Session, string, error) {
 	targetID := GetTabTarget()
 	if err := ensureContextResolved(); err != nil {
 		return nil, "", err
 	}
 	port := GetCDPPort()
+	store, err := loadEmulationStore()
+	if err != nil {
+		return nil, "", err
+	}
+	// Only this port's entry is decoded, so a bad entry on another port never blocks it.
+	e, err := portEmulation(store, port)
+	if err != nil {
+		return nil, "", err
+	}
 	s, err := cdp.PageSession(port, targetID)
 	if err != nil {
 		return nil, "", err
 	}
 	s.SetFrame(frameFlag)
+	// A port with no stored entry is the zero Emulation, which sends no CDP calls.
+	if err := cdp.ApplyEmulation(s, e); err != nil {
+		// intentionally not logged: the apply error is returned to the caller below, and a close failure on a session that already failed adds nothing
+		_ = s.Close()
+		return nil, "", fmt.Errorf("applying stored emulation for port %d: %w", port, err)
+	}
 	if targetID == "" {
 		targets, err := cdp.ListTargets(port)
 		if err == nil && len(targets) > 0 {
@@ -320,10 +338,6 @@ func runEvalCDP(expression string) error {
 
 // runScreenshotCDP captures the page via CDP.
 func runScreenshotCDP(path string, fullPage bool, annotate []api.TargetSelector) error {
-	if len(annotate) > 0 {
-		return errUnsupportedCDP("screenshot --annotate")
-	}
-
 	s, _, err := cdpSession()
 	if err != nil {
 		return err
@@ -331,7 +345,9 @@ func runScreenshotCDP(path string, fullPage bool, annotate []api.TargetSelector)
 	defer s.Close()
 
 	var png []byte
-	if fullPage {
+	if len(annotate) > 0 {
+		png, err = captureAnnotatedCDP(s, fullPage, annotate)
+	} else if fullPage {
 		png, err = cdp.ScreenshotFullPage(s)
 	} else {
 		png, err = cdp.Screenshot(s)
@@ -352,6 +368,218 @@ func runScreenshotCDP(path string, fullPage bool, annotate []api.TargetSelector)
 		return nil
 	}
 	fmt.Printf("Screenshot saved to %s\n", out)
+	return nil
+}
+
+// captureAnnotatedCDP draws numbered overlays over the annotate selectors,
+// captures the page, then removes the overlays. Removal is deferred from the
+// first draw attempt on, so a failed capture never leaves boxes on the user's
+// page; a removal failure is joined into the returned error.
+func captureAnnotatedCDP(s *cdp.Session, fullPage bool, annotate []api.TargetSelector) (png []byte, err error) {
+	boxes, err := cdp.AnnotationBoxes(s, annotate)
+	if err != nil {
+		return nil, err
+	}
+	script, err := cdp.AnnotateScript(boxes)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if cerr := cdp.ClearAnnotations(s); cerr != nil {
+			err = errors.Join(err, cerr)
+		}
+	}()
+	if _, err := cdp.Evaluate(s, script); err != nil {
+		return nil, fmt.Errorf("drawing annotation overlay: %w", err)
+	}
+	if fullPage {
+		return cdp.ScreenshotFullPage(s)
+	}
+	return cdp.Screenshot(s)
+}
+
+// scrollDelta maps a scroll direction and pixel count to window.scrollBy offsets.
+func scrollDelta(direction string, pixels int) (dx, dy int, err error) {
+	switch direction {
+	case "up":
+		return 0, -pixels, nil
+	case "down":
+		return 0, pixels, nil
+	case "left":
+		return -pixels, 0, nil
+	case "right":
+		return pixels, 0, nil
+	}
+	return 0, 0, fmt.Errorf("invalid scroll direction %q (expected up, down, left, or right)", direction)
+}
+
+// runScrollCDP scrolls the top-level page and reports the position it lands on.
+// Not frame-aware, same as the extension transport.
+func runScrollCDP(direction string, pixels int) error {
+	dx, dy, err := scrollDelta(direction, pixels)
+	if err != nil {
+		return err
+	}
+	s, _, err := cdpSession()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	raw, err := cdp.Evaluate(s, fmt.Sprintf(`(() => {
+	window.scrollBy({left: %d, top: %d, behavior: "instant"});
+	return {x: window.scrollX, y: window.scrollY};
+})()`, dx, dy))
+	if err != nil {
+		return err
+	}
+	var pos struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+	}
+	if err := json.Unmarshal(raw, &pos); err != nil {
+		return fmt.Errorf("decoding scroll position: %w", err)
+	}
+	if output.JSONOutput {
+		output.PrintJSON(map[string]any{"success": true, "direction": direction, "pixels": pixels, "scrollX": pos.X, "scrollY": pos.Y})
+		return nil
+	}
+	fmt.Printf("Scrolled %s %dpx (cdp), now at x=%g y=%g\n", direction, pixels, pos.X, pos.Y)
+	return nil
+}
+
+// runHistoryCDP moves one entry back (delta -1) or forward (delta +1).
+func runHistoryCDP(delta int) error {
+	direction := "back"
+	if delta > 0 {
+		direction = "forward"
+	}
+	s, _, err := cdpSession()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	if err := cdp.HistoryStep(s, delta, timeout); err != nil {
+		return err
+	}
+	if output.JSONOutput {
+		output.PrintJSON(map[string]any{"success": true, "direction": direction})
+		return nil
+	}
+	fmt.Printf("Went %s (cdp)\n", direction)
+	return nil
+}
+
+// runPrintPDFCDP saves the current page as a PDF via CDP.
+func runPrintPDFCDP(outputPath string) error {
+	s, _, err := cdpSession()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	pdfBytes, err := cdp.PrintPDF(s)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(outputPath, pdfBytes, 0644); err != nil {
+		return fmt.Errorf("failed to write PDF: %w", err)
+	}
+	if output.JSONOutput {
+		output.PrintJSON(map[string]any{"success": true, "path": outputPath, "bytes": len(pdfBytes)})
+		return nil
+	}
+	fmt.Printf("PDF saved to %s (%d bytes)\n", outputPath, len(pdfBytes))
+	return nil
+}
+
+// cdpDialogResult is the --json shape of a dialog handled over CDP.
+type cdpDialogResult struct {
+	DialogType     string `json:"dialogType"`
+	Message        string `json:"message"`
+	DefaultPrompt  string `json:"defaultPrompt"`
+	ResolvedAction string `json:"resolvedAction"`
+	RespondedText  string `json:"respondedText,omitempty"`
+}
+
+// answerDialogCDP waits up to timeoutMS for the next JavaScript dialog on s,
+// answers it with action, and returns what it was. timeoutMS <= 0 waits
+// without a deadline.
+func answerDialogCDP(s *cdp.Session, action, text string, timeoutMS int) (cdpDialogResult, error) {
+	if err := s.Call("Page.enable", nil, nil); err != nil {
+		return cdpDialogResult{}, fmt.Errorf("Page.enable: %w", err)
+	}
+	deadline := cdpEventsDeadline(timeoutMS)
+	var opening struct {
+		Type          string `json:"type"`
+		Message       string `json:"message"`
+		DefaultPrompt string `json:"defaultPrompt"`
+	}
+	for {
+		name, params, err := s.NextEvent(deadline)
+		if errors.Is(err, cdp.ErrEventDeadline) {
+			return cdpDialogResult{}, fmt.Errorf("no JavaScript dialog opened within %dms over --cdp (start `dialog handle --cdp` in the background before the action that opens the dialog)", timeoutMS)
+		}
+		if err != nil {
+			return cdpDialogResult{}, err
+		}
+		if name == "Page.javascriptDialogOpening" {
+			if err := json.Unmarshal(params, &opening); err != nil {
+				return cdpDialogResult{}, fmt.Errorf("decoding Page.javascriptDialogOpening: %w", err)
+			}
+			break
+		}
+	}
+
+	answer := map[string]any{"accept": action != "dismiss"}
+	if action == "respond" {
+		answer["promptText"] = text
+	}
+	if err := s.Call("Page.handleJavaScriptDialog", answer, nil); err != nil {
+		return cdpDialogResult{}, fmt.Errorf("answering dialog: %w", err)
+	}
+
+	result := cdpDialogResult{
+		DialogType:     opening.Type,
+		Message:        opening.Message,
+		DefaultPrompt:  opening.DefaultPrompt,
+		ResolvedAction: action,
+	}
+	if action == "respond" {
+		result.RespondedText = text
+	}
+	return result, nil
+}
+
+// runDialogHandleCDP waits up to timeoutMS for the next JavaScript dialog,
+// answers it with action, and reports what it was. Over CDP there is no daemon
+// to arm a policy in, so this is a foreground waiter: start it in the background
+// before the action that opens the dialog. timeoutMS <= 0 waits without a deadline.
+func runDialogHandleCDP(action, text string, timeoutMS int) error {
+	s, _, err := cdpSession()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	result, err := answerDialogCDP(s, action, text, timeoutMS)
+	if err != nil {
+		return err
+	}
+	if output.JSONOutput {
+		output.PrintJSON(result)
+		return nil
+	}
+	line := fmt.Sprintf("%s %q", result.DialogType, result.Message)
+	if result.DefaultPrompt != "" {
+		line += fmt.Sprintf(" (default %q)", result.DefaultPrompt)
+	}
+	line += " → " + action
+	if action == "respond" {
+		line += fmt.Sprintf(" %q", text)
+	}
+	fmt.Println(line + " (cdp)")
 	return nil
 }
 

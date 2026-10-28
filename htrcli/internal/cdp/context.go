@@ -20,6 +20,9 @@ type ContextEntry struct {
 	Port       int       `json:"port"`
 	PID        int       `json:"pid"`
 	CreatedAt  time.Time `json:"created_at"`
+	// StderrLog is set only when htrcli launched this context's Chrome; an
+	// adopted listener's log is not ours to name.
+	StderrLog string `json:"stderr_log"`
 }
 
 var (
@@ -136,12 +139,13 @@ func freePort() (int, error) {
 }
 
 // EnsureContext launches (or reuses) the named context's Chrome process and
-// returns its debugging port. A context is an isolated --user-data-dir profile
+// returns its debugging port. extra applies only when a Chrome is launched; a
+// live context is reused as it is. A context is an isolated --user-data-dir profile
 // on its own port, launched as a separate process so it survives across CLI
 // invocations and gives true cookie/storage isolation. Chrome-only: the Firefox
 // equivalent (a separate `firefox -profile <dir>` process) is out of scope for
 // this task and documented as the Firefox fallback in the spec.
-func EnsureContext(name, chromePath string, headless bool) (int, error) {
+func EnsureContext(name, chromePath string, headless bool, extra []string) (int, error) {
 	if name == "" {
 		return 0, errors.New("context name must not be empty")
 	}
@@ -171,7 +175,7 @@ func EnsureContext(name, chromePath string, headless bool) (int, error) {
 		}
 	}
 
-	pid, err := launchChromeFn(chromePath, port, profileDir, headless)
+	pid, err := launchChromeFn(chromePath, port, profileDir, headless, extra)
 	if err != nil {
 		return 0, err
 	}
@@ -189,12 +193,17 @@ func EnsureContext(name, chromePath string, headless bool) (int, error) {
 	if entry != nil {
 		createdAt = entry.CreatedAt
 	}
+	var stderrLog string
+	if launched {
+		stderrLog = ChromeStderrLogPath(profileDir)
+	}
 	if err := upsertContextFn(ContextEntry{
 		Name:       name,
 		ProfileDir: profileDir,
 		Port:       port,
 		PID:        pid,
 		CreatedAt:  createdAt,
+		StderrLog:  stderrLog,
 	}); err != nil {
 		// Only tear down a process htrcli actually launched; an adopted
 		// listener is someone else's browser and must be left running.
