@@ -76,10 +76,16 @@ scenarios, not assertions.
   **Both defects are now fixed in code** (`extract list --visible`;
   `sender:span.yP||span.zF` alternatives), verified end-to-end over CDP against
   a probe page (3 rows with one inside `display:none`: 3 returned without the
-  flag, 2 with it). The live Gmail re-check is pending an extension reload,
-  since that tab is extension transport. The collector had the same hole and
+  flag, 2 with it). The collector had the same hole and
   now takes `--visible` as well (`collect` runs many harvests, so it could
   accumulate stale rows mid-scroll as well as at the start).
+- **Live re-check (2026-10-28, after an extension reload)**: PASS. The control
+  run without the flag returned **87** rows; `--visible` returned **37**, equal
+  to Gmail's own "1–37 of 37", and **37 of 37** rows had non-empty sender,
+  subject and date (previously 36 of 50). `collect "tr.zA" --visible` returned
+  the same **37** in `0` scroll steps with `truncated: false`. Read-only
+  throughout: no send/delete/archive/mark/draft, and the view was restored to
+  `#inbox`.
 - **Metrics**: success, commands, wall_ms, retries, failure_mode.
 
 ### B02 — Reply to an email (Gmail) — P0
