@@ -272,6 +272,45 @@ scenarios, not assertions.
   written summary with no source, cite both pages, save, and read back the exact
   sentence plus a `stdoutNotContains` guard proving Q3's figure was not mistaken
   for Q4's. A live research run still needs target sites that permit reads.
+- **Live run (2026-10-28, read-only, public pages, `--transport cdp`)**: PASS on
+  the mechanics, and on the half of "no hallucinated facts" a browser can
+  actually check. Two real encyclopedia pages with exact, quotable values —
+  `en.wikipedia.org/wiki/Speed_of_light` and `.../Avogadro_constant` — were read
+  in a dedicated Chrome profile: no account, no writes, nothing typed into a
+  page. Per page, `wait --selector "table.infobox"` then
+  `extract table "table.infobox"` returned a structured
+  `{columns, rows, rowCount}` payload (23 rows on the first). Captured and
+  cited: A → `299792458` m/s, B → `6.02214076 × 10^23 mol^-1`.
+  Reproduce (no fixture, no account; `--cdp` needs `htrcli browser start`):
+  ```bash
+  htrcli --cdp open "https://en.wikipedia.org/wiki/Speed_of_light"
+  htrcli --cdp wait --selector "table.infobox" --timeout 20000
+  htrcli --cdp extract table "table.infobox" --json        # 23 rows; exact value in col2
+  htrcli --cdp eval "document.querySelector('#mw-content-text').innerText.includes('299792458')"  # true
+  htrcli --cdp eval "document.querySelector('#mw-content-text').innerText.includes('299792459')"  # false
+  # then the same three over https://en.wikipedia.org/wiki/Avogadro_constant
+  # with 6.02214076 (true) and 6.02214077 (false).
+  ```
+  **Attribution audit** (what replaces "prove the prose is true", which no
+  browser can do): for each cited value the source page's own text was re-read
+  in page context and the claim re-tested —
+  `eval "document.querySelector('#mw-content-text').innerText.includes('<digits>')"`.
+  It returned `true` for `299792458` on A and `6.02214076` on B, and `false` on
+  both pages for the perturbed values `299792459` / `6.02214077`, so the audit
+  discriminates instead of agreeing with whatever it is given. **Prose
+  faithfulness: NOT PROVEN** — no browser can check that a summary reasons
+  correctly over correct citations, so the pass condition for a live run is
+  "every number and reference traces to a live page", never "the text is true".
+  **Two real-page fidelity traps the fixture never produced**:
+  1. the extracted cell for A is `"299792458\u200d[2]"` — a zero-width joiner
+     plus a footnote marker, so the digits must be stripped before citing;
+  2. B's exponent is **flattened** by `textContent`: `6.02214076×10<sup>23</sup>`
+     comes back as `"6.02214076×1023"`, which reads as 6.02×10^1023 if quoted
+     verbatim. The mantissa survives; the exponent must be recovered from the
+     DOM.
+  Both are content traps rather than extraction failures — the DOM text really
+  is that — but a research step must normalize before trusting a number. See
+  the TODO entry about number fidelity in `extract table`.
 
 ### B15 — Social media post / schedule — P3
 - **App**: social platform web
