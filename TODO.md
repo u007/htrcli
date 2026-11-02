@@ -51,13 +51,13 @@
 
 ## From review-changes (2026-07-09)
 
-Plan gaps surfaced during the review of the Playwright-parity change set.
+Plan gaps surfaced during the review of the Playwright-parity change set. **Audited 2026-10-28: all five are resolved** — four as written, one superseded by a simpler design. Each line records where it landed, so nobody re-implements it.
 
-- [ ] Part 3: `keyMap.ts` with `resolveKey` and full test coverage (from review-changes: 2026-07-09)
-- [ ] Part 3: `prepareClick` / `prepareKeys` content-script actions (from review-changes: 2026-07-09)
-- [ ] Part 3: Background CDP dispatchers (`dispatchCdpClick`/`dispatchCdpKey`/`dispatchCdpType`) and routing gate in `sendCommandToTab` (from review-changes: 2026-07-09)
-- [ ] Part 3: Firefox synthetic-event upgrade (pointer events) for click/pressKey/type (from review-changes: 2026-07-09)
-- [ ] Part 3: WS-path relay via `chrome.runtime.sendMessage` and three new `MessageType` entries (from review-changes: 2026-07-09)
+- [x] Part 3: `keyMap.ts` with `resolveKey` and full test coverage — DONE: `src/utils/keyMap.ts` (`resolveKey` at :140, throws on an unknown key rather than guessing), `src/utils/keyMap.test.ts`, imported at `commandExecutor.ts:21` and used for the key descriptor (:1024, :1272).
+- [x] Part 3: `prepareClick` / `prepareKeys` content-script actions — DONE: dispatch cases at `commandExecutor.ts:388` and `:393`, covered by the "prepareClick / prepareKeys (internal CDP preparation)" block in `commandExecutor.test.ts:847` (9 references).
+- [x] Part 3: Background CDP dispatchers and the routing gate — DONE: `dispatchCdpClick/Key/Type` (+ mouse/drag) in `src/background/cdpInput.ts:149/437/482`, 32 `dispatchCdp` references in `cdpInput.test.ts`, routed from `sendCommandToTab` (`index.ts:34` import, `:1539` call), single `CDP_INPUT` message type (`types/recording.ts:135`, `:330`).
+- [x] Part 3: Firefox synthetic-event upgrade (pointer events) — DONE in shared code: `commandExecutor.ts` dispatches `pointerover`/`pointerdown`/`pointerup` from the single-click sequence (`pointerdown` before `mousedown`, `pointerup` before `mouseup`) with `pointerType: "mouse"`, falling back to `MouseEvent` when `PointerEvent` is undefined. Covered by `commandExecutor.test.ts:961` ("click dispatches pointerdown before mousedown and pointerup before mouseup"), which asserts both relative orders. Not covered: the ordering of `pointerover` against `mouseover` — cosmetic, and the test would have to be rewritten to pin it.
+- [x] Part 3: WS-path relay + three new `MessageType` entries — SUPERSEDED, not built: there is no WebSocket relay in the extension (the transport is native messaging → `htrcli serve`, plus the tab-less `/api/background/command` route), and the three per-verb types collapsed into one `CDP_INPUT` message carrying the command. Building it as written would add a second transport for no gain.
 
 ## Review resolution — /review-changes (project f10d385e9683, 2026-09-13)
 
@@ -166,7 +166,7 @@ Still open:
 Work top-down; one item at a time. Each entry: task, why it matters, htrcli
 gap, acceptance.
 
-- [ ] B01 Find emails (Gmail) — P0. Gap: DOM `wait` + virtualized list extraction. Acceptance: structured list with sender/subject/date. (DEFERRED: needs live Gmail auth. `wait` DONE, `collect` DONE — only the live run remains.)
+- [x] B01 Find emails (Gmail) — P0. Gap: DOM `wait` + virtualized list extraction. Acceptance: structured list with sender/subject/date. (DONE 2026-10-28 — live PASS, see the LIVE B01 entry below.)
 - [ ] B02 Reply to email — P0. Gap: contenteditable typing (`type`), signature preservation. Safety: reply to self / draft.
 - [ ] B03 Arrange meeting (Calendar) — P0. Gap: date/time pickers, guest autocomplete `pick`. Acceptance: event visible, invites sent (test account).
 - [x] B04 Create todo/reminder — P0. Gap: due-date widgets, quick-add vs fields. Acceptance: task with correct due date. DONE via the local Tasks fixture (docs/benchmarks/fixtures/tasks.html) + scenarios S07/S08 (docs/benchmarks/scenarios/s04-tasks-fixture.json, run with `make bench-tasks`): both the quick-add path (one field, committed with Enter) and the full-form path (a details panel whose date is a POPOVER grid of day buttons — no date field) work. The live Google Tasks run is still pending auth (see the SKIPPED line).
@@ -214,7 +214,11 @@ gap, acceptance.
 
 The following items cannot be verified offline because they require an authenticated session on a real web app. Per the user's standing rule, production data is never touched; if staging is not certain, stop and ask before proceeding. The `gws` CLI session (201 real messages) is treated as production and has not been read, written, or run against.
 
-- [ ] BLOCKED B01 Find emails (Gmail) — needs live Gmail auth. `wait` DONE, `collect` DONE — only the live run remains.
+- [x] BLOCKED B01 Find emails (Gmail) — RESOLVED 2026-10-28, live PASS (see the LIVE B01 entry).
+- [ ] BLOCKED B04 Create todo/reminder — needs live auth (Google Tasks or Todoist). Offline proof: S07/S08 (`benchtasks`) cover quick-add, the popover date grid and the ARIA-checkbox completion.
+- [ ] BLOCKED B07 Booking — needs a booking site; the offline room/date/seat/confirmation chain is covered by S10 (`bench-booking`).
+- [ ] BLOCKED B09 Expense report — needs an expense portal; the offline multi-line report (dynamic add-line, receipt upload, total + reference) is covered by S11 (`bench-expense`).
+- [ ] BLOCKED B13 Form filling — needs a real multi-page form (an HR/expense portal would cover it); the offline validation/select/pick/confirmation chain is covered by S09 (`bench-form`).
 - [ ] BLOCKED B02 Reply to email (Gmail) — needs live Gmail auth. `type` append + signature preservation verified offline via S03.
 - [ ] BLOCKED B03 Arrange meeting (Calendar) — needs live Calendar auth. Date/time pickers + guest `pick` verified offline via S04.
 - [ ] BLOCKED B05 Google Docs create/edit/share — needs live Docs auth. Contenteditable `type`/`press` verified offline via S05.
