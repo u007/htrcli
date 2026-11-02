@@ -204,6 +204,48 @@ func TestEventsIngestAndRead(t *testing.T) {
 	}
 }
 
+func TestEventsIngestAndReadNetwork(t *testing.T) {
+	d := host.NewDaemon()
+	rc := d.AddConn(func(_ []byte) error { return nil })
+	d.RegisterTab(rc, 1, host.TabInfo{ID: 1, URL: "https://a.com", Title: "A", Active: true})
+	srv := host.NewHTTPServer(d, 0, "", nil)
+	ts := httptest.NewServer(srv.Handler)
+	defer ts.Close()
+
+	// The extension flushes NetworkEntry records under kind "network"; the daemon
+	// must accept them, or the bucket is retried forever and never reaches ocode.
+	ingestBody := `{"tabId":1,"kind":"network","entries":[{"kind":"network","timestamp":2000,"data":{"requestId":"r1","url":"https://a.com/api","method":"GET","status":200,"durationMs":12}}]}`
+	resp, err := http.Post(ts.URL+"/api/events/ingest", "application/json", strings.NewReader(ingestBody))
+	if err != nil {
+		t.Fatalf("POST /api/events/ingest: %v", err)
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("network ingest status = %d, want 200", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	resp2, err := http.Get(ts.URL + "/api/events?kind=network&tab=1&since=0")
+	if err != nil {
+		t.Fatalf("GET /api/events?kind=network: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != 200 {
+		t.Fatalf("network read status = %d, want 200", resp2.StatusCode)
+	}
+	var body map[string]interface{}
+	if err := json.NewDecoder(resp2.Body).Decode(&body); err != nil {
+		t.Fatalf("decode events body: %v", err)
+	}
+	entries := body["data"].(map[string]interface{})["entries"].([]interface{})
+	if len(entries) != 1 {
+		t.Fatalf("want 1 network entry, got %d", len(entries))
+	}
+	data := entries[0].(map[string]interface{})["data"].(map[string]interface{})
+	if data["url"] != "https://a.com/api" {
+		t.Fatalf("network entry data.url = %v, want https://a.com/api", data["url"])
+	}
+}
+
 func TestEventsGenerationEndpoint(t *testing.T) {
 	d := host.NewDaemon()
 	srv := host.NewHTTPServer(d, 0, "", nil)

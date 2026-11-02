@@ -1,4 +1,15 @@
 import type { SnapshotNode, SnapshotNodeState } from "../types/commands";
+import { layoutBox } from "./elementFinder";
+import {
+	isButtonElement,
+	isHTMLElement,
+	isInputElement,
+	isLabelElement,
+	isOptionElement,
+	isProgressElement,
+	isSelectElement,
+	isTextAreaElement,
+} from "./elementKind";
 import { assignRef } from "./refRegistry";
 
 const PRESENTATION_ROLES = new Set(["none", "presentation"]);
@@ -20,14 +31,18 @@ const LANDMARK_TAGS = new Map<string, string>([
  * The tree is intentionally shared across the extension and CDP transports so
  * snapshot works everywhere htrcli can execute DOM code.
  */
-export function getSnapshot(): SnapshotNode {
-	const rootChildren = snapshotChildren(
-		document.body ?? document.documentElement,
-	);
+export function getSnapshot(root: Document): SnapshotNode {
+	const view = root.defaultView;
+	if (!view) {
+		throw new Error("snapshot: document has no window (detached frame)");
+	}
+	const rootChildren = snapshotChildren(root.body ?? root.documentElement);
 	return {
 		role: "document",
-		name: normalizeText(document.title),
+		name: normalizeText(root.title),
 		children: rootChildren.length > 0 ? rootChildren : undefined,
+		viewport: { w: view.innerWidth, h: view.innerHeight },
+		scroll: { x: view.scrollX, y: view.scrollY },
 	};
 }
 
@@ -66,6 +81,8 @@ function snapshotElement(element: Element): SnapshotNode[] {
 	}
 
 	const node: SnapshotNode = { role };
+	const box = layoutBox(element.getBoundingClientRect());
+	if (box) node.box = box;
 	if (name) node.name = name;
 	if (value) node.value = value;
 	if (state && Object.keys(state).length > 0) node.state = state;
@@ -96,13 +113,13 @@ function isInteractiveElement(element: Element): boolean {
 }
 
 function isFocusable(element: Element): boolean {
-	if (!(element instanceof HTMLElement)) return false;
+	if (!isHTMLElement(element)) return false;
 	if (element.hasAttribute("disabled")) return false;
 	return element.tabIndex >= 0;
 }
 
 function isHidden(element: Element): boolean {
-	if (!(element instanceof HTMLElement)) return false;
+	if (!isHTMLElement(element)) return false;
 	if (element.hidden) return true;
 	if (element.hasAttribute("inert")) return true;
 	if (element.getAttribute("aria-hidden") === "true") return true;
@@ -199,7 +216,7 @@ function getAccessibleName(element: Element, role: string): string {
 		const ids = labelledBy.split(/\s+/).filter(Boolean);
 		const parts: string[] = [];
 		for (const id of ids) {
-			const label = document.getElementById(id);
+			const label = element.ownerDocument.getElementById(id);
 			const text = normalizeText(label?.textContent);
 			if (text) parts.push(text);
 		}
@@ -228,16 +245,18 @@ function getAccessibleName(element: Element, role: string): string {
 }
 
 function getAssociatedLabelText(element: Element): string {
-	if (!(element instanceof HTMLElement)) return "";
+	if (!isHTMLElement(element)) return "";
 
 	if (
-		element instanceof HTMLInputElement ||
-		element instanceof HTMLTextAreaElement ||
-		element instanceof HTMLSelectElement
+		isInputElement(element) ||
+		isTextAreaElement(element) ||
+		isSelectElement(element)
 	) {
 		if (element.id) {
-			for (const label of Array.from(document.querySelectorAll("label"))) {
-				if (label instanceof HTMLLabelElement && label.htmlFor === element.id) {
+			for (const label of Array.from(
+				element.ownerDocument.querySelectorAll("label"),
+			)) {
+				if (isLabelElement(label) && label.htmlFor === element.id) {
 					const labelText = normalizeText(label.textContent);
 					if (labelText) return labelText;
 				}
@@ -253,17 +272,14 @@ function getAssociatedLabelText(element: Element): string {
 }
 
 function getValue(element: Element): string {
-	if (
-		element instanceof HTMLInputElement ||
-		element instanceof HTMLTextAreaElement
-	) {
+	if (isInputElement(element) || isTextAreaElement(element)) {
 		return normalizeText(element.value);
 	}
-	if (element instanceof HTMLSelectElement) {
+	if (isSelectElement(element)) {
 		const option = element.options[element.selectedIndex];
 		return normalizeText(option?.textContent);
 	}
-	if (element instanceof HTMLProgressElement) {
+	if (isProgressElement(element)) {
 		return normalizeText(element.value.toString());
 	}
 	return "";
@@ -273,17 +289,14 @@ function getState(element: Element): SnapshotNodeState | undefined {
 	const state: SnapshotNodeState = {};
 
 	if (
-		element instanceof HTMLInputElement ||
-		element instanceof HTMLTextAreaElement ||
-		element instanceof HTMLSelectElement ||
-		element instanceof HTMLButtonElement
+		isInputElement(element) ||
+		isTextAreaElement(element) ||
+		isSelectElement(element) ||
+		isButtonElement(element)
 	) {
 		if (element.disabled) state.disabled = true;
 	}
-	if (
-		element instanceof HTMLInputElement ||
-		element instanceof HTMLTextAreaElement
-	) {
+	if (isInputElement(element) || isTextAreaElement(element)) {
 		if (element.readOnly) state.readonly = true;
 	}
 
@@ -305,16 +318,16 @@ function getState(element: Element): SnapshotNodeState | undefined {
 	if (ariaChecked === "true" || ariaChecked === "mixed") {
 		state.checked = ariaChecked === "mixed" ? "mixed" : true;
 	}
-	if (element instanceof HTMLInputElement) {
+	if (isInputElement(element)) {
 		if (element.type === "checkbox" || element.type === "radio") {
 			if (element.checked) state.checked = true;
 		}
 	}
-	if (element instanceof HTMLOptionElement && element.selected) {
+	if (isOptionElement(element) && element.selected) {
 		state.selected = true;
 	}
 
-	if (element === document.activeElement) state.focused = true;
+	if (element === element.ownerDocument.activeElement) state.focused = true;
 
 	return Object.keys(state).length > 0 ? state : undefined;
 }

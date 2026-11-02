@@ -5,12 +5,48 @@
  */
 
 import type {
+	ElementBox,
 	RemoteElementInfo,
 	TargetSelector,
 	TextMatchMode,
 } from "../types/commands";
+import {
+	isButtonElement,
+	isFieldSetElement,
+	isInputElement,
+	isSelectElement,
+	isTextAreaElement,
+} from "./elementKind";
 import { resolveRef } from "./refRegistry";
 import { generateXPath } from "./xpathGenerator";
+
+/**
+ * Document an element lookup resolves inside. The command executor binds it to
+ * the target it is about to act on (the top document, or an `options.frame`
+ * iframe's document). A symbol key keeps it out of JSON, so it never crosses the
+ * wire and the TargetSelector type is unchanged.
+ */
+const LOOKUP_ROOT: unique symbol = Symbol("htr.lookupRoot");
+
+/** Copy of `target` whose lookups resolve inside `root`. */
+export function withLookupRoot(
+	target: TargetSelector,
+	root: Document,
+): TargetSelector & { [LOOKUP_ROOT]: Document } {
+	return { ...target, [LOOKUP_ROOT]: root };
+}
+
+/**
+ * The document a target's lookups resolve inside. An unbound target (every
+ * caller outside the command executor, and every top-level command) resolves
+ * in the top document.
+ */
+export function lookupRoot(target: TargetSelector): Document {
+	const bound = (target as TargetSelector & { [LOOKUP_ROOT]?: Document })[
+		LOOKUP_ROOT
+	];
+	return bound ?? document;
+}
 
 // ─── Main Find Functions ──────────────────────────────────────────
 
@@ -107,7 +143,7 @@ export function waitForElement(
 			}
 		});
 
-		obs.observe(document.documentElement, {
+		obs.observe(lookupRoot(target).documentElement, {
 			childList: true,
 			subtree: true,
 		});
@@ -119,6 +155,7 @@ export function waitForElement(
 function findAllElementsRaw(target: TargetSelector): Element[] {
 	// Try strategies in priority order
 	let elements: Element[] = [];
+	const root = lookupRoot(target);
 
 	// 0. Element ref (@eN) — highest priority, resolved from in-page registry
 	if (target.ref) {
@@ -128,47 +165,51 @@ function findAllElementsRaw(target: TargetSelector): Element[] {
 
 	// 1. CSS selector
 	if (target.selector) {
-		elements = querySelectorAllSafe(target.selector);
+		elements = querySelectorAllSafe(root, target.selector);
 		return applyFilters(elements, target);
 	}
 
 	// 2. XPath
 	if (target.xpath) {
-		elements = queryXPath(target.xpath);
+		elements = queryXPath(root, target.xpath);
 		return applyFilters(elements, target);
 	}
 
 	// 3. ID
 	if (target.id) {
-		const el = document.getElementById(target.id);
+		const el = root.getElementById(target.id);
 		if (el) elements = [el];
 		return applyFilters(elements, target);
 	}
 
 	// 4. Name attribute
 	if (target.name) {
-		elements = querySelectorAllSafe(`[name="${CSS.escape(target.name)}"]`);
+		elements = querySelectorAllSafe(
+			root,
+			`[name="${CSS.escape(target.name)}"]`,
+		);
 		if (elements.length > 0) return applyFilters(elements, target);
 		// Fallback: search all elements with name attribute
-		elements = Array.from(document.querySelectorAll(`[name="${target.name}"]`));
+		elements = Array.from(root.querySelectorAll(`[name="${target.name}"]`));
 		return applyFilters(elements, target);
 	}
 
 	// 5. Role
 	if (target.role) {
-		elements = querySelectorAllSafe(`[role="${target.role}"]`);
+		elements = querySelectorAllSafe(root, `[role="${target.role}"]`);
 		if (elements.length > 0) return applyFilters(elements, target);
 	}
 
 	// 6. Label (find form control by associated label)
 	if (target.label) {
-		elements = findByLabel(target.label);
+		elements = findByLabel(root, target.label);
 		return applyFilters(elements, target);
 	}
 
 	// 7. Placeholder
 	if (target.placeholder) {
 		elements = querySelectorAllSafe(
+			root,
 			`[placeholder="${CSS.escape(target.placeholder)}"]`,
 		);
 		if (elements.length > 0) return applyFilters(elements, target);
@@ -177,6 +218,7 @@ function findAllElementsRaw(target: TargetSelector): Element[] {
 	// 8. Text content
 	if (target.text) {
 		elements = findByText(
+			root,
 			target.text,
 			target.tag,
 			target.textMatch,
@@ -191,7 +233,7 @@ function findAllElementsRaw(target: TargetSelector): Element[] {
 		if (target.type) {
 			selector += `[type="${target.type}"]`;
 		}
-		elements = querySelectorAllSafe(selector);
+		elements = querySelectorAllSafe(root, selector);
 		return applyFilters(elements, target);
 	}
 
@@ -203,9 +245,9 @@ function findAllElementsRaw(target: TargetSelector): Element[] {
 /**
  * Safe querySelectorAll that catches invalid selectors
  */
-function querySelectorAllSafe(selector: string): Element[] {
+function querySelectorAllSafe(root: Document, selector: string): Element[] {
 	try {
-		return Array.from(document.querySelectorAll(selector));
+		return Array.from(root.querySelectorAll(selector));
 	} catch {
 		return [];
 	}
@@ -214,11 +256,11 @@ function querySelectorAllSafe(selector: string): Element[] {
 /**
  * Execute an XPath expression and return matching elements
  */
-function queryXPath(xpath: string): Element[] {
+function queryXPath(root: Document, xpath: string): Element[] {
 	try {
-		const result = document.evaluate(
+		const result = root.evaluate(
 			xpath,
-			document,
+			root,
 			null,
 			XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
 			null,
@@ -239,15 +281,15 @@ function queryXPath(xpath: string): Element[] {
 /**
  * Find form element by associated label text
  */
-function findByLabel(labelText: string): Element[] {
+function findByLabel(root: Document, labelText: string): Element[] {
 	// Find label elements matching the text
-	const labels = Array.from(document.querySelectorAll("label"));
+	const labels = Array.from(root.querySelectorAll("label"));
 	for (const label of labels) {
 		// Check label text content
 		if (getTextContent(label).trim() === labelText.trim()) {
 			// Check for "for" attribute
 			if (label.htmlFor) {
-				const control = document.getElementById(label.htmlFor);
+				const control = root.getElementById(label.htmlFor);
 				if (control) return [control];
 			}
 			// Check for nested control
@@ -257,11 +299,11 @@ function findByLabel(labelText: string): Element[] {
 	}
 
 	// Fallback: look for aria-labelledby
-	const allControls = document.querySelectorAll("input, select, textarea");
+	const allControls = root.querySelectorAll("input, select, textarea");
 	for (const control of allControls) {
 		const labelledBy = control.getAttribute("aria-labelledby");
 		if (labelledBy) {
-			const labelEl = document.getElementById(labelledBy);
+			const labelEl = root.getElementById(labelledBy);
 			if (labelEl && getTextContent(labelEl).trim() === labelText.trim()) {
 				return [control];
 			}
@@ -281,6 +323,7 @@ function findByLabel(labelText: string): Element[] {
  * Find elements by text content
  */
 function findByText(
+	root: Document,
 	text: string,
 	tag?: string,
 	matchMode: TextMatchMode = "contains",
@@ -288,7 +331,7 @@ function findByText(
 ): Element[] {
 	const results: Element[] = [];
 	const selector = tag || "*";
-	const elements = document.querySelectorAll(selector);
+	const elements = root.querySelectorAll(selector);
 
 	for (const el of elements) {
 		const textContent = getTextContent(el);
@@ -353,9 +396,10 @@ function applyFilters(elements: Element[], target: TargetSelector): Element[] {
  * Check if an element is visible in the viewport
  */
 function isVisible(element: Element): boolean {
-	if (!element.ownerDocument) return false;
+	const view = element.ownerDocument.defaultView;
+	if (!view) return false;
 
-	const style = window.getComputedStyle(element);
+	const style = view.getComputedStyle(element);
 	if (
 		style.display === "none" ||
 		style.visibility === "hidden" ||
@@ -369,9 +413,9 @@ function isVisible(element: Element): boolean {
 
 	// Check if at least partially in viewport
 	const viewportWidth =
-		window.innerWidth || document.documentElement.clientWidth;
+		view.innerWidth || element.ownerDocument.documentElement.clientWidth;
 	const viewportHeight =
-		window.innerHeight || document.documentElement.clientHeight;
+		view.innerHeight || element.ownerDocument.documentElement.clientHeight;
 
 	return (
 		rect.bottom > 0 &&
@@ -387,8 +431,9 @@ function isVisible(element: Element): boolean {
  * visible. A hidden or collapsed element returns false: scrolling cannot fix it.
  */
 function isOnlyOffscreen(element: Element): boolean {
-	if (!element.ownerDocument) return false;
-	const style = window.getComputedStyle(element);
+	const view = element.ownerDocument.defaultView;
+	if (!view) return false;
+	const style = view.getComputedStyle(element);
 	if (
 		style.display === "none" ||
 		style.visibility === "hidden" ||
@@ -425,11 +470,15 @@ export function isRendered(element: Element): boolean {
  * Check if an element is enabled (not disabled)
  */
 function isEnabled(element: Element): boolean {
-	if (element instanceof HTMLInputElement) return !element.disabled;
-	if (element instanceof HTMLSelectElement) return !element.disabled;
-	if (element instanceof HTMLTextAreaElement) return !element.disabled;
-	if (element instanceof HTMLButtonElement) return !element.disabled;
-	if (element instanceof HTMLFieldSetElement) return !element.disabled;
+	if (
+		isInputElement(element) ||
+		isSelectElement(element) ||
+		isTextAreaElement(element) ||
+		isButtonElement(element) ||
+		isFieldSetElement(element)
+	) {
+		return !element.disabled;
+	}
 
 	const ariaDisabled = element.getAttribute("aria-disabled");
 	if (ariaDisabled === "true") return false;
@@ -444,6 +493,7 @@ function isEnabled(element: Element): boolean {
  */
 export function getElementInfo(element: Element): RemoteElementInfo {
 	const rect = element.getBoundingClientRect();
+	const box = layoutBox(rect);
 	const text = getTextContent(element);
 
 	// Collect all attributes
@@ -463,8 +513,7 @@ export function getElementInfo(element: Element): RemoteElementInfo {
 		className: element.className ? String(element.className).trim() : undefined,
 		ariaLabel: getAttributeSafe(element, "aria-label"),
 		value:
-			element instanceof HTMLInputElement ||
-			element instanceof HTMLTextAreaElement
+			isInputElement(element) || isTextAreaElement(element)
 				? element.value
 				: undefined,
 		visible: isVisible(element),
@@ -480,7 +529,20 @@ export function getElementInfo(element: Element): RemoteElementInfo {
 			right: rect.right,
 		},
 		attributes,
+		...(box ? { box } : {}),
 	};
+}
+
+/**
+ * Viewport box of a rect in CSS pixels, or undefined when the element has no
+ * layout box (zero width and height). Snapshot nodes and element info share it,
+ * so both report the same geometry from one rect read.
+ */
+export function layoutBox(
+	rect: Pick<DOMRect, "left" | "top" | "width" | "height">,
+): ElementBox | undefined {
+	if (rect.width === 0 && rect.height === 0) return undefined;
+	return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
 }
 
 // ─── Utility Functions ────────────────────────────────────────────
@@ -490,16 +552,16 @@ export function getElementInfo(element: Element): RemoteElementInfo {
  */
 function getTextContent(element: Element): string {
 	// For inputs, check value first
-	if (element instanceof HTMLInputElement) {
+	if (isInputElement(element)) {
 		if (element.type === "button" || element.type === "submit") {
 			return element.value || element.textContent || "";
 		}
 		return element.value || "";
 	}
-	if (element instanceof HTMLTextAreaElement) {
+	if (isTextAreaElement(element)) {
 		return element.value || "";
 	}
-	if (element instanceof HTMLSelectElement) {
+	if (isSelectElement(element)) {
 		const selected = element.options[element.selectedIndex];
 		return selected?.textContent || "";
 	}
@@ -536,7 +598,7 @@ function generateCSSSelector(element: Element): string {
 	const parts: string[] = [];
 	let current: Element | null = element;
 
-	while (current && current !== document.documentElement) {
+	while (current && current !== element.ownerDocument.documentElement) {
 		let selector = current.tagName.toLowerCase();
 
 		if (current.id) {
@@ -727,7 +789,10 @@ async function waitForActionable(
 
 		const timer = setTimeout(evaluate, timeoutMs);
 		const obs = new MutationObserver(() => evaluate());
-		obs.observe(document.documentElement, { childList: true, subtree: true });
+		obs.observe(lookupRoot(target).documentElement, {
+			childList: true,
+			subtree: true,
+		});
 		const poll = setInterval(evaluate, 50);
 
 		// Kick off an initial evaluation in case the element is already present.

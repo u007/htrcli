@@ -704,11 +704,14 @@ async function handleUploadFiles(
 	tabId: number,
 	payload: Command,
 ): Promise<void> {
-	if (typeof chrome.debugger === "undefined") {
-		// Firefox: no chrome.debugger, so the background cannot call
-		// DOM.setFileInputFiles. `htrcli upload` embeds the file bytes as
-		// base64 (options.filesData); forward the command to the content
-		// script, which sets input.files via File + DataTransfer.
+	// Bytes embedded by `htrcli upload` (options.filesData) are set by the content
+	// script via File + DataTransfer on every browser. Firefox has no
+	// chrome.debugger, so it always takes this path; Chrome takes it only for the
+	// bytes form, and keeps DOM.setFileInputFiles for host paths.
+	if (
+		typeof chrome.debugger === "undefined" ||
+		payload.options?.filesData !== undefined
+	) {
 		const filesData = payload.options?.filesData as
 			| { name: string; mimeType: string; base64: string }[]
 			| undefined;
@@ -716,7 +719,7 @@ async function handleUploadFiles(
 			replyError(
 				tabId,
 				payload.id,
-				"upload on Firefox requires file data, which `htrcli upload` embeds automatically. Run `htrcli upload <selector> <file>` — chrome.debugger (used on Chrome) is unavailable on Firefox.",
+				"upload requires file data in options.filesData. `htrcli upload` embeds it automatically on Firefox; on Chrome, host paths use chrome.debugger.",
 			);
 			return;
 		}
@@ -763,6 +766,14 @@ async function handleUploadFiles(
 				error instanceof Error ? error.message : String(error),
 			);
 		}
+		return;
+	}
+	if (payload.options?.frame !== undefined) {
+		replyError(
+			tabId,
+			payload.id,
+			"uploading a host path into an options.frame needs the file bytes (`htrcli upload` embeds them): the debugger path resolves selectors in the top document.",
+		);
 		return;
 	}
 	const selector = payload.target?.selector;

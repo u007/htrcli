@@ -78,6 +78,8 @@ export interface RemoteElementInfo {
 	tag: string;
 	text: string;
 	selector: string;
+	/** Omitted when the element has no layout box. */
+	box?: ElementBox;
 	xpath: string;
 	type?: string;
 	name?: string;
@@ -136,6 +138,9 @@ export type CommandAction =
 	| "focus"
 	| "blur"
 	| "scrollTo"
+	| "scrollBy"
+	| "isChecked"
+	| "pick"
 	| "fill"
 	| "type"
 	| "clear"
@@ -256,6 +261,14 @@ export interface SnapshotNodeState {
 	readonly?: boolean;
 }
 
+/** Layout box in viewport CSS pixels (the element's document viewport). */
+export interface ElementBox {
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+}
+
 export interface SnapshotNode {
 	role: string;
 	name?: string;
@@ -263,7 +276,13 @@ export interface SnapshotNode {
 	value?: string;
 	description?: string;
 	state?: SnapshotNodeState;
+	/** Omitted when the element has no layout box. */
+	box?: ElementBox;
 	children?: SnapshotNode[];
+	/** Set on the root node only: the inner size of the snapshotted viewport. */
+	viewport?: { w: number; h: number };
+	/** Set on the root node only: the scroll offset of the snapshotted viewport, CSS px. */
+	scroll?: { x: number; y: number };
 }
 
 // ─── Page Info ──────────────────────────────────────────────────────

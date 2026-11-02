@@ -47,6 +47,8 @@ export type PrepareSender = (command: Command) => Promise<{
 	x?: number;
 	y?: number;
 	focused?: boolean;
+	/** Targetless prepareKeys only: whether the focused element accepts text. */
+	editable?: boolean;
 }>;
 
 export interface CdpDispatchDeps {
@@ -79,7 +81,7 @@ function defaultSend(tabId: number): CdpInputSender {
 async function defaultPrepare(
 	tabId: number,
 	command: Command,
-): Promise<{ x?: number; y?: number; focused?: boolean }> {
+): Promise<{ x?: number; y?: number; focused?: boolean; editable?: boolean }> {
 	const result = await new Promise<CommandResult | null>((resolve) => {
 		chrome.tabs.sendMessage(
 			tabId,
@@ -101,7 +103,12 @@ async function defaultPrepare(
 	if (!result.success) {
 		throw new Error(result.error ?? "element preparation failed");
 	}
-	return (result.data ?? {}) as { x?: number; y?: number; focused?: boolean };
+	return (result.data ?? {}) as {
+		x?: number;
+		y?: number;
+		focused?: boolean;
+		editable?: boolean;
+	};
 }
 
 /**
@@ -152,15 +159,9 @@ export async function dispatchCdpClick(
 	deps: CdpDispatchDeps = {},
 ): Promise<CommandResult> {
 	const prepare = deps.prepare ?? ((c) => defaultPrepare(tabId, c));
-	const coords = await prepare({
-		action: "prepareClick",
-		id: command.id,
-		target: command.target,
-		options: command.options,
-	});
-	if (typeof coords.x !== "number" || typeof coords.y !== "number") {
-		throw new Error("prepareClick did not return viewport coordinates");
-	}
+	// Literal `xy=` coordinates bypass the content script's element lookup, which
+	// has no coordinate strategy, exactly as the other CDP mouse paths do.
+	const coords = await resolveCoords(command.target, prepare, command);
 
 	const button: "left" | "right" =
 		command.action === "rightclick" ? "right" : "left";
@@ -220,7 +221,14 @@ async function resolveCoords(
 ): Promise<{ x: number; y: number }> {
 	// Literal viewport coordinates via xy=100,200 bypass element lookup
 	const literal = literalCoords(target);
-	if (literal) return literal;
+	if (literal) {
+		if (command.options?.frame !== undefined) {
+			throw new Error(
+				"coordinate targets do not support options.frame; target an element inside the frame",
+			);
+		}
+		return literal;
+	}
 
 	return requirePreparedCoords(
 		await prepare({
@@ -490,12 +498,17 @@ export async function dispatchCdpType(
 	}
 
 	const prepare = deps.prepare ?? ((c) => defaultPrepare(tabId, c));
-	await prepare({
+	const prepared = await prepare({
 		action: "prepareKeys",
 		id: command.id,
 		target: command.target,
 		options: command.options,
 	});
+	// Input.insertText into a non-editable focus is accepted and silently dropped,
+	// so a targetless type must check the focus before sending any text.
+	if (!command.target && prepared.editable !== true) {
+		throw new Error("type without a target needs a focused editable element");
+	}
 
 	await runWithDebugger(tabId, deps.send, async (send) => {
 		await send("Input.insertText", { text: value });

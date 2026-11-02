@@ -19,16 +19,27 @@ import type {
 } from "../types/commands";
 import { AIA_API_KEY } from "../utils/aiaConfig";
 import { resolveKey } from "../utils/keyMap";
+import { dispatchClickSequence } from "./clickSequence";
 import { collectAll, type TruncationCause } from "./collectList";
 import {
 	findAllElements,
 	findElement,
 	getElementInfo,
+	lookupRoot,
 	waitForActionableElement,
 	waitForElement,
 	waitForScrollableActionableElement,
+	withLookupRoot,
 } from "./elementFinder";
+import {
+	isHTMLElement,
+	isIFrameElement,
+	isInputElement,
+	isSelectElement,
+	isTextAreaElement,
+} from "./elementKind";
 import { extractListFrom, extractTable } from "./extractData";
+import { type PickResult, pickOption } from "./pick";
 import { assignRef, DetachedRefError } from "./refRegistry";
 import { getSnapshot } from "./snapshot";
 import { generateXPath } from "./xpathGenerator";
@@ -174,8 +185,60 @@ function waitTimeout(options?: Command["options"]): number {
 	return Math.min(t, 20000);
 }
 
+/**
+ * Actions that resolve no element through the element finder, so an
+ * `options.frame` cannot apply to them. They reject it rather than act on the
+ * top document silently.
+ */
+const FRAME_UNSUPPORTED_ACTIONS = new Set<CommandAction>([
+	"collectAll",
+	"extractTable",
+	"extractList",
+	"screenshot",
+	"highlight",
+]);
+
+/**
+ * The document an action resolves elements in: the top document, or the
+ * document of the `options.frame` iframe (a CSS selector in the top document).
+ * Resolved once per command, so every lookup in the command shares one root.
+ */
+function resolveFrameRoot(options: Command["options"]): Document {
+	const frame = options?.frame;
+	if (frame === undefined) return document;
+	if (typeof frame !== "string" || frame === "") {
+		throw new Error("options.frame must be a non-empty CSS selector string");
+	}
+	const element = document.querySelector(frame);
+	if (!element) {
+		throw new Error(`frame ${frame} not found`);
+	}
+	if (!isIFrameElement(element)) {
+		throw new Error(`frame ${frame} is not an <iframe>`);
+	}
+	let inner: Document | null = null;
+	try {
+		inner = element.contentDocument;
+	} catch (error) {
+		// Cross-origin frames throw on access in some browsers and return null in
+		// others. Both mean the same thing here, so both take the error below.
+		console.debug("[HTR NControl] frame contentDocument access threw", error);
+	}
+	if (!inner) {
+		throw new Error(`frame ${frame} is cross-origin; open its URL in a tab`);
+	}
+	return inner;
+}
+
 async function executeAction(command: Command): Promise<unknown> {
-	const { action, target, value, options } = command;
+	const { action, value, options } = command;
+	const root = resolveFrameRoot(options);
+	if (options?.frame !== undefined && FRAME_UNSUPPORTED_ACTIONS.has(action)) {
+		throw new Error(`action "${action}" does not support options.frame`);
+	}
+	// Bind the lookup root to the target so every finder call in the handlers
+	// resolves inside the frame, without threading it through each handler.
+	const target = command.target && withLookupRoot(command.target, root);
 
 	// At this point, target/value have been validated for actions that need them.
 	// requireTarget/requireValue provide type-safe non-null returns.
@@ -241,7 +304,7 @@ async function executeAction(command: Command): Promise<unknown> {
 		case "getPageInfo":
 			return getPageInfo();
 		case "snapshot":
-			return getSnapshot();
+			return getSnapshot(root);
 		case "xpath":
 			return handleXPath(requireTarget(target, action));
 
@@ -278,6 +341,22 @@ async function executeAction(command: Command): Promise<unknown> {
 				requireTarget(target, action),
 				waitTimeout(options),
 			);
+		case "scrollBy":
+			return handleScrollBy(
+				target,
+				requireNumberOption(options, "dx", action),
+				requireNumberOption(options, "dy", action),
+				root,
+				waitTimeout(options),
+			);
+		case "isChecked":
+			return handleIsChecked(requireTarget(target, action));
+		case "pick":
+			return handlePick(
+				requireTarget(target, action),
+				requireValue(value, action),
+				waitTimeout(options),
+			);
 		case "fill":
 			return handleFill(
 				requireTarget(target, action),
@@ -285,10 +364,12 @@ async function executeAction(command: Command): Promise<unknown> {
 				waitTimeout(options),
 			);
 		case "type":
+			// Target is optional: a targetless type goes to the focused editable element.
 			return handleType(
-				requireTarget(target, action),
+				target,
 				requireValue(value, action),
 				waitTimeout(options),
+				root,
 			);
 		case "clear":
 			return handleClear(requireTarget(target, action), waitTimeout(options));
@@ -316,18 +397,21 @@ async function executeAction(command: Command): Promise<unknown> {
 				target,
 				requireValue(value, action),
 				waitTimeout(options),
+				root,
 			);
 		case "keyDown":
 			return handleKeyDown(
 				target,
 				requireValue(value, action),
 				waitTimeout(options),
+				root,
 			);
 		case "keyUp":
 			return handleKeyUp(
 				target,
 				requireValue(value, action),
 				waitTimeout(options),
+				root,
 			);
 		case "mouseDown":
 			return handleMouseDown(
@@ -358,7 +442,7 @@ async function executeAction(command: Command): Promise<unknown> {
 			}
 			return handleDrag(
 				requireTarget(target, action),
-				endSel,
+				withLookupRoot(endSel, root),
 				waitTimeout(options),
 				(options?.steps as number) ?? 5,
 				(options?.delay as number) ?? 0,
@@ -392,7 +476,7 @@ async function executeAction(command: Command): Promise<unknown> {
 			);
 		case "prepareKeys":
 			// Target is optional: targetless press goes to the focused element.
-			return handlePrepareKeys(target, waitTimeout(options));
+			return handlePrepareKeys(target, waitTimeout(options), root);
 
 		// ─── Navigation ───────────────────────────────────────────────
 		case "navigate":
@@ -675,16 +759,13 @@ function handleGetValue(target: TargetSelector): string {
 	const element = findElement(target);
 	if (!element) throw new Error("Element not found");
 
-	if (
-		element instanceof HTMLInputElement ||
-		element instanceof HTMLTextAreaElement
-	) {
+	if (isInputElement(element) || isTextAreaElement(element)) {
 		return element.value;
 	}
-	if (element instanceof HTMLSelectElement) {
+	if (isSelectElement(element)) {
 		return element.value;
 	}
-	if (element instanceof HTMLElement) {
+	if (isHTMLElement(element)) {
 		return element.textContent || "";
 	}
 	throw new Error("Cannot get value from this element type");
@@ -734,7 +815,7 @@ function handleGetComputedStyle(
 ): string | null {
 	const element = findElement(target);
 	if (!element) return null;
-	const style = window.getComputedStyle(element);
+	const style = windowOf(element.ownerDocument).getComputedStyle(element);
 	return style.getPropertyValue(property);
 }
 
@@ -752,6 +833,23 @@ async function handleClick(
 	count = 1,
 	timeoutMs = 5000,
 ): Promise<void> {
+	// Coordinate target (`xy=`): hit-test the viewport point and dispatch on what
+	// is there. Nothing is scrolled, because the point is taken as given. This is
+	// the synthetic path (Firefox, and Chrome when the trusted path is absent).
+	if (typeof target.x === "number" && typeof target.y === "number") {
+		if (lookupRoot(target) !== document) {
+			throw new Error(
+				"coordinate targets do not support options.frame; target an element inside the frame",
+			);
+		}
+		const at = document.elementFromPoint(target.x, target.y);
+		if (!at) {
+			throw new Error(`nothing at (${target.x}, ${target.y})`);
+		}
+		dispatchClickSequence(at, target.x, target.y, button, count);
+		return;
+	}
+
 	const element = await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: true,
@@ -766,65 +864,7 @@ async function handleClick(
 	const x = rect.left + rect.width / 2;
 	const y = rect.top + rect.height / 2;
 
-	const eventInit: MouseEventInit = {
-		bubbles: true,
-		cancelable: true,
-		view: window,
-		button: button === "right" ? 2 : 0,
-		clientX: x,
-		clientY: y,
-	};
-
-	const pointerButton = button === "right" ? 2 : 0;
-	const pointerInit: PointerEventInit = {
-		bubbles: true,
-		cancelable: true,
-		view: window,
-		pointerId: 1,
-		pointerType: "mouse",
-		button: pointerButton,
-		buttons: pointerButton,
-		clientX: x,
-		clientY: y,
-	};
-	const makePointer = (type: string) =>
-		typeof PointerEvent !== "undefined"
-			? new PointerEvent(type, pointerInit)
-			: new MouseEvent(type, eventInit);
-
-	// Full event sequence matching real browser order: pointer events are
-	// dispatched immediately before/after their mouse counterparts (pointerdown
-	// before mousedown, pointerup before mouseup). This is what pages expect and
-	// is required for frameworks that listen to pointer events.
-	const singleClickSequence = [
-		"pointerover",
-		"mouseover",
-		"mouseenter",
-		"pointerdown",
-		"mousedown",
-		"pointerup",
-		"mouseup",
-		"click",
-	];
-
-	for (let i = 0; i < count; i++) {
-		for (const eventType of singleClickSequence) {
-			if (eventType.startsWith("pointer")) {
-				(element as HTMLElement).dispatchEvent(makePointer(eventType));
-			} else {
-				(element as HTMLElement).dispatchEvent(
-					new MouseEvent(eventType, eventInit),
-				);
-			}
-		}
-	}
-
-	// dblclick fires after both click sequences, matching the DOM Level 3 event order
-	if (count === 2) {
-		(element as HTMLElement).dispatchEvent(
-			new MouseEvent("dblclick", eventInit),
-		);
-	}
+	dispatchClickSequence(element, x, y, button, count);
 }
 
 async function handleHover(
@@ -885,15 +925,15 @@ async function handleBlur(
  * Bounded by a short hard cap so a page with its own scroll animations can't
  * hang the command.
  */
-function waitForScrollSettle(maxMs = 500): Promise<void> {
+function waitForScrollSettle(view: Window, maxMs = 500): Promise<void> {
 	return new Promise((resolve) => {
 		const start = Date.now();
-		let lastTop = window.scrollY;
-		let lastLeft = window.scrollX;
+		let lastTop = view.scrollY;
+		let lastLeft = view.scrollX;
 		let stableFrames = 0;
 		const check = () => {
-			const top = window.scrollY;
-			const left = window.scrollX;
+			const top = view.scrollY;
+			const left = view.scrollX;
 			if (top === lastTop && left === lastLeft) {
 				stableFrames++;
 			} else {
@@ -923,7 +963,33 @@ async function handleScrollTo(
 	// Instant scroll (no smooth animation) so the following action captures the
 	// settled position; then wait for the scroll to actually settle.
 	element.scrollIntoView({ behavior: "instant", block: "center" });
-	await waitForScrollSettle();
+	await waitForScrollSettle(windowOf(element.ownerDocument));
+}
+
+/**
+ * Scroll an element (or, without a target, the frame's window) by (dx, dy)
+ * instantly, then wait for the scroll to settle. Returns the position after.
+ */
+async function handleScrollBy(
+	target: TargetSelector | undefined,
+	dx: number,
+	dy: number,
+	root: Document,
+	timeoutMs = 5000,
+): Promise<{ x: number; y: number }> {
+	if (target) {
+		const element = await waitForScrollableActionableElement(target, {
+			timeoutMs,
+			requireEnabled: false,
+		});
+		element.scrollBy({ left: dx, top: dy, behavior: "instant" });
+		await waitForScrollSettle(windowOf(element.ownerDocument));
+		return { x: element.scrollLeft, y: element.scrollTop };
+	}
+	const view = windowOf(root);
+	view.scrollBy({ left: dx, top: dy, behavior: "instant" });
+	await waitForScrollSettle(view);
+	return { x: view.scrollX, y: view.scrollY };
 }
 
 async function handleFill(
@@ -941,20 +1007,20 @@ async function handleFill(
 		| HTMLElement;
 
 	if (
-		element instanceof HTMLInputElement ||
-		element instanceof HTMLTextAreaElement ||
-		element instanceof HTMLSelectElement
+		isInputElement(element) ||
+		isTextAreaElement(element) ||
+		isSelectElement(element)
 	) {
 		// Focus first
 		(element as HTMLInputElement).focus();
 
 		// Set value
-		if (element instanceof HTMLSelectElement) {
+		if (isSelectElement(element)) {
 			element.value = value;
 		} else {
 			// Use native setter to bypass React's synthetic event system
 			const nativeSetter = Object.getOwnPropertyDescriptor(
-				element instanceof HTMLTextAreaElement
+				isTextAreaElement(element)
 					? HTMLTextAreaElement.prototype
 					: HTMLInputElement.prototype,
 				"value",
@@ -971,7 +1037,7 @@ async function handleFill(
 		element.dispatchEvent(new Event("change", { bubbles: true }));
 		element.dispatchEvent(new Event("blur", { bubbles: true }));
 	} else if (
-		element instanceof HTMLElement &&
+		isHTMLElement(element) &&
 		(element as HTMLElement).isContentEditable
 	) {
 		// `fill` REPLACES the content — correct for a spreadsheet cell.
@@ -984,9 +1050,9 @@ async function handleFill(
 		// Chromium treats insertText with an empty string as a no-op, so an
 		// empty fill deletes the selected contents instead.
 		if (value === "") {
-			document.execCommand("delete");
+			element.ownerDocument.execCommand("delete");
 		} else {
-			document.execCommand("insertText", false, value);
+			element.ownerDocument.execCommand("insertText", false, value);
 		}
 		element.dispatchEvent(new Event("input", { bubbles: true }));
 		element.dispatchEvent(new Event("change", { bubbles: true }));
@@ -999,19 +1065,19 @@ async function handleFill(
 }
 
 async function handleType(
-	target: TargetSelector,
+	target: TargetSelector | undefined,
 	value: string,
 	timeoutMs = 5000,
+	root: Document,
 ): Promise<void> {
-	const element = (await waitForScrollableActionableElement(target, {
-		timeoutMs,
-		requireEnabled: true,
-	})) as HTMLInputElement | HTMLTextAreaElement | HTMLElement;
+	const element = target
+		? ((await waitForScrollableActionableElement(target, {
+				timeoutMs,
+				requireEnabled: true,
+			})) as HTMLInputElement | HTMLTextAreaElement | HTMLElement)
+		: focusedEditableElement(root);
 
-	if (
-		element instanceof HTMLInputElement ||
-		element instanceof HTMLTextAreaElement
-	) {
+	if (isInputElement(element) || isTextAreaElement(element)) {
 		(element as HTMLInputElement).focus();
 
 		// Type each character
@@ -1065,7 +1131,7 @@ async function handleType(
 		element.dispatchEvent(new Event("change", { bubbles: true }));
 		element.dispatchEvent(new Event("blur", { bubbles: true }));
 	} else if (
-		element instanceof HTMLElement &&
+		isHTMLElement(element) &&
 		(element as HTMLElement).isContentEditable
 	) {
 		// A contenteditable APPENDS, like real keystrokes. It must not wipe
@@ -1074,7 +1140,7 @@ async function handleType(
 		// message. Use `fill` (or `clear` first) when replacing is intended.
 		(element as HTMLElement).focus();
 		placeCaretAtEnd(element);
-		document.execCommand("insertText", false, value);
+		element.ownerDocument.execCommand("insertText", false, value);
 		element.dispatchEvent(new Event("input", { bubbles: true }));
 		element.dispatchEvent(new Event("change", { bubbles: true }));
 		element.dispatchEvent(new Event("blur", { bubbles: true }));
@@ -1087,9 +1153,9 @@ async function handleType(
 // inserted text lands AFTER the existing content. Rich editors (Gmail's
 // reply box, Docs, Draft, Quill) keep their quoted text and signature there.
 function placeCaretAtEnd(element: HTMLElement): void {
-	const selection = document.getSelection();
+	const selection = element.ownerDocument.getSelection();
 	if (!selection) return;
-	const range = document.createRange();
+	const range = element.ownerDocument.createRange();
 	range.selectNodeContents(element);
 	range.collapse(false);
 	selection.removeAllRanges();
@@ -1099,9 +1165,9 @@ function placeCaretAtEnd(element: HTMLElement): void {
 // selectElementContents selects ONLY this element's own contents, leaving any
 // sibling content of the surrounding editing host untouched.
 function selectElementContents(element: HTMLElement): void {
-	const selection = document.getSelection();
+	const selection = element.ownerDocument.getSelection();
 	if (!selection) return;
-	const range = document.createRange();
+	const range = element.ownerDocument.createRange();
 	range.selectNodeContents(element);
 	selection.removeAllRanges();
 	selection.addRange(range);
@@ -1116,10 +1182,7 @@ async function handleClear(
 		requireEnabled: true,
 	})) as HTMLInputElement | HTMLTextAreaElement;
 
-	if (
-		element instanceof HTMLInputElement ||
-		element instanceof HTMLTextAreaElement
-	) {
+	if (isInputElement(element) || isTextAreaElement(element)) {
 		(element as HTMLInputElement).focus();
 		(element as HTMLInputElement).value = "";
 		element.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1139,7 +1202,7 @@ async function handleSelect(
 		requireEnabled: true,
 	})) as HTMLSelectElement;
 
-	if (element instanceof HTMLSelectElement) {
+	if (isSelectElement(element)) {
 		(element as HTMLSelectElement).focus();
 		// Use native setter to bypass React's synthetic event system
 		const nativeSetter = Object.getOwnPropertyDescriptor(
@@ -1168,7 +1231,7 @@ async function handleCheck(
 		requireEnabled: true,
 	})) as HTMLInputElement;
 
-	if (element instanceof HTMLInputElement) {
+	if (isInputElement(element)) {
 		(element as HTMLInputElement).focus();
 		// Use native setter to bypass React's synthetic event system
 		const nativeSetter = Object.getOwnPropertyDescriptor(
@@ -1203,7 +1266,7 @@ async function handleCheck(
 function isAriaCheckbox(element: Element): boolean {
 	return (
 		element.getAttribute("role")?.toLowerCase() === "checkbox" &&
-		element instanceof HTMLElement
+		isHTMLElement(element)
 	);
 }
 
@@ -1249,10 +1312,107 @@ async function setAriaCheckbox(
 	);
 }
 
+/** Whether an element accepts typed text: a text-like input, a textarea, or a contenteditable host. */
+function isEditableElement(element: Element): boolean {
+	return (
+		isInputElement(element) ||
+		isTextAreaElement(element) ||
+		(isHTMLElement(element) && element.isContentEditable)
+	);
+}
+
+/** Whether the focused element of `root` accepts typed text. */
+function isEditableFocus(root: Document): boolean {
+	const active = root.activeElement;
+	return active !== null && isEditableElement(active);
+}
+
+/**
+ * The focused element a targetless `type` writes into. Anything else is an
+ * error: typing into a button or the page body would silently go nowhere.
+ */
+function focusedEditableElement(root: Document): HTMLElement {
+	const active = root.activeElement;
+	if (!active || !isEditableElement(active)) {
+		throw new Error("type without a target needs a focused editable element");
+	}
+	return active as HTMLElement;
+}
+
+/** The window of a document. A detached frame has none, so it cannot be scrolled or measured. */
+function windowOf(doc: Document): Window {
+	const view = doc.defaultView;
+	if (!view) {
+		throw new Error("document has no window (detached frame)");
+	}
+	return view;
+}
+
+/**
+ * Top-viewport offset of the iframe a document belongs to; zero for the top
+ * document. CDP input is dispatched in top-viewport coordinates.
+ */
+function frameOffset(doc: Document): { x: number; y: number } {
+	const frame = windowOf(doc).frameElement;
+	if (!frame) return { x: 0, y: 0 };
+	const rect = frame.getBoundingClientRect();
+	return { x: rect.left + frame.clientLeft, y: rect.top + frame.clientTop };
+}
+
+function requireNumberOption(
+	options: Command["options"],
+	key: "dx" | "dy",
+	action: string,
+): number {
+	const value = options?.[key];
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		throw new Error(
+			`Action "${action}" requires options.${key} as a finite number`,
+		);
+	}
+	return value;
+}
+
+/**
+ * Whether a checkbox, radio or ARIA checkable element is checked. Reads only;
+ * it never clicks.
+ */
+function handleIsChecked(target: TargetSelector): { checked: boolean } {
+	const element = findElement(target);
+	if (!element) throw new Error("Element not found");
+	if (
+		isInputElement(element) &&
+		(element.type === "checkbox" || element.type === "radio")
+	) {
+		return { checked: element.checked };
+	}
+	const ariaChecked = element.getAttribute("aria-checked");
+	if (ariaChecked === "true") return { checked: true };
+	if (ariaChecked === "false" || ariaChecked === "mixed") {
+		return { checked: false };
+	}
+	throw new Error("element is not checkable");
+}
+
+async function handlePick(
+	target: TargetSelector,
+	want: string,
+	timeoutMs = 5000,
+): Promise<PickResult> {
+	// Presence only: a react-select input is a 2px box that the actionability
+	// check would reject as not visible.
+	const element = await waitForElement(target, timeoutMs, { force: true });
+	if (!element) {
+		throw new Error(`pick: element not found within ${timeoutMs}ms`);
+	}
+	return pickOption(element, want);
+}
+
 async function handlePressKey(
 	target: TargetSelector | undefined,
 	key: string,
 	timeoutMs = 5000,
+	root: Document,
 ): Promise<void> {
 	// Playwright keyboard.press semantics: without a target, the key goes to
 	// the currently focused element (e.g. after a `fill`) — falling back to
@@ -1262,7 +1422,7 @@ async function handlePressKey(
 				timeoutMs,
 				requireEnabled: true,
 			})) as HTMLElement)
-		: ((document.activeElement as HTMLElement | null) ?? document.body);
+		: ((root.activeElement as HTMLElement | null) ?? root.body);
 
 	element.focus();
 
@@ -1288,13 +1448,14 @@ async function handleKeyDown(
 	target: TargetSelector | undefined,
 	key: string,
 	timeoutMs = 5000,
+	root: Document,
 ): Promise<void> {
 	const element = target
 		? ((await waitForActionableElement(target, {
 				timeoutMs,
 				requireEnabled: true,
 			})) as HTMLElement)
-		: ((document.activeElement as HTMLElement | null) ?? document.body);
+		: ((root.activeElement as HTMLElement | null) ?? root.body);
 	element.focus();
 	const descriptor = resolveKey(key);
 	element.dispatchEvent(
@@ -1312,13 +1473,14 @@ async function handleKeyUp(
 	target: TargetSelector | undefined,
 	key: string,
 	timeoutMs = 5000,
+	root: Document,
 ): Promise<void> {
 	const element = target
 		? ((await waitForActionableElement(target, {
 				timeoutMs,
 				requireEnabled: true,
 			})) as HTMLElement)
-		: ((document.activeElement as HTMLElement | null) ?? document.body);
+		: ((root.activeElement as HTMLElement | null) ?? root.body);
 	element.focus();
 	const descriptor = resolveKey(key);
 	element.dispatchEvent(
@@ -1774,7 +1936,10 @@ async function handlePrepareClick(
 	const rect = element.getBoundingClientRect();
 	const x = rect.left + rect.width / 2;
 	const y = rect.top + rect.height / 2;
-	return { x, y };
+	// CDP input is dispatched in top-viewport coordinates; an element in a frame
+	// is measured against its frame's viewport, so shift it by the iframe's offset.
+	const offset = frameOffset(element.ownerDocument);
+	return { x: offset.x + x, y: offset.y + y };
 }
 
 /**
@@ -1787,12 +1952,16 @@ async function handlePrepareClick(
 async function handlePrepareKeys(
 	target: TargetSelector | undefined,
 	timeoutMs = 5000,
-): Promise<{ focused: boolean }> {
+	root: Document,
+): Promise<{ focused: boolean; editable?: boolean }> {
 	// Targetless press (htrcli `press Enter` after a `fill`) follows Playwright
 	// keyboard.press semantics: the CDP key events go to whatever currently has
 	// focus, so there is nothing to wait for or refocus here.
 	if (!target) {
-		return { focused: document.activeElement != null };
+		return {
+			focused: root.activeElement != null,
+			editable: isEditableFocus(root),
+		};
 	}
 	const element = (await waitForScrollableActionableElement(target, {
 		timeoutMs,
@@ -1805,7 +1974,7 @@ async function handlePrepareKeys(
 	// — which inserts at the caret — would write BEFORE a reply box's quoted
 	// thread. A real keystroke appends; match that.
 	if (element.isContentEditable) placeCaretAtEnd(element);
-	return { focused: document.activeElement === element };
+	return { focused: element.ownerDocument.activeElement === element };
 }
 
 async function handleSelectText(
@@ -1817,16 +1986,13 @@ async function handleSelectText(
 		requireEnabled: false,
 	});
 
-	if (
-		element instanceof HTMLInputElement ||
-		element instanceof HTMLTextAreaElement
-	) {
+	if (isInputElement(element) || isTextAreaElement(element)) {
 		(element as HTMLInputElement).select();
 	} else {
 		// Select all text in element
 		const selection = window.getSelection();
 		if (selection) {
-			const range = document.createRange();
+			const range = element.ownerDocument.createRange();
 			range.selectNodeContents(element);
 			selection.removeAllRanges();
 			selection.addRange(range);
@@ -1870,7 +2036,7 @@ async function handleUploadFiles(
 	const filesData = options?.filesData as UploadFileData[] | undefined;
 	if (!filesData || filesData.length === 0) {
 		throw new Error(
-			"uploadFiles requires options.filesData (base64 file bytes). On Chrome this action is background-handled via chrome.debugger; this content-script path is used on Firefox.",
+			"uploadFiles requires options.filesData (base64 file bytes). Host paths on Chrome are set by the background via chrome.debugger; file bytes are set here.",
 		);
 	}
 
@@ -1885,10 +2051,10 @@ async function handleUploadFiles(
 			`uploadFiles: element ${target.selector ?? target.name ?? "?"} not found within ${timeoutMs}ms`,
 		);
 	}
-	if (!(element instanceof HTMLInputElement) || element.type !== "file") {
+	if (!isInputElement(element) || element.type !== "file") {
 		throw new Error(
 			"uploadFiles target is not an <input type=file> (got " +
-				`${element instanceof HTMLInputElement ? element.type : element.tagName})`,
+				`${isInputElement(element) ? element.type : element.tagName})`,
 		);
 	}
 

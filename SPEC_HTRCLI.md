@@ -389,6 +389,55 @@ Implemented in `internal/cdp/{pick,fillform,frame}.go` + `formkit.js`
   `htrcli --cdp open <src>` advice. One level only; `@eN`, `xy=` and
   `find --ref` are rejected with `--frame`.
 
+#### Raw extension actions (ocode)
+
+ocode drives the extension through the raw command route `POST /api/tabs/<id>/command`.
+The CLI verbs above are unchanged: `pick` and `--frame` stay CDP-only on the CLI.
+These actions exist on the extension transport for raw callers:
+
+- `type` without `target` types into the focused editable element (input,
+  textarea, or contenteditable). Any other focus fails with
+  `type without a target needs a focused editable element`. On Chrome the check
+  runs before any text is sent.
+- `scrollBy` takes `options: {dx, dy}` (finite numbers, either may be 0). With a
+  `target` it scrolls that element; without one it scrolls the window, or the
+  frame's window under `options.frame`. The result is the position after settling.
+- `isChecked` takes a `target`. A checkbox or radio reads `.checked`; an element
+  with `aria-checked` reads `"true"` as true and `"false"` or `"mixed"` as false.
+  Anything else fails with `element is not checkable`.
+- `pick` takes a `target` (a native `<select>`, a combobox `<input>`, or a
+  react-select style control) and `value`, the wanted option text. Ranking is
+  the same as the CLI verb. Both browsers use synthetic events, because the
+  extension transport has no trusted input.
+- `click` with `target: {x, y}` hit-tests that viewport point (CSS pixels) and
+  dispatches the click there. It scrolls nothing. Nothing at the point fails
+  with `nothing at (x, y)`. Chrome sends the same point through trusted CDP input.
+- `uploadFiles` with `options.filesData` (`[{name, mimeType, base64}]`) works on
+  Chrome and Firefox. Host paths in `options.files` stay on the Chrome debugger
+  path, which cannot target a frame.
+- `options.frame` (CSS selector of an `<iframe>` in the top document) makes
+  element-targeting actions resolve inside that frame's document. Errors:
+  `frame <sel> not found`, `frame <sel> is not an <iframe>`, and
+  `frame <sel> is cross-origin; open its URL in a tab`. `collectAll`,
+  `extractTable`, `extractList`, `screenshot` and `highlight` reject it, and so do
+  coordinate targets.
+- `networkCapture` with `options.durationMs` (1000 to 120000, default 10000)
+  arms a bounded CDP capture window on Chrome per tab. Re-arming extends the
+  window, and nothing is captured before it is armed. Firefox captures through
+  `webRequest` the whole time, so its `networkCapture` only acknowledges.
+  Captured entries are `NetworkEntry` JSON under event kind `network`.
+- `snapshot` returns the accessibility tree. The root carries `viewport: {w, h}`
+  (the inner size) and `scroll: {x, y}` (the scroll offset, CSS px). Each node with
+  a layout box carries `box: {x, y, w, h}` in viewport CSS pixels; the key is
+  omitted when the element has no layout box.
+
+```json
+{"id":"c1","action":"scrollBy","target":{"selector":"#list"},"options":{"dx":0,"dy":400}}
+{"id":"c1","success":true,"data":{"x":0,"y":400}}
+{"id":"c2","action":"pick","target":{"selector":"#country"},"value":"Germany"}
+{"id":"c2","success":true,"data":{"value":"Germany","matched":"Germany"}}
+```
+
 ---
 
 ### Inspection
@@ -1153,6 +1202,9 @@ instead of going through the native-messaging relay's 1MB frame cap.
 POST /api/events/ingest          # extension → daemon, body: EventEntry[]
 GET  /api/events?since=<seq>&kind=<kind>&tab=<id>   # CLI → daemon, cursor-based
 ```
+
+The daemon accepts the kinds `console` and `network`. `dialog` is still rejected
+with `unknown event kind`, so a dialog bucket is retried and never delivered.
 
 The CLI always polls with `since=<seq>` (never "return everything") to avoid
 duplicate/missed entries across polls.

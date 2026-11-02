@@ -371,3 +371,66 @@ describe("CDP input dispatch — error handling", () => {
 		}
 	});
 });
+
+describe("CDP input — targetless type and frame coordinates", () => {
+	it("targetless type inserts into an editable focus", async () => {
+		const { send, calls } = recordingSend();
+		await dispatchCdpType(
+			1,
+			{ id: "t2", action: "type", value: "hi" },
+			{ send, prepare: async () => ({ focused: true, editable: true }) },
+		);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].params.text).toBe("hi");
+	});
+
+	it("targetless type refuses a non-editable focus before sending any text", async () => {
+		const { send, calls } = recordingSend();
+		await expect(
+			dispatchCdpType(
+				1,
+				{ id: "t3", action: "type", value: "hi" },
+				{ send, prepare: async () => ({ focused: true, editable: false }) },
+			),
+		).rejects.toThrow("type without a target needs a focused editable element");
+		expect(calls).toHaveLength(0);
+	});
+
+	it("clicks literal coordinates without asking the content script to find an element", async () => {
+		const { send, calls } = recordingSend();
+		let prepared = false;
+		await dispatchCdpClick(
+			1,
+			{ id: "c8", action: "click", target: { x: 5, y: 6 } },
+			{
+				send,
+				prepare: async () => {
+					prepared = true;
+					return {};
+				},
+			},
+		);
+		expect(prepared).toBe(false);
+		expect(calls[0]).toEqual({
+			method: "Input.dispatchMouseEvent",
+			params: expect.objectContaining({ type: "mousePressed", x: 5, y: 6 }),
+		});
+	});
+
+	it("rejects a literal coordinate target that also names options.frame", async () => {
+		const { send, calls } = recordingSend();
+		await expect(
+			dispatchCdpMouseDown(
+				1,
+				{
+					id: "c9",
+					action: "mouseDown",
+					target: { x: 5, y: 6 },
+					options: { frame: "#f" },
+				},
+				{ send, prepare: coordsPrepare },
+			),
+		).rejects.toThrow("coordinate targets do not support options.frame");
+		expect(calls).toHaveLength(0);
+	});
+});

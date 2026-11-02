@@ -272,3 +272,166 @@ describe("tab-less openTab / closeTab", () => {
 		expect(resultFor("t4")?.error).toContain("options.url");
 	});
 });
+
+describe("uploadFiles routing", () => {
+	const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+	type Forwarded = {
+		tabId: number;
+		msg: {
+			type: string;
+			command: { id: string; options?: Record<string, unknown> };
+		};
+	};
+	let forwarded: Forwarded[] = [];
+	let debuggerCalls: string[] = [];
+
+	function resultFor(
+		id: string,
+	): { id: string; success: boolean; error?: string } | undefined {
+		const found = getPort().messages.find(
+			(m) =>
+				(m as { type?: string }).type === "command_result" &&
+				(m as { payload?: { id?: string } }).payload?.id === id,
+		) as
+			| { payload: { id: string; success: boolean; error?: string } }
+			| undefined;
+		return found?.payload;
+	}
+
+	/** Installs a fake tabs API (content script echoes success) and, on Chrome, a fake debugger. */
+	function installTabs(withDebugger: boolean) {
+		const fake = (globalThis as { chrome?: Record<string, unknown> }).chrome;
+		if (!fake) throw new Error("fake chrome not installed");
+		fake.tabs = {
+			sendMessage: (
+				tabId: number,
+				msg: Forwarded["msg"],
+				cb: (r: unknown) => void,
+			) => {
+				forwarded.push({ tabId, msg });
+				cb({
+					id: msg.command.id,
+					success: true,
+					data: { files: ["a.png"], engine: "DataTransfer" },
+				});
+			},
+		};
+		if (!withDebugger) {
+			delete fake.debugger;
+			return;
+		}
+		fake.debugger = {
+			attach: async () => {
+				debuggerCalls.push("attach");
+			},
+			detach: async () => {
+				debuggerCalls.push("detach");
+			},
+			sendCommand: (
+				_target: unknown,
+				method: string,
+				_params: unknown,
+				cb: (r: unknown) => void,
+			) => {
+				debuggerCalls.push(method);
+				const replies: Record<string, unknown> = {
+					"DOM.getDocument": { root: { nodeId: 1 } },
+					"DOM.querySelector": { nodeId: 2 },
+					"DOM.setFileInputFiles": {},
+				};
+				cb(replies[method]);
+			},
+		};
+	}
+
+	const bytesPayload = {
+		id: "u",
+		action: "uploadFiles",
+		target: { selector: "#file" },
+		options: {
+			filesData: [{ name: "a.png", mimeType: "image/png", base64: "AAA=" }],
+		},
+	};
+
+	beforeEach(() => {
+		createdPorts.length = 0;
+		currentPort = null;
+		installFakeChrome();
+		forwarded = [];
+		debuggerCalls = [];
+		startNativeHost();
+		getPort().emit({ type: "ping" });
+	});
+
+	it("Chrome forwards a file-bytes upload to the content script", async () => {
+		installTabs(true);
+
+		getPort().emit({
+			type: "command",
+			tabId: 5,
+			payload: { ...bytesPayload, id: "u1" },
+		});
+		await flush();
+
+		expect(forwarded).toHaveLength(1);
+		expect(forwarded[0].tabId).toBe(5);
+		expect(forwarded[0].msg.command.options?.filesData).toBeDefined();
+		expect(debuggerCalls).toEqual([]);
+		expect(resultFor("u1")?.success).toBe(true);
+	});
+
+	it("Chrome keeps the debugger path for host paths", async () => {
+		installTabs(true);
+
+		getPort().emit({
+			type: "command",
+			tabId: 5,
+			payload: {
+				id: "u2",
+				action: "uploadFiles",
+				target: { selector: "#file" },
+				options: { files: ["/tmp/a.png"] },
+			},
+		});
+		await flush();
+
+		expect(forwarded).toEqual([]);
+		expect(debuggerCalls).toContain("DOM.setFileInputFiles");
+		expect(resultFor("u2")?.success).toBe(true);
+	});
+
+	it("Chrome refuses host paths into an options.frame", async () => {
+		installTabs(true);
+
+		getPort().emit({
+			type: "command",
+			tabId: 5,
+			payload: {
+				id: "u3",
+				action: "uploadFiles",
+				target: { selector: "#file" },
+				options: { files: ["/tmp/a.png"], frame: "#frame" },
+			},
+		});
+		await flush();
+
+		expect(forwarded).toEqual([]);
+		expect(debuggerCalls).toEqual([]);
+		expect(resultFor("u3")?.success).toBe(false);
+		expect(resultFor("u3")?.error).toContain("needs the file bytes");
+	});
+
+	it("Firefox (no debugger) forwards a file-bytes upload to the content script", async () => {
+		installTabs(false);
+
+		getPort().emit({
+			type: "command",
+			tabId: 5,
+			payload: { ...bytesPayload, id: "u4" },
+		});
+		await flush();
+
+		expect(forwarded).toHaveLength(1);
+		expect(resultFor("u4")?.success).toBe(true);
+	});
+});

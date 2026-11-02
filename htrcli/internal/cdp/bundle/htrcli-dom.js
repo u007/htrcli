@@ -126,6 +126,85 @@
     }
     throw new Error(`resolveKey: unknown key "${key}"`);
   }
+  function dispatchClickSequence(element, x, y, button, count) {
+    const eventInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      button: button === "right" ? 2 : 0,
+      clientX: x,
+      clientY: y
+    };
+    const pointerButton = button === "right" ? 2 : 0;
+    const pointerInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      pointerId: 1,
+      pointerType: "mouse",
+      button: pointerButton,
+      buttons: pointerButton,
+      clientX: x,
+      clientY: y
+    };
+    const makePointer = (type) => typeof PointerEvent !== "undefined" ? new PointerEvent(type, pointerInit) : new MouseEvent(type, eventInit);
+    const singleClickSequence = [
+      "pointerover",
+      "mouseover",
+      "mouseenter",
+      "pointerdown",
+      "mousedown",
+      "pointerup",
+      "mouseup",
+      "click"
+    ];
+    for (let i = 0; i < count; i++) {
+      for (const eventType of singleClickSequence) {
+        if (eventType.startsWith("pointer")) {
+          element.dispatchEvent(makePointer(eventType));
+        } else {
+          element.dispatchEvent(new MouseEvent(eventType, eventInit));
+        }
+      }
+    }
+    if (count === 2) {
+      element.dispatchEvent(new MouseEvent("dblclick", eventInit));
+    }
+  }
+  const XHTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+  function isXhtmlNamed(element, localName) {
+    return element.namespaceURI === XHTML_NAMESPACE && element.localName === localName;
+  }
+  function isHTMLElement(element) {
+    return element.namespaceURI === XHTML_NAMESPACE;
+  }
+  function isIFrameElement(element) {
+    return isXhtmlNamed(element, "iframe");
+  }
+  function isInputElement(element) {
+    return isXhtmlNamed(element, "input");
+  }
+  function isTextAreaElement(element) {
+    return isXhtmlNamed(element, "textarea");
+  }
+  function isSelectElement(element) {
+    return isXhtmlNamed(element, "select");
+  }
+  function isButtonElement(element) {
+    return isXhtmlNamed(element, "button");
+  }
+  function isFieldSetElement(element) {
+    return isXhtmlNamed(element, "fieldset");
+  }
+  function isLabelElement(element) {
+    return isXhtmlNamed(element, "label");
+  }
+  function isOptionElement(element) {
+    return isXhtmlNamed(element, "option");
+  }
+  function isProgressElement(element) {
+    return isXhtmlNamed(element, "progress");
+  }
   const refToEl = /* @__PURE__ */ new Map();
   let nextRef = 0;
   function assignRef(el) {
@@ -195,6 +274,14 @@
     const index = siblings.indexOf(element) + 1;
     return `${tag}[${index}]`;
   }
+  const LOOKUP_ROOT = Symbol("htr.lookupRoot");
+  function withLookupRoot(target, root) {
+    return { ...target, [LOOKUP_ROOT]: root };
+  }
+  function lookupRoot(target) {
+    const bound = target[LOOKUP_ROOT];
+    return bound ?? document;
+  }
   function findElement(target) {
     const elements = findAllElementsRaw(target);
     if (elements.length === 0) return null;
@@ -249,7 +336,7 @@
           resolve(el);
         }
       });
-      obs.observe(document.documentElement, {
+      obs.observe(lookupRoot(target).documentElement, {
         childList: true,
         subtree: true
       });
@@ -257,45 +344,51 @@
   }
   function findAllElementsRaw(target) {
     let elements = [];
+    const root = lookupRoot(target);
     if (target.ref) {
       const el = resolveRef(target.ref);
       return el ? [el] : [];
     }
     if (target.selector) {
-      elements = querySelectorAllSafe(target.selector);
+      elements = querySelectorAllSafe(root, target.selector);
       return applyFilters(elements, target);
     }
     if (target.xpath) {
-      elements = queryXPath(target.xpath);
+      elements = queryXPath(root, target.xpath);
       return applyFilters(elements, target);
     }
     if (target.id) {
-      const el = document.getElementById(target.id);
+      const el = root.getElementById(target.id);
       if (el) elements = [el];
       return applyFilters(elements, target);
     }
     if (target.name) {
-      elements = querySelectorAllSafe(`[name="${CSS.escape(target.name)}"]`);
+      elements = querySelectorAllSafe(
+        root,
+        `[name="${CSS.escape(target.name)}"]`
+      );
       if (elements.length > 0) return applyFilters(elements, target);
-      elements = Array.from(document.querySelectorAll(`[name="${target.name}"]`));
+      elements = Array.from(root.querySelectorAll(`[name="${target.name}"]`));
       return applyFilters(elements, target);
     }
     if (target.role) {
-      elements = querySelectorAllSafe(`[role="${target.role}"]`);
+      elements = querySelectorAllSafe(root, `[role="${target.role}"]`);
       if (elements.length > 0) return applyFilters(elements, target);
     }
     if (target.label) {
-      elements = findByLabel(target.label);
+      elements = findByLabel(root, target.label);
       return applyFilters(elements, target);
     }
     if (target.placeholder) {
       elements = querySelectorAllSafe(
+        root,
         `[placeholder="${CSS.escape(target.placeholder)}"]`
       );
       if (elements.length > 0) return applyFilters(elements, target);
     }
     if (target.text) {
       elements = findByText(
+        root,
         target.text,
         target.tag,
         target.textMatch,
@@ -308,23 +401,23 @@
       if (target.type) {
         selector += `[type="${target.type}"]`;
       }
-      elements = querySelectorAllSafe(selector);
+      elements = querySelectorAllSafe(root, selector);
       return applyFilters(elements, target);
     }
     return [];
   }
-  function querySelectorAllSafe(selector) {
+  function querySelectorAllSafe(root, selector) {
     try {
-      return Array.from(document.querySelectorAll(selector));
+      return Array.from(root.querySelectorAll(selector));
     } catch {
       return [];
     }
   }
-  function queryXPath(xpath) {
+  function queryXPath(root, xpath) {
     try {
-      const result = document.evaluate(
+      const result = root.evaluate(
         xpath,
-        document,
+        root,
         null,
         XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
         null
@@ -341,23 +434,23 @@
       return [];
     }
   }
-  function findByLabel(labelText) {
-    const labels = Array.from(document.querySelectorAll("label"));
+  function findByLabel(root, labelText) {
+    const labels = Array.from(root.querySelectorAll("label"));
     for (const label of labels) {
       if (getTextContent(label).trim() === labelText.trim()) {
         if (label.htmlFor) {
-          const control = document.getElementById(label.htmlFor);
+          const control = root.getElementById(label.htmlFor);
           if (control) return [control];
         }
         const nested = label.querySelector("input, select, textarea");
         if (nested) return [nested];
       }
     }
-    const allControls = document.querySelectorAll("input, select, textarea");
+    const allControls = root.querySelectorAll("input, select, textarea");
     for (const control of allControls) {
       const labelledBy = control.getAttribute("aria-labelledby");
       if (labelledBy) {
-        const labelEl = document.getElementById(labelledBy);
+        const labelEl = root.getElementById(labelledBy);
         if (labelEl && getTextContent(labelEl).trim() === labelText.trim()) {
           return [control];
         }
@@ -369,10 +462,10 @@
     }
     return [];
   }
-  function findByText(text, tag, matchMode = "contains", caseSensitive = false) {
+  function findByText(root, text, tag, matchMode = "contains", caseSensitive = false) {
     const results = [];
     const selector = tag || "*";
-    const elements = document.querySelectorAll(selector);
+    const elements = root.querySelectorAll(selector);
     for (const el of elements) {
       const textContent = getTextContent(el);
       if (matchText(textContent, text, matchMode, caseSensitive)) {
@@ -415,20 +508,22 @@
     return result;
   }
   function isVisible(element) {
-    if (!element.ownerDocument) return false;
-    const style = window.getComputedStyle(element);
+    const view = element.ownerDocument.defaultView;
+    if (!view) return false;
+    const style = view.getComputedStyle(element);
     if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
       return false;
     }
     const rect = element.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return false;
-    const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const viewportWidth = view.innerWidth || element.ownerDocument.documentElement.clientWidth;
+    const viewportHeight = view.innerHeight || element.ownerDocument.documentElement.clientHeight;
     return rect.bottom > 0 && rect.right > 0 && rect.top < viewportHeight && rect.left < viewportWidth;
   }
   function isOnlyOffscreen(element) {
-    if (!element.ownerDocument) return false;
-    const style = window.getComputedStyle(element);
+    const view = element.ownerDocument.defaultView;
+    if (!view) return false;
+    const style = view.getComputedStyle(element);
     if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
       return false;
     }
@@ -446,17 +541,16 @@
     return check.call(element, { checkOpacity: true, checkVisibilityCSS: true });
   }
   function isEnabled(element) {
-    if (element instanceof HTMLInputElement) return !element.disabled;
-    if (element instanceof HTMLSelectElement) return !element.disabled;
-    if (element instanceof HTMLTextAreaElement) return !element.disabled;
-    if (element instanceof HTMLButtonElement) return !element.disabled;
-    if (element instanceof HTMLFieldSetElement) return !element.disabled;
+    if (isInputElement(element) || isSelectElement(element) || isTextAreaElement(element) || isButtonElement(element) || isFieldSetElement(element)) {
+      return !element.disabled;
+    }
     const ariaDisabled = element.getAttribute("aria-disabled");
     if (ariaDisabled === "true") return false;
     return true;
   }
   function getElementInfo(element) {
     const rect = element.getBoundingClientRect();
+    const box = layoutBox(rect);
     const text = getTextContent(element);
     const attributes = {};
     for (const attr of Array.from(element.attributes)) {
@@ -473,7 +567,7 @@
       id: element.id || void 0,
       className: element.className ? String(element.className).trim() : void 0,
       ariaLabel: getAttributeSafe(element, "aria-label"),
-      value: element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement ? element.value : void 0,
+      value: isInputElement(element) || isTextAreaElement(element) ? element.value : void 0,
       visible: isVisible(element),
       enabled: isEnabled(element),
       boundingBox: {
@@ -486,20 +580,25 @@
         left: rect.left,
         right: rect.right
       },
-      attributes
+      attributes,
+      ...box ? { box } : {}
     };
   }
+  function layoutBox(rect) {
+    if (rect.width === 0 && rect.height === 0) return void 0;
+    return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
+  }
   function getTextContent(element) {
-    if (element instanceof HTMLInputElement) {
+    if (isInputElement(element)) {
       if (element.type === "button" || element.type === "submit") {
         return element.value || element.textContent || "";
       }
       return element.value || "";
     }
-    if (element instanceof HTMLTextAreaElement) {
+    if (isTextAreaElement(element)) {
       return element.value || "";
     }
-    if (element instanceof HTMLSelectElement) {
+    if (isSelectElement(element)) {
       const selected = element.options[element.selectedIndex];
       return (selected == null ? void 0 : selected.textContent) || "";
     }
@@ -520,7 +619,7 @@
     }
     const parts = [];
     let current = element;
-    while (current && current !== document.documentElement) {
+    while (current && current !== element.ownerDocument.documentElement) {
       let selector = current.tagName.toLowerCase();
       if (current.id) {
         parts.unshift(`#${CSS.escape(current.id)}`);
@@ -628,7 +727,10 @@
       };
       const timer = setTimeout(evaluate, timeoutMs);
       const obs = new MutationObserver(() => evaluate());
-      obs.observe(document.documentElement, { childList: true, subtree: true });
+      obs.observe(lookupRoot(target).documentElement, {
+        childList: true,
+        subtree: true
+      });
       const poll = setInterval(evaluate, 50);
       evaluate();
     });
@@ -665,7 +767,7 @@
     if (text) return { key: `t:${text}`, strategy: "text" };
     return { key: null, strategy: "index" };
   }
-  function sleep(ms) {
+  function sleep$1(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
   async function collectAll(target, options = {}) {
@@ -739,7 +841,7 @@
         }
         const before = seen.size;
         anyContainer.scrollTop = anyContainer.scrollTop + anyContainer.clientHeight;
-        await sleep(stepDelayMs);
+        await sleep$1(stepDelayMs);
         harvest();
         const currentScrollTop = anyContainer.scrollTop;
         const currentHeight = anyContainer.scrollHeight;
@@ -770,7 +872,7 @@
       keyStrategy
     };
   }
-  function textOf(el) {
+  function textOf$1(el) {
     if (!el) return "";
     return (el.textContent ?? "").trim();
   }
@@ -825,7 +927,7 @@
     let columns;
     if (headerCells.length > 0) {
       columns = headerCells.map((c, i) => {
-        const base = textOf(c) || `col${i + 1}`;
+        const base = textOf$1(c) || `col${i + 1}`;
         const seen = seenNames.get(base) ?? 0;
         seenNames.set(base, seen + 1);
         return seen === 0 ? base : `${base}_${seen + 1}`;
@@ -844,7 +946,7 @@
       const row = {};
       cells.forEach((cell, i) => {
         const col = columns[i] ?? `col${i + 1}`;
-        row[col] = textOf(cell);
+        row[col] = textOf$1(cell);
       });
       rows.push(row);
     }
@@ -893,7 +995,7 @@
         }
         out.push(row);
       } else {
-        out.push({ text: textOf(item) });
+        out.push({ text: textOf$1(item) });
       }
     }
     return { items: out, count: out.length };
@@ -969,8 +1071,8 @@
       return target ? target.getAttribute(pureAttr) ?? "" : "";
     }
     const found = item.querySelector(sel);
-    if (found) return textOf(found);
-    if (item.matches(sel)) return textOf(item);
+    if (found) return textOf$1(found);
+    if (item.matches(sel)) return textOf$1(item);
     return "";
   }
   function parseAttributeField(sel) {
@@ -1004,6 +1106,347 @@
     }
     return Array.from(root.children);
   }
+  const OPTIONS_WAIT_MS = 3e3;
+  const VERIFY_WAIT_MS = 2e3;
+  const POLL_MS = 100;
+  const LIST_MAX = 15;
+  async function pickOption(element, want) {
+    if (want.trim() === "") {
+      throw new Error("pick: option text cannot be empty");
+    }
+    if (isSelectElement(element)) {
+      return pickSelect(element, want);
+    }
+    return pickCombobox(element, want);
+  }
+  function normalize(text) {
+    return text.replace(/\s+/g, " ").trim().toLowerCase();
+  }
+  function optionRank(option, want) {
+    const o = normalize(option);
+    const w = normalize(want);
+    if (w === "") return 0;
+    if (o === w) return 3;
+    if (o.startsWith(w)) return 2;
+    if (o.includes(w)) return 1;
+    return 0;
+  }
+  function bestOption(options, want) {
+    let bestRank = 0;
+    let best = [];
+    options.forEach((option, i) => {
+      const rank = optionRank(option, want);
+      if (rank === 0) return;
+      if (rank > bestRank) {
+        bestRank = rank;
+        best = [i];
+      } else if (rank === bestRank) {
+        best.push(i);
+      }
+    });
+    if (best.length === 0) return { index: -1, tied: null };
+    if (best.length > 1) return { index: -1, tied: best.map((i) => options[i]) };
+    return { index: best[0], tied: null };
+  }
+  function sameOptions(a, b) {
+    return a !== null && a.length === b.length && a.every((v, i) => v === b[i]);
+  }
+  function listOptions(options) {
+    if (options.length === 0) return "(no options visible)";
+    const shown = options.slice(0, LIST_MAX).map((o) => JSON.stringify(o));
+    const more = options.length > LIST_MAX ? ` … and ${options.length - LIST_MAX} more` : "";
+    return shown.join(", ") + more;
+  }
+  function resolveSelectOption(options, want) {
+    const byValue = options.filter((o) => o.value === want);
+    if (byValue.length === 1) return byValue[0];
+    const best = bestOption(
+      options.map((o) => o.text),
+      want
+    );
+    if (best.tied) {
+      throw new Error(
+        `pick: ${JSON.stringify(want)} is ambiguous: it matches ${listOptions(best.tied)} equally well`
+      );
+    }
+    if (best.index < 0) {
+      throw new Error(
+        `pick: no option matches ${JSON.stringify(want)}; available: ${listOptions(options.map((o) => o.text))}`
+      );
+    }
+    return options[best.index];
+  }
+  function pickSelect(select, want) {
+    const options = Array.from(select.options).map((o) => ({
+      value: o.value,
+      text: textOf(o)
+    }));
+    const chosen = resolveSelectOption(options, want);
+    select.focus();
+    select.value = chosen.value;
+    select.dispatchEvent(new Event("input", { bubbles: true }));
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    if (select.value !== chosen.value) {
+      throw new Error(
+        `pick: selected ${JSON.stringify(chosen.text)} but the <select> holds value ${JSON.stringify(select.value)}`
+      );
+    }
+    return { value: select.value, matched: chosen.text };
+  }
+  function textOf(element) {
+    return (element.textContent || "").replace(/\s+/g, " ").trim();
+  }
+  function describe(element) {
+    if (element.id) return `${element.tagName.toLowerCase()}#${element.id}`;
+    const firstClass = typeof element.className === "string" ? element.className.trim().split(/\s+/)[0] : "";
+    return element.tagName.toLowerCase() + (firstClass ? `.${firstClass}` : "");
+  }
+  function isShown(element) {
+    const view = element.ownerDocument.defaultView;
+    if (!view) return false;
+    const rect = element.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+    const style = view.getComputedStyle(element);
+    return style.display !== "none" && style.visibility !== "hidden";
+  }
+  function comboInput(element) {
+    if (isInputElement(element)) return element;
+    const inner = element.querySelector('input[role="combobox"]') ?? element.querySelector("input");
+    if (inner) return inner;
+    throw new Error(
+      `pick: ${describe(element)} is not a combobox: it is not an <input> and has no <input> inside`
+    );
+  }
+  function comboListbox(input) {
+    const hosts = [input, input.closest('[role="combobox"]')];
+    for (const host of hosts) {
+      if (!host) continue;
+      for (const attr of ["aria-controls", "aria-owns"]) {
+        for (const id of (host.getAttribute(attr) ?? "").split(/\s+/)) {
+          if (!id) continue;
+          const listbox = input.ownerDocument.getElementById(id);
+          if (listbox) return listbox;
+        }
+      }
+    }
+    return null;
+  }
+  function comboContainerListbox(input) {
+    for (let container = input.parentElement; container; container = container.parentElement) {
+      const open = Array.from(
+        container.querySelectorAll('[role="listbox"], [role="menu"]')
+      ).filter(isShown);
+      if (open.length === 1) return open[0];
+      if (open.length > 1) {
+        throw new Error(
+          `${describe(input)}: ${open.length} open listboxes or menus share its container; cannot tell which one belongs to this combobox`
+        );
+      }
+    }
+    return null;
+  }
+  function comboOptionElements(input) {
+    const listbox = comboListbox(input) ?? comboContainerListbox(input);
+    if (!listbox) {
+      throw new Error(
+        `${describe(input)}: no listbox is associated with this combobox (no aria-controls/aria-owns, and no listbox or menu in its container); not guessing its options`
+      );
+    }
+    return Array.from(
+      listbox.querySelectorAll('[role="option"]')
+    ).filter(isShown);
+  }
+  function displayedValue(input) {
+    const scope = input.closest('.select__value-container, [class*="__value-container"]') ?? input.closest('.select__control, [class*="__control"]');
+    if (scope) {
+      const single = scope.querySelector(
+        '.select__single-value, [class*="singleValue"], [class*="single-value"]'
+      );
+      if (single) {
+        return {
+          text: textOf(single),
+          from: `${describe(single)} in ${describe(scope)}`
+        };
+      }
+      const multi = Array.from(
+        scope.querySelectorAll(
+          '.select__multi-value__label, [class*="multi-value__label"]'
+        )
+      );
+      if (multi.length > 0) {
+        return {
+          text: multi.map(textOf).join(", "),
+          from: `multi-value labels in ${describe(scope)}`
+        };
+      }
+      return {
+        text: "",
+        from: `no selected-value element in ${describe(scope)}`
+      };
+    }
+    if (input.value) {
+      return { text: input.value, from: `value of ${describe(input)}` };
+    }
+    return {
+      text: input.getAttribute("aria-valuetext") ?? "",
+      from: `aria-valuetext of ${describe(input)}`
+    };
+  }
+  function setQuery(input, value) {
+    var _a;
+    const setter = (_a = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value"
+    )) == null ? void 0 : _a.set;
+    if (!setter) {
+      throw new Error("pick: HTMLInputElement value setter is unavailable");
+    }
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  function clearQuery(input) {
+    if (input.value !== "") setQuery(input, "");
+  }
+  function pressKey(target, key) {
+    const descriptor = resolveKey(key);
+    const init = {
+      bubbles: true,
+      cancelable: true,
+      key: descriptor.key,
+      code: descriptor.code,
+      keyCode: descriptor.windowsVirtualKeyCode,
+      which: descriptor.windowsVirtualKeyCode
+    };
+    target.dispatchEvent(new KeyboardEvent("keydown", init));
+    target.dispatchEvent(new KeyboardEvent("keyup", init));
+  }
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  function settle(previous, options, want) {
+    const best = bestOption(options, want);
+    if (best.index >= 0) {
+      return {
+        choice: best.index,
+        tied: null,
+        done: optionRank(options[best.index], want) === 3 || sameOptions(previous, options)
+      };
+    }
+    if (best.tied) {
+      return {
+        choice: -1,
+        tied: best.tied,
+        done: sameOptions(previous, options)
+      };
+    }
+    return { choice: -1, tied: null, done: false };
+  }
+  async function pollOptions(input, want) {
+    const deadline = Date.now() + OPTIONS_WAIT_MS;
+    let previous = null;
+    for (; ; ) {
+      const options = comboOptionElements(input).map(textOf);
+      const verdict = settle(previous, options, want);
+      if (verdict.done || Date.now() >= deadline) return { options, verdict };
+      previous = options;
+      await sleep(POLL_MS);
+    }
+  }
+  async function unfilteredOptions(input) {
+    clearQuery(input);
+    pressKey(input, "ArrowDown");
+    const deadline = Date.now() + VERIFY_WAIT_MS;
+    let options = [];
+    for (; ; ) {
+      options = comboOptionElements(input).map(textOf);
+      if (options.length > 0 || Date.now() >= deadline) break;
+      await sleep(POLL_MS);
+    }
+    pressKey(input, "Escape");
+    return options;
+  }
+  async function verifyShown(input, chosen, options) {
+    const want = normalize(chosen);
+    const deadline = Date.now() + VERIFY_WAIT_MS;
+    for (; ; ) {
+      const shown = displayedValue(input);
+      if (want !== "" && normalize(shown.text).includes(want)) {
+        return { value: shown.text, matched: chosen };
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `pick: clicked option ${JSON.stringify(chosen)} but after ${VERIFY_WAIT_MS}ms the combobox shows ${JSON.stringify(shown.text)} (read from ${shown.from}), which does not contain ${JSON.stringify(chosen)}; options were: ${listOptions(options)}`
+        );
+      }
+      await sleep(POLL_MS);
+    }
+  }
+  async function chooseOption(input, want) {
+    const { options, verdict } = await pollOptions(input, want);
+    if (verdict.tied) {
+      throw new Error(
+        `pick: ${JSON.stringify(want)} is ambiguous: it matches ${listOptions(verdict.tied)} equally well; pass the full option text`
+      );
+    }
+    if (verdict.choice < 0) {
+      if (options.length === 0) {
+        const available = await unfilteredOptions(input);
+        throw new Error(
+          `pick: no option matching ${JSON.stringify(want)} appeared within ${OPTIONS_WAIT_MS}ms; the menu without a query offers: ${listOptions(available)}`
+        );
+      }
+      throw new Error(
+        `pick: no option matching ${JSON.stringify(want)} appeared within ${OPTIONS_WAIT_MS}ms; available: ${listOptions(options)}`
+      );
+    }
+    const chosen = options[verdict.choice];
+    const matches = comboOptionElements(input).filter(
+      (o) => normalize(textOf(o)) === normalize(chosen)
+    );
+    if (matches.length !== 1) {
+      throw new Error(
+        `pick: option ${JSON.stringify(chosen)} is no longer uniquely present (${matches.length} matches)`
+      );
+    }
+    const option = matches[0];
+    option.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+      behavior: "instant"
+    });
+    const rect = option.getBoundingClientRect();
+    dispatchClickSequence(
+      option,
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2,
+      "left",
+      1
+    );
+    return verifyShown(input, chosen, options);
+  }
+  async function pickCombobox(element, want) {
+    const input = comboInput(element);
+    input.scrollIntoView({
+      block: "center",
+      inline: "center",
+      behavior: "instant"
+    });
+    clearQuery(input);
+    input.focus();
+    if (input.ownerDocument.activeElement !== input) {
+      throw new Error(
+        `pick: could not focus the combobox input at ${describe(input)}`
+      );
+    }
+    pressKey(input, "ArrowDown");
+    setQuery(input, want);
+    try {
+      return await chooseOption(input, want);
+    } catch (error) {
+      pressKey(input, "Escape");
+      throw error;
+    }
+  }
   const PRESENTATION_ROLES = /* @__PURE__ */ new Set(["none", "presentation"]);
   const HEADING_TAGS = /* @__PURE__ */ new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
   const LANDMARK_TAGS = /* @__PURE__ */ new Map([
@@ -1016,14 +1459,18 @@
     ["section", "region"],
     ["article", "article"]
   ]);
-  function getSnapshot() {
-    const rootChildren = snapshotChildren(
-      document.body ?? document.documentElement
-    );
+  function getSnapshot(root) {
+    const view = root.defaultView;
+    if (!view) {
+      throw new Error("snapshot: document has no window (detached frame)");
+    }
+    const rootChildren = snapshotChildren(root.body ?? root.documentElement);
     return {
       role: "document",
-      name: normalizeText(document.title),
-      children: rootChildren.length > 0 ? rootChildren : void 0
+      name: normalizeText(root.title),
+      children: rootChildren.length > 0 ? rootChildren : void 0,
+      viewport: { w: view.innerWidth, h: view.innerHeight },
+      scroll: { x: view.scrollX, y: view.scrollY }
     };
   }
   function snapshotChildren(parent) {
@@ -1051,6 +1498,8 @@
       return children;
     }
     const node = { role };
+    const box = layoutBox(element.getBoundingClientRect());
+    if (box) node.box = box;
     if (name) node.name = name;
     if (value) node.value = value;
     if (state && Object.keys(state).length > 0) node.state = state;
@@ -1074,12 +1523,12 @@
     return false;
   }
   function isFocusable(element) {
-    if (!(element instanceof HTMLElement)) return false;
+    if (!isHTMLElement(element)) return false;
     if (element.hasAttribute("disabled")) return false;
     return element.tabIndex >= 0;
   }
   function isHidden(element) {
-    if (!(element instanceof HTMLElement)) return false;
+    if (!isHTMLElement(element)) return false;
     if (element.hidden) return true;
     if (element.hasAttribute("inert")) return true;
     if (element.getAttribute("aria-hidden") === "true") return true;
@@ -1164,7 +1613,7 @@
       const ids = labelledBy.split(/\s+/).filter(Boolean);
       const parts = [];
       for (const id of ids) {
-        const label = document.getElementById(id);
+        const label = element.ownerDocument.getElementById(id);
         const text2 = normalizeText(label == null ? void 0 : label.textContent);
         if (text2) parts.push(text2);
       }
@@ -1184,11 +1633,13 @@
     return text;
   }
   function getAssociatedLabelText(element) {
-    if (!(element instanceof HTMLElement)) return "";
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+    if (!isHTMLElement(element)) return "";
+    if (isInputElement(element) || isTextAreaElement(element) || isSelectElement(element)) {
       if (element.id) {
-        for (const label of Array.from(document.querySelectorAll("label"))) {
-          if (label instanceof HTMLLabelElement && label.htmlFor === element.id) {
+        for (const label of Array.from(
+          element.ownerDocument.querySelectorAll("label")
+        )) {
+          if (isLabelElement(label) && label.htmlFor === element.id) {
             const labelText = normalizeText(label.textContent);
             if (labelText) return labelText;
           }
@@ -1201,24 +1652,24 @@
     return "";
   }
   function getValue(element) {
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    if (isInputElement(element) || isTextAreaElement(element)) {
       return normalizeText(element.value);
     }
-    if (element instanceof HTMLSelectElement) {
+    if (isSelectElement(element)) {
       const option = element.options[element.selectedIndex];
       return normalizeText(option == null ? void 0 : option.textContent);
     }
-    if (element instanceof HTMLProgressElement) {
+    if (isProgressElement(element)) {
       return normalizeText(element.value.toString());
     }
     return "";
   }
   function getState(element) {
     const state = {};
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement || element instanceof HTMLButtonElement) {
+    if (isInputElement(element) || isTextAreaElement(element) || isSelectElement(element) || isButtonElement(element)) {
       if (element.disabled) state.disabled = true;
     }
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    if (isInputElement(element) || isTextAreaElement(element)) {
       if (element.readOnly) state.readonly = true;
     }
     const ariaDisabled = element.getAttribute("aria-disabled");
@@ -1235,15 +1686,15 @@
     if (ariaChecked === "true" || ariaChecked === "mixed") {
       state.checked = ariaChecked === "mixed" ? "mixed" : true;
     }
-    if (element instanceof HTMLInputElement) {
+    if (isInputElement(element)) {
       if (element.type === "checkbox" || element.type === "radio") {
         if (element.checked) state.checked = true;
       }
     }
-    if (element instanceof HTMLOptionElement && element.selected) {
+    if (isOptionElement(element) && element.selected) {
       state.selected = true;
     }
-    if (element === document.activeElement) state.focused = true;
+    if (element === element.ownerDocument.activeElement) state.focused = true;
     return Object.keys(state).length > 0 ? state : void 0;
   }
   function directTextContent(element) {
@@ -1334,8 +1785,44 @@
     if (typeof t !== "number" || t <= 0) return 5e3;
     return Math.min(t, 2e4);
   }
+  const FRAME_UNSUPPORTED_ACTIONS = /* @__PURE__ */ new Set([
+    "collectAll",
+    "extractTable",
+    "extractList",
+    "screenshot",
+    "highlight"
+  ]);
+  function resolveFrameRoot(options) {
+    const frame = options == null ? void 0 : options.frame;
+    if (frame === void 0) return document;
+    if (typeof frame !== "string" || frame === "") {
+      throw new Error("options.frame must be a non-empty CSS selector string");
+    }
+    const element = document.querySelector(frame);
+    if (!element) {
+      throw new Error(`frame ${frame} not found`);
+    }
+    if (!isIFrameElement(element)) {
+      throw new Error(`frame ${frame} is not an <iframe>`);
+    }
+    let inner = null;
+    try {
+      inner = element.contentDocument;
+    } catch (error) {
+      console.debug("[HTR NControl] frame contentDocument access threw", error);
+    }
+    if (!inner) {
+      throw new Error(`frame ${frame} is cross-origin; open its URL in a tab`);
+    }
+    return inner;
+  }
   async function executeAction(command) {
-    const { action, target, value, options } = command;
+    const { action, value, options } = command;
+    const root = resolveFrameRoot(options);
+    if ((options == null ? void 0 : options.frame) !== void 0 && FRAME_UNSUPPORTED_ACTIONS.has(action)) {
+      throw new Error(`action "${action}" does not support options.frame`);
+    }
+    const target = command.target && withLookupRoot(command.target, root);
     if (CDP_INPUT_RELAY_ACTIONS.has(action) && cdpInputAvailable()) {
       const relayed = await relayCdpInput(command);
       if (relayed) return relayed;
@@ -1388,7 +1875,7 @@
       case "getPageInfo":
         return getPageInfo();
       case "snapshot":
-        return getSnapshot();
+        return getSnapshot(root);
       case "xpath":
         return handleXPath(requireTarget(target, action));
       case "click":
@@ -1423,6 +1910,22 @@
           requireTarget(target, action),
           waitTimeout(options)
         );
+      case "scrollBy":
+        return handleScrollBy(
+          target,
+          requireNumberOption(options, "dx", action),
+          requireNumberOption(options, "dy", action),
+          root,
+          waitTimeout(options)
+        );
+      case "isChecked":
+        return handleIsChecked(requireTarget(target, action));
+      case "pick":
+        return handlePick(
+          requireTarget(target, action),
+          requireValue(value, action),
+          waitTimeout(options)
+        );
       case "fill":
         return handleFill(
           requireTarget(target, action),
@@ -1431,9 +1934,10 @@
         );
       case "type":
         return handleType(
-          requireTarget(target, action),
+          target,
           requireValue(value, action),
-          waitTimeout(options)
+          waitTimeout(options),
+          root
         );
       case "clear":
         return handleClear(requireTarget(target, action), waitTimeout(options));
@@ -1459,19 +1963,22 @@
         return handlePressKey(
           target,
           requireValue(value, action),
-          waitTimeout(options)
+          waitTimeout(options),
+          root
         );
       case "keyDown":
         return handleKeyDown(
           target,
           requireValue(value, action),
-          waitTimeout(options)
+          waitTimeout(options),
+          root
         );
       case "keyUp":
         return handleKeyUp(
           target,
           requireValue(value, action),
-          waitTimeout(options)
+          waitTimeout(options),
+          root
         );
       case "mouseDown":
         return handleMouseDown(
@@ -1495,7 +2002,7 @@
         }
         return handleDrag(
           requireTarget(target, action),
-          endSel,
+          withLookupRoot(endSel, root),
           waitTimeout(options),
           (options == null ? void 0 : options.steps) ?? 5,
           (options == null ? void 0 : options.delay) ?? 0
@@ -1518,7 +2025,7 @@
           waitTimeout(options)
         );
       case "prepareKeys":
-        return handlePrepareKeys(target, waitTimeout(options));
+        return handlePrepareKeys(target, waitTimeout(options), root);
       case "navigate":
         return handleNavigate(requireValue(value, action));
       case "reload":
@@ -1694,13 +2201,13 @@
   function handleGetValue(target) {
     const element = findElement(target);
     if (!element) throw new Error("Element not found");
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    if (isInputElement(element) || isTextAreaElement(element)) {
       return element.value;
     }
-    if (element instanceof HTMLSelectElement) {
+    if (isSelectElement(element)) {
       return element.value;
     }
-    if (element instanceof HTMLElement) {
+    if (isHTMLElement(element)) {
       return element.textContent || "";
     }
     throw new Error("Cannot get value from this element type");
@@ -1739,7 +2246,7 @@
   function handleGetComputedStyle(target, property) {
     const element = findElement(target);
     if (!element) return null;
-    const style = window.getComputedStyle(element);
+    const style = windowOf(element.ownerDocument).getComputedStyle(element);
     return style.getPropertyValue(property);
   }
   function handleXPath(target) {
@@ -1748,6 +2255,19 @@
     return generateXPath(element);
   }
   async function handleClick(target, button = "left", count = 1, timeoutMs = 5e3) {
+    if (typeof target.x === "number" && typeof target.y === "number") {
+      if (lookupRoot(target) !== document) {
+        throw new Error(
+          "coordinate targets do not support options.frame; target an element inside the frame"
+        );
+      }
+      const at = document.elementFromPoint(target.x, target.y);
+      if (!at) {
+        throw new Error(`nothing at (${target.x}, ${target.y})`);
+      }
+      dispatchClickSequence(at, target.x, target.y, button, count);
+      return;
+    }
     const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: true
@@ -1756,53 +2276,7 @@
     const rect = element.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
-    const eventInit = {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-      button: button === "right" ? 2 : 0,
-      clientX: x,
-      clientY: y
-    };
-    const pointerButton = button === "right" ? 2 : 0;
-    const pointerInit = {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-      pointerId: 1,
-      pointerType: "mouse",
-      button: pointerButton,
-      buttons: pointerButton,
-      clientX: x,
-      clientY: y
-    };
-    const makePointer = (type) => typeof PointerEvent !== "undefined" ? new PointerEvent(type, pointerInit) : new MouseEvent(type, eventInit);
-    const singleClickSequence = [
-      "pointerover",
-      "mouseover",
-      "mouseenter",
-      "pointerdown",
-      "mousedown",
-      "pointerup",
-      "mouseup",
-      "click"
-    ];
-    for (let i = 0; i < count; i++) {
-      for (const eventType of singleClickSequence) {
-        if (eventType.startsWith("pointer")) {
-          element.dispatchEvent(makePointer(eventType));
-        } else {
-          element.dispatchEvent(
-            new MouseEvent(eventType, eventInit)
-          );
-        }
-      }
-    }
-    if (count === 2) {
-      element.dispatchEvent(
-        new MouseEvent("dblclick", eventInit)
-      );
-    }
+    dispatchClickSequence(element, x, y, button, count);
   }
   async function handleHover(target, timeoutMs = 5e3) {
     const element = await waitForScrollableActionableElement(target, {
@@ -1840,15 +2314,15 @@
     });
     element.blur();
   }
-  function waitForScrollSettle(maxMs = 500) {
+  function waitForScrollSettle(view, maxMs = 500) {
     return new Promise((resolve) => {
       const start = Date.now();
-      let lastTop = window.scrollY;
-      let lastLeft = window.scrollX;
+      let lastTop = view.scrollY;
+      let lastLeft = view.scrollX;
       let stableFrames = 0;
       const check = () => {
-        const top = window.scrollY;
-        const left = window.scrollX;
+        const top = view.scrollY;
+        const left = view.scrollX;
         if (top === lastTop && left === lastLeft) {
           stableFrames++;
         } else {
@@ -1871,7 +2345,22 @@
       requireEnabled: false
     });
     element.scrollIntoView({ behavior: "instant", block: "center" });
-    await waitForScrollSettle();
+    await waitForScrollSettle(windowOf(element.ownerDocument));
+  }
+  async function handleScrollBy(target, dx, dy, root, timeoutMs = 5e3) {
+    if (target) {
+      const element = await waitForScrollableActionableElement(target, {
+        timeoutMs,
+        requireEnabled: false
+      });
+      element.scrollBy({ left: dx, top: dy, behavior: "instant" });
+      await waitForScrollSettle(windowOf(element.ownerDocument));
+      return { x: element.scrollLeft, y: element.scrollTop };
+    }
+    const view = windowOf(root);
+    view.scrollBy({ left: dx, top: dy, behavior: "instant" });
+    await waitForScrollSettle(view);
+    return { x: view.scrollX, y: view.scrollY };
   }
   async function handleFill(target, value, timeoutMs = 5e3) {
     var _a;
@@ -1879,13 +2368,13 @@
       timeoutMs,
       requireEnabled: true
     });
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+    if (isInputElement(element) || isTextAreaElement(element) || isSelectElement(element)) {
       element.focus();
-      if (element instanceof HTMLSelectElement) {
+      if (isSelectElement(element)) {
         element.value = value;
       } else {
         const nativeSetter = (_a = Object.getOwnPropertyDescriptor(
-          element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
+          isTextAreaElement(element) ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype,
           "value"
         )) == null ? void 0 : _a.set;
         if (nativeSetter) {
@@ -1897,13 +2386,13 @@
       element.dispatchEvent(new Event("input", { bubbles: true }));
       element.dispatchEvent(new Event("change", { bubbles: true }));
       element.dispatchEvent(new Event("blur", { bubbles: true }));
-    } else if (element instanceof HTMLElement && element.isContentEditable) {
+    } else if (isHTMLElement(element) && element.isContentEditable) {
       element.focus();
       selectElementContents(element);
       if (value === "") {
-        document.execCommand("delete");
+        element.ownerDocument.execCommand("delete");
       } else {
-        document.execCommand("insertText", false, value);
+        element.ownerDocument.execCommand("insertText", false, value);
       }
       element.dispatchEvent(new Event("input", { bubbles: true }));
       element.dispatchEvent(new Event("change", { bubbles: true }));
@@ -1914,12 +2403,12 @@
       );
     }
   }
-  async function handleType(target, value, timeoutMs = 5e3) {
-    const element = await waitForScrollableActionableElement(target, {
+  async function handleType(target, value, timeoutMs = 5e3, root) {
+    const element = target ? await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: true
-    });
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    }) : focusedEditableElement(root);
+    if (isInputElement(element) || isTextAreaElement(element)) {
       element.focus();
       for (const char of value) {
         const charCode = (() => {
@@ -1963,10 +2452,10 @@
       }
       element.dispatchEvent(new Event("change", { bubbles: true }));
       element.dispatchEvent(new Event("blur", { bubbles: true }));
-    } else if (element instanceof HTMLElement && element.isContentEditable) {
+    } else if (isHTMLElement(element) && element.isContentEditable) {
       element.focus();
       placeCaretAtEnd(element);
-      document.execCommand("insertText", false, value);
+      element.ownerDocument.execCommand("insertText", false, value);
       element.dispatchEvent(new Event("input", { bubbles: true }));
       element.dispatchEvent(new Event("change", { bubbles: true }));
       element.dispatchEvent(new Event("blur", { bubbles: true }));
@@ -1975,18 +2464,18 @@
     }
   }
   function placeCaretAtEnd(element) {
-    const selection = document.getSelection();
+    const selection = element.ownerDocument.getSelection();
     if (!selection) return;
-    const range = document.createRange();
+    const range = element.ownerDocument.createRange();
     range.selectNodeContents(element);
     range.collapse(false);
     selection.removeAllRanges();
     selection.addRange(range);
   }
   function selectElementContents(element) {
-    const selection = document.getSelection();
+    const selection = element.ownerDocument.getSelection();
     if (!selection) return;
-    const range = document.createRange();
+    const range = element.ownerDocument.createRange();
     range.selectNodeContents(element);
     selection.removeAllRanges();
     selection.addRange(range);
@@ -1996,7 +2485,7 @@
       timeoutMs,
       requireEnabled: true
     });
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    if (isInputElement(element) || isTextAreaElement(element)) {
       element.focus();
       element.value = "";
       element.dispatchEvent(new Event("input", { bubbles: true }));
@@ -2011,7 +2500,7 @@
       timeoutMs,
       requireEnabled: true
     });
-    if (element instanceof HTMLSelectElement) {
+    if (isSelectElement(element)) {
       element.focus();
       const nativeSetter = (_a = Object.getOwnPropertyDescriptor(
         HTMLSelectElement.prototype,
@@ -2034,7 +2523,7 @@
       timeoutMs,
       requireEnabled: true
     });
-    if (element instanceof HTMLInputElement) {
+    if (isInputElement(element)) {
       element.focus();
       const nativeSetter = (_a = Object.getOwnPropertyDescriptor(
         HTMLInputElement.prototype,
@@ -2056,7 +2545,7 @@
   }
   function isAriaCheckbox(element) {
     var _a;
-    return ((_a = element.getAttribute("role")) == null ? void 0 : _a.toLowerCase()) === "checkbox" && element instanceof HTMLElement;
+    return ((_a = element.getAttribute("role")) == null ? void 0 : _a.toLowerCase()) === "checkbox" && isHTMLElement(element);
   }
   async function setAriaCheckbox(element, checked) {
     const target = checked ? "true" : "false";
@@ -2076,11 +2565,67 @@
       `ARIA checkbox did not reach aria-checked="${target}" after ${maxClicks} clicks (still "${readState()}")`
     );
   }
-  async function handlePressKey(target, key, timeoutMs = 5e3) {
+  function isEditableElement(element) {
+    return isInputElement(element) || isTextAreaElement(element) || isHTMLElement(element) && element.isContentEditable;
+  }
+  function isEditableFocus(root) {
+    const active = root.activeElement;
+    return active !== null && isEditableElement(active);
+  }
+  function focusedEditableElement(root) {
+    const active = root.activeElement;
+    if (!active || !isEditableElement(active)) {
+      throw new Error("type without a target needs a focused editable element");
+    }
+    return active;
+  }
+  function windowOf(doc) {
+    const view = doc.defaultView;
+    if (!view) {
+      throw new Error("document has no window (detached frame)");
+    }
+    return view;
+  }
+  function frameOffset(doc) {
+    const frame = windowOf(doc).frameElement;
+    if (!frame) return { x: 0, y: 0 };
+    const rect = frame.getBoundingClientRect();
+    return { x: rect.left + frame.clientLeft, y: rect.top + frame.clientTop };
+  }
+  function requireNumberOption(options, key, action) {
+    const value = options == null ? void 0 : options[key];
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new Error(
+        `Action "${action}" requires options.${key} as a finite number`
+      );
+    }
+    return value;
+  }
+  function handleIsChecked(target) {
+    const element = findElement(target);
+    if (!element) throw new Error("Element not found");
+    if (isInputElement(element) && (element.type === "checkbox" || element.type === "radio")) {
+      return { checked: element.checked };
+    }
+    const ariaChecked = element.getAttribute("aria-checked");
+    if (ariaChecked === "true") return { checked: true };
+    if (ariaChecked === "false" || ariaChecked === "mixed") {
+      return { checked: false };
+    }
+    throw new Error("element is not checkable");
+  }
+  async function handlePick(target, want, timeoutMs = 5e3) {
+    const element = await waitForElement(target, timeoutMs, { force: true });
+    if (!element) {
+      throw new Error(`pick: element not found within ${timeoutMs}ms`);
+    }
+    return pickOption(element, want);
+  }
+  async function handlePressKey(target, key, timeoutMs = 5e3, root) {
     const element = target ? await waitForActionableElement(target, {
       timeoutMs,
       requireEnabled: true
-    }) : document.activeElement ?? document.body;
+    }) : root.activeElement ?? root.body;
     element.focus();
     const descriptor = resolveKey(key);
     const keyInit = {
@@ -2095,11 +2640,11 @@
     element.dispatchEvent(keyDownEvent);
     element.dispatchEvent(keyUpEvent);
   }
-  async function handleKeyDown(target, key, timeoutMs = 5e3) {
+  async function handleKeyDown(target, key, timeoutMs = 5e3, root) {
     const element = target ? await waitForActionableElement(target, {
       timeoutMs,
       requireEnabled: true
-    }) : document.activeElement ?? document.body;
+    }) : root.activeElement ?? root.body;
     element.focus();
     const descriptor = resolveKey(key);
     element.dispatchEvent(
@@ -2112,11 +2657,11 @@
       })
     );
   }
-  async function handleKeyUp(target, key, timeoutMs = 5e3) {
+  async function handleKeyUp(target, key, timeoutMs = 5e3, root) {
     const element = target ? await waitForActionableElement(target, {
       timeoutMs,
       requireEnabled: true
-    }) : document.activeElement ?? document.body;
+    }) : root.activeElement ?? root.body;
     element.focus();
     const descriptor = resolveKey(key);
     element.dispatchEvent(
@@ -2480,11 +3025,15 @@
     const rect = element.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
-    return { x, y };
+    const offset = frameOffset(element.ownerDocument);
+    return { x: offset.x + x, y: offset.y + y };
   }
-  async function handlePrepareKeys(target, timeoutMs = 5e3) {
+  async function handlePrepareKeys(target, timeoutMs = 5e3, root) {
     if (!target) {
-      return { focused: document.activeElement != null };
+      return {
+        focused: root.activeElement != null,
+        editable: isEditableFocus(root)
+      };
     }
     const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
@@ -2493,19 +3042,19 @@
     element.scrollIntoView({ behavior: "instant", block: "center" });
     element.focus();
     if (element.isContentEditable) placeCaretAtEnd(element);
-    return { focused: document.activeElement === element };
+    return { focused: element.ownerDocument.activeElement === element };
   }
   async function handleSelectText(target, timeoutMs = 5e3) {
     const element = await waitForActionableElement(target, {
       timeoutMs,
       requireEnabled: false
     });
-    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+    if (isInputElement(element) || isTextAreaElement(element)) {
       element.select();
     } else {
       const selection = window.getSelection();
       if (selection) {
-        const range = document.createRange();
+        const range = element.ownerDocument.createRange();
         range.selectNodeContents(element);
         selection.removeAllRanges();
         selection.addRange(range);
@@ -2527,7 +3076,7 @@
     const filesData = options == null ? void 0 : options.filesData;
     if (!filesData || filesData.length === 0) {
       throw new Error(
-        "uploadFiles requires options.filesData (base64 file bytes). On Chrome this action is background-handled via chrome.debugger; this content-script path is used on Firefox."
+        "uploadFiles requires options.filesData (base64 file bytes). Host paths on Chrome are set by the background via chrome.debugger; file bytes are set here."
       );
     }
     let element = findElement(target);
@@ -2539,9 +3088,9 @@
         `uploadFiles: element ${target.selector ?? target.name ?? "?"} not found within ${timeoutMs}ms`
       );
     }
-    if (!(element instanceof HTMLInputElement) || element.type !== "file") {
+    if (!isInputElement(element) || element.type !== "file") {
       throw new Error(
-        `uploadFiles target is not an <input type=file> (got ${element instanceof HTMLInputElement ? element.type : element.tagName})`
+        `uploadFiles target is not an <input type=file> (got ${isInputElement(element) ? element.type : element.tagName})`
       );
     }
     if (typeof DataTransfer === "undefined" || typeof File === "undefined") {

@@ -26,7 +26,6 @@ const ACTIONS_REQUIRING_TARGET = new Set([
 	"blur",
 	"scrollTo",
 	"fill",
-	"type",
 	"clear",
 	"select",
 	"check",
@@ -34,6 +33,8 @@ const ACTIONS_REQUIRING_TARGET = new Set([
 	"pressKey",
 	"selectText",
 	"highlight",
+	"isChecked",
+	"pick",
 ]);
 
 const ACTIONS_REQUIRING_VALUE = new Set([
@@ -78,7 +79,6 @@ describe("Command Validation", () => {
 			"blur",
 			"scrollTo",
 			"fill",
-			"type",
 			"clear",
 			"select",
 			"check",
@@ -98,8 +98,12 @@ describe("Command Validation", () => {
 			"xpath",
 			"findAll",
 			"wait",
+			"isChecked",
+			"pick",
 		];
 
+		// `type` is deliberately absent: without a target it types into the focused
+		// editable element, so it is covered by its own tests below.
 		for (const action of targetRequiredActions) {
 			it(`should reject "${action}" without target`, () => {
 				const result = validateCommand({
@@ -1104,5 +1108,559 @@ describe("uploadFiles action (Firefox content-script path)", () => {
 		});
 		expect(result.success).toBe(false);
 		expect(result.error).toContain("filesData");
+	});
+});
+
+describe("type without a target (DOM)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("types into the focused editable element", async () => {
+		const input = document.createElement("input");
+		document.body.appendChild(input);
+		input.focus();
+
+		const result = await executeCommand({
+			id: "type-focus-1",
+			action: "type",
+			value: "abc",
+		});
+
+		expect(result.success).toBe(true);
+		expect(input.value).toBe("abc");
+	});
+
+	it("refuses when the focused element is not editable", async () => {
+		const button = document.createElement("button");
+		document.body.appendChild(button);
+		button.focus();
+
+		const result = await executeCommand({
+			id: "type-focus-2",
+			action: "type",
+			value: "abc",
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toBe(
+			"type without a target needs a focused editable element",
+		);
+	});
+});
+
+describe("scrollBy action (DOM)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("scrolls an element by dx/dy and reports the position after", async () => {
+		const box = document.createElement("div");
+		box.id = "scroll-box";
+		document.body.appendChild(box);
+		// happy-dom has no Element.scrollBy; model the browser's effect on scrollLeft/Top.
+		box.scrollBy = ((opts: ScrollToOptions) => {
+			box.scrollLeft += opts.left ?? 0;
+			box.scrollTop += opts.top ?? 0;
+		}) as typeof box.scrollBy;
+
+		const result = await executeCommand({
+			id: "sb-1",
+			action: "scrollBy",
+			target: { selector: "#scroll-box" },
+			options: { dx: 0, dy: 40 },
+		});
+
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({ x: 0, y: 40 });
+	});
+
+	it("rejects a non-numeric dy", async () => {
+		const result = await executeCommand({
+			id: "sb-2",
+			action: "scrollBy",
+			options: { dx: 0, dy: "40" },
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toBe(
+			'Action "scrollBy" requires options.dy as a finite number',
+		);
+	});
+});
+
+describe("isChecked action (DOM)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("reads a checkbox and a radio from their checked property", async () => {
+		document.body.innerHTML =
+			'<input id="cb" type="checkbox" checked><input id="rd" type="radio">';
+
+		const box = await executeCommand({
+			id: "ic-1",
+			action: "isChecked",
+			target: { selector: "#cb" },
+		});
+		const radio = await executeCommand({
+			id: "ic-2",
+			action: "isChecked",
+			target: { selector: "#rd" },
+		});
+
+		expect(box.data).toEqual({ checked: true });
+		expect(radio.data).toEqual({ checked: false });
+	});
+
+	it("reads aria-checked: true is checked, false and mixed are not", async () => {
+		document.body.innerHTML =
+			'<div id="t" role="checkbox" aria-checked="true"></div>' +
+			'<div id="f" role="checkbox" aria-checked="false"></div>' +
+			'<div id="m" role="checkbox" aria-checked="mixed"></div>';
+
+		const results = await Promise.all(
+			["#t", "#f", "#m"].map((selector) =>
+				executeCommand({
+					id: `ic-${selector}`,
+					action: "isChecked",
+					target: { selector },
+				}),
+			),
+		);
+
+		expect(results.map((r) => r.data)).toEqual([
+			{ checked: true },
+			{ checked: false },
+			{ checked: false },
+		]);
+	});
+
+	it("throws for an element that is not checkable", async () => {
+		document.body.innerHTML = '<div id="plain" role="checkbox"></div>';
+
+		const result = await executeCommand({
+			id: "ic-3",
+			action: "isChecked",
+			target: { selector: "#plain" },
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toBe("element is not checkable");
+	});
+});
+
+describe("pick action (DOM)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	const SELECT_HTML =
+		'<select id="colour">' +
+		'<option value="r">Red</option>' +
+		'<option value="a">Alpha</option>' +
+		'<option value="b">Alphabet</option>' +
+		'<option value="g">Green</option>' +
+		"</select>";
+
+	it("picks the single best-ranked native <select> option", async () => {
+		document.body.innerHTML = SELECT_HTML;
+
+		const result = await executeCommand({
+			id: "pick-1",
+			action: "pick",
+			target: { selector: "#colour" },
+			value: "Green",
+		});
+
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({ value: "g", matched: "Green" });
+		expect((document.querySelector("#colour") as HTMLSelectElement).value).toBe(
+			"g",
+		);
+	});
+
+	it("errors on an ambiguous native <select> match and lists the tie", async () => {
+		document.body.innerHTML = SELECT_HTML;
+
+		const result = await executeCommand({
+			id: "pick-2",
+			action: "pick",
+			target: { selector: "#colour" },
+			value: "Alph",
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("ambiguous");
+		expect(result.error).toContain('"Alpha"');
+		expect(result.error).toContain('"Alphabet"');
+	});
+
+	it("errors on a native <select> with no match and lists the options seen", async () => {
+		document.body.innerHTML = SELECT_HTML;
+
+		const result = await executeCommand({
+			id: "pick-3",
+			action: "pick",
+			target: { selector: "#colour" },
+			value: "Purple",
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toContain('no option matches "Purple"');
+		expect(result.error).toContain('"Red"');
+	});
+
+	it("picks a combobox option and reads the displayed value back", async () => {
+		document.body.innerHTML =
+			'<div class="select__control"><div class="select__value-container">' +
+			'<div class="select__single-value">Choose</div>' +
+			'<input id="city" role="combobox" aria-controls="city-list" />' +
+			"</div></div>" +
+			'<div id="city-list" role="listbox">' +
+			'<div role="option" id="o-paris">Paris</div>' +
+			'<div role="option" id="o-parma">Parma</div>' +
+			"</div>";
+		const input = document.querySelector("#city") as HTMLInputElement;
+		const single = document.querySelector(
+			".select__single-value",
+		) as HTMLElement;
+		const listbox = document.querySelector("#city-list") as HTMLElement;
+		// Typing filters the list; picking an option shows it as the selected value.
+		input.addEventListener("input", () => {
+			for (const option of Array.from(listbox.children) as HTMLElement[]) {
+				option.style.display = option.textContent?.includes(input.value)
+					? ""
+					: "none";
+			}
+		});
+		listbox.addEventListener("click", (event) => {
+			const option = (event.target as HTMLElement).closest('[role="option"]');
+			if (option) single.textContent = option.textContent;
+		});
+
+		const result = await executeCommand({
+			id: "pick-4",
+			action: "pick",
+			target: { selector: "#city" },
+			value: "Paris",
+		});
+
+		expect(result.success).toBe(true);
+		expect(result.data).toEqual({ value: "Paris", matched: "Paris" });
+	});
+});
+
+describe("click at viewport coordinates (DOM)", () => {
+	let originalElementFromPoint: typeof document.elementFromPoint;
+
+	beforeEach(() => {
+		document.body.innerHTML = "";
+		originalElementFromPoint = document.elementFromPoint;
+	});
+
+	afterEach(() => {
+		document.elementFromPoint = originalElementFromPoint;
+		document.body.innerHTML = "";
+	});
+
+	it("dispatches the click on the element at the point", async () => {
+		const button = document.createElement("button");
+		document.body.appendChild(button);
+		let clicks = 0;
+		button.addEventListener("click", () => {
+			clicks++;
+		});
+		document.elementFromPoint = (() =>
+			button) as typeof document.elementFromPoint;
+
+		const result = await executeCommand({
+			id: "xy-1",
+			action: "click",
+			target: { x: 12, y: 34 },
+		});
+
+		expect(result.success).toBe(true);
+		expect(clicks).toBe(1);
+	});
+
+	it("errors when nothing is at the point", async () => {
+		document.elementFromPoint = (() =>
+			null) as typeof document.elementFromPoint;
+
+		const result = await executeCommand({
+			id: "xy-2",
+			action: "click",
+			target: { x: 12, y: 34 },
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toBe("nothing at (12, 34)");
+	});
+});
+
+describe("options.frame (DOM)", () => {
+	/**
+	 * An iframe whose document is a stand-in. happy-dom loads iframe pages on its
+	 * own schedule, and under the full suite `contentDocument` stays null, so these
+	 * tests pin the lookup logic rather than happy-dom's iframe loading. The
+	 * stand-in is same-realm: cross-realm behaviour needs a live browser check.
+	 */
+	function makeFrame(id: string): {
+		frame: HTMLIFrameElement;
+		inner: Document;
+	} {
+		const frame = document.createElement("iframe");
+		frame.id = id;
+		document.body.appendChild(frame);
+		const inner = document.implementation.createHTMLDocument("frame");
+		Object.defineProperty(inner, "defaultView", { value: window });
+		Object.defineProperty(frame, "contentDocument", {
+			configurable: true,
+			get: () => inner,
+		});
+		return { frame, inner };
+	}
+
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("resolves a target inside the frame's document", async () => {
+		const { inner } = makeFrame("frame-a");
+		inner.body.innerHTML = '<button id="inner-btn">Go</button>';
+
+		const result = await executeCommand({
+			id: "fr-1",
+			action: "getText",
+			target: { selector: "#inner-btn" },
+			options: { frame: "#frame-a" },
+		});
+
+		expect(result.success).toBe(true);
+		expect(result.data).toBe("Go");
+	});
+
+	it("does not see frame content without options.frame", async () => {
+		const { inner } = makeFrame("frame-b");
+		inner.body.innerHTML = '<button id="only-inside">Go</button>';
+
+		const result = await executeCommand({
+			id: "fr-2",
+			action: "getText",
+			target: { selector: "#only-inside" },
+		});
+
+		expect(result.success).toBe(false);
+	});
+
+	it("fills an input inside the frame's document", async () => {
+		const { inner } = makeFrame("frame-c");
+		inner.body.innerHTML = '<input id="inner-input">';
+
+		const result = await executeCommand({
+			id: "fr-3",
+			action: "fill",
+			target: { selector: "#inner-input" },
+			value: "hello",
+			options: { frame: "#frame-c" },
+		});
+
+		expect(result.success).toBe(true);
+		expect(
+			(inner.querySelector("#inner-input") as HTMLInputElement).value,
+		).toBe("hello");
+	});
+
+	it("mints a ref inside the frame that later commands resolve without the frame", async () => {
+		const { inner } = makeFrame("frame-r");
+		inner.body.innerHTML = '<button id="ref-btn">Save</button>';
+
+		const found = await executeCommand({
+			id: "fr-ref-1",
+			action: "find",
+			target: { selector: "#ref-btn" },
+			options: { frame: "#frame-r", assignRef: true },
+		});
+		const ref = (found.data as { ref?: string }).ref;
+		expect(ref).toMatch(/^@e\d+$/);
+
+		const text = await executeCommand({
+			id: "fr-ref-2",
+			action: "getText",
+			target: { ref },
+		});
+		expect(text.success).toBe(true);
+		expect(text.data).toBe("Save");
+	});
+
+	it("errors when the frame does not exist", async () => {
+		const result = await executeCommand({
+			id: "fr-4",
+			action: "getText",
+			target: { selector: "body" },
+			options: { frame: "#missing" },
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toBe("frame #missing not found");
+	});
+
+	it("errors when the match is not an iframe", async () => {
+		document.body.innerHTML = '<div id="not-a-frame"></div>';
+
+		const result = await executeCommand({
+			id: "fr-5",
+			action: "getText",
+			target: { selector: "body" },
+			options: { frame: "#not-a-frame" },
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toBe("frame #not-a-frame is not an <iframe>");
+	});
+
+	it("errors when the frame is cross-origin", async () => {
+		const { frame } = makeFrame("frame-x");
+		Object.defineProperty(frame, "contentDocument", {
+			configurable: true,
+			get: () => null,
+		});
+
+		const result = await executeCommand({
+			id: "fr-6",
+			action: "getText",
+			target: { selector: "body" },
+			options: { frame: "#frame-x" },
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toBe(
+			"frame #frame-x is cross-origin; open its URL in a tab",
+		);
+	});
+
+	it("rejects options.frame on an action that cannot honour it", async () => {
+		makeFrame("frame-y");
+
+		const result = await executeCommand({
+			id: "fr-7",
+			action: "extractTable",
+			target: { selector: "table" },
+			options: { frame: "#frame-y" },
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toBe(
+			'action "extractTable" does not support options.frame',
+		);
+	});
+});
+
+describe("snapshot and findAll geometry (DOM)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	type Node = { role: string; box?: unknown; children?: Node[] };
+	function findNode(node: Node, role: string): Node | undefined {
+		if (node.role === role) return node;
+		for (const child of node.children ?? []) {
+			const found = findNode(child, role);
+			if (found) return found;
+		}
+		return undefined;
+	}
+
+	it("gives a snapshot node its viewport box and the root its viewport size", async () => {
+		document.body.innerHTML = '<button id="geo-btn">Go</button>';
+
+		const result = await executeCommand({ id: "geo-1", action: "snapshot" });
+
+		expect(result.success).toBe(true);
+		const tree = result.data as Node & {
+			viewport?: { w: number; h: number };
+		};
+		expect(tree.viewport).toEqual({
+			w: window.innerWidth,
+			h: window.innerHeight,
+		});
+		// domSetup gives every element a 100x50 box at the origin.
+		expect(findNode(tree, "button")?.box).toEqual({
+			x: 0,
+			y: 0,
+			w: 100,
+			h: 50,
+		});
+	});
+
+	it("reports the viewport scroll offset on the snapshot root", async () => {
+		document.body.innerHTML = '<button id="scroll-btn">Go</button>';
+		const original = Object.getOwnPropertyDescriptor(window, "scrollY");
+		Object.defineProperty(window, "scrollY", {
+			value: 120,
+			configurable: true,
+		});
+		try {
+			const result = await executeCommand({
+				id: "geo-scroll",
+				action: "snapshot",
+			});
+			const tree = result.data as Node & { scroll?: { x: number; y: number } };
+			expect(tree.scroll).toEqual({ x: window.scrollX, y: 120 });
+		} finally {
+			if (original) Object.defineProperty(window, "scrollY", original);
+		}
+	});
+
+	it("omits box when the element has no layout box", async () => {
+		document.body.innerHTML = '<button id="zero-btn">Go</button>';
+		const button = document.querySelector("#zero-btn") as HTMLElement;
+		button.getBoundingClientRect = () =>
+			({ left: 0, top: 0, width: 0, height: 0 }) as DOMRect;
+
+		const result = await executeCommand({ id: "geo-2", action: "snapshot" });
+
+		const node = findNode(result.data as Node, "button");
+		expect(node).toBeDefined();
+		expect("box" in (node as Node)).toBe(false);
+	});
+
+	it("gives findAll entries a box", async () => {
+		document.body.innerHTML = '<a id="geo-link" href="/x">Next</a>';
+
+		const result = await executeCommand({
+			id: "geo-3",
+			action: "findAll",
+			target: { selector: "#geo-link" },
+		});
+
+		const entries = result.data as { box?: unknown }[];
+		expect(entries).toHaveLength(1);
+		expect(entries[0].box).toEqual({ x: 0, y: 0, w: 100, h: 50 });
 	});
 });

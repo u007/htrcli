@@ -1,10 +1,16 @@
 ---
 name: htrcli
-description: HTR NControl CLI (htrcli) usage guide. Read this before running any htrcli commands. Covers connecting to the HTR NControl server, listing, filtering by browser, opening and closing tabs, navigating pages, interacting with elements (click, fill, type, select, press, keydown/keyup, mousedown/mouseup/mousemove/drag with xy= viewport coordinates and @eN refs), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, recording video, session recordings (start/stop/list/get/export/delete — works on Chrome and Firefox), network capture/mocking, console watching, dialog handling, and more. Includes a form-filling guide (pick/fill-form/--frame, datepickers, react-select, iframes, submit-and-verify) and the list of what works over --cdp. Use when the user asks to control a browser, interact with a website, fill a form, click something, drag, press keys, extract data, take a screenshot, or automate any browser task via HTR NControl.
+description: If the agent has a `browser_run` or `browser` tool, use those instead; this skill is for shells without browser tools (the TUI) and for recording, network mocking, contexts and raw commands. HTR NControl CLI (htrcli) usage guide. Read this before running any htrcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select, press, keydown/keyup, mousedown/mouseup/mousemove/drag with xy= viewport coordinates and @eN refs), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, recording video, session recordings (start/stop/list/get/export/delete — works on Chrome and Firefox), network capture/mocking, console watching, dialog handling, and more. Includes a form-filling guide (pick/fill-form/--frame, datepickers, react-select, iframes, submit-and-verify) and the list of what works over --cdp. Use when the user asks to control a browser, interact with a website, fill a form, click something, drag, press keys, extract data, take a screenshot, or automate any browser task via HTR NControl.
 allowed-tools: Bash(htrcli:*), Bash(go run ./cmd/htrcli:*), Bash(make htrcli-*)
 ---
 
 # htrcli — HTR NControl CLI
+
+## When to use this vs the browser tools
+
+- If the agent has a `browser_run` tool (an ocode web or desktop session), prefer `browser_run` for multi-step page tasks, and the `browser` tool for single reads or actions.
+- Use htrcli from the shell only when those tools are absent (for example the TUI), or for things they cannot do: recording, network mocking, contexts, raw `command`.
+- On a remote (SSH) project the `browser` and `browser_run` tools already drive the client's local browser through this same daemon (reverse-forwarded to the host's port 3845), including dense pages via `browser_run`'s screenshot view. Shelling out to htrcli from the host costs one chat-model round trip per command; `browser_run` costs one for the whole task.
 
 Go CLI for controlling browser tabs via the HTR NControl remote control API.
 Supports **two transports** — extension (default) and direct CDP:
@@ -19,6 +25,8 @@ htrcli (Go) ──CDP──► Chrome DevTools Protocol (:9222)
 
 The extension transport works with both Chrome and Firefox; CDP transport works
 with Chrome only.
+
+An agent host that drives htrcli through the daemon API (ocode's `browser`/`browser_run` tools on a remote host do this): see `docs/agent-host.md` in the htrcli repository and `docs/concepts/browser-agent-tools.md` here.
 
 ## Agent quick rules (read this first; skip the probing)
 

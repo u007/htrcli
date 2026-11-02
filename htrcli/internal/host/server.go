@@ -16,6 +16,7 @@ import (
 // and returns on read. Any other kind creates an unreachable orphan bucket.
 var knownEventKinds = map[string]bool{
 	"console": true,
+	"network": true,
 }
 
 // NewHTTPServer builds the HTTP server with all API routes.

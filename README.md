@@ -201,6 +201,8 @@ See [htrcli/README.md](./htrcli/README.md) and [GUIDE.md](./GUIDE.md) for the fu
 
 ## Remote Control
 
+For driving htrcli from an AI agent host (the daemon API, the step loop, and remote setup), see [docs/agent-host.md](docs/agent-host.md).
+
 HTR NControl includes a remote control system that allows external tools (like AI agents) to control browser tabs via an HTTP API. The backend is provided by **htrcli**, a self-contained Go daemon.
 
 ### Quick Start
