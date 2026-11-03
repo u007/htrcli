@@ -220,8 +220,20 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
 		};
 	}, [state.isRecording, state.session?.startTime, state.session]);
 
+	// Refresh past sessions list
+	const refreshPastSessions = useCallback(async () => {
+		try {
+			const sessions = await dbGetAllSessions();
+			dispatch({ type: "SET_PAST_SESSIONS", payload: sessions });
+		} catch (error) {
+			console.error("[HTR NControl] refreshing past sessions failed:", error);
+		}
+	}, []);
+
 	// Listen for messages from background script
 	useEffect(() => {
+		// A finished recording is persisted at stop, and a delete broadcast can come
+		// from any surface (this panel, htrcli). Keep the stored-session list in step.
 		const handleMessage = (
 			message: RecordingMessage | ConnectionStatusMessage,
 		) => {
@@ -244,6 +256,9 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
 					type: "STOP_RECORDING",
 					payload: (message as RecordingStoppedMessage).session,
 				});
+				void refreshPastSessions();
+			} else if (message.type === "DELETE_SESSION_RESULT") {
+				void refreshPastSessions();
 			} else if (message.type === "CONNECTION_STATUS") {
 				dispatch({
 					type: "SET_CONNECTION_STATUS",
@@ -254,7 +269,7 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
 
 		chrome.runtime.onMessage.addListener(handleMessage);
 		return () => chrome.runtime.onMessage.removeListener(handleMessage);
-	}, []);
+	}, [refreshPastSessions]);
 
 	// Initialize state from background script
 	useEffect(() => {
@@ -446,16 +461,6 @@ export function RecordingProvider({ children }: RecordingProviderProps) {
 	// Clear current session
 	const clearSession = useCallback(() => {
 		dispatch({ type: "CLEAR_SESSION" });
-	}, []);
-
-	// Refresh past sessions list
-	const refreshPastSessions = useCallback(async () => {
-		try {
-			const sessions = await dbGetAllSessions();
-			dispatch({ type: "SET_PAST_SESSIONS", payload: sessions });
-		} catch (error) {
-			console.error("Failed to refresh past sessions:", error);
-		}
 	}, []);
 
 	const value: RecordingContextType = {

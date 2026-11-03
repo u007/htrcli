@@ -14,11 +14,13 @@
 // (always show the same panel).
 //
 // Note: `chrome.sidebarAction` is REAL here, not a stub — the
-// polyfill maps `browser.*` onto `chrome.*`. The popup uses it to
-// open the sidebar, since a `default_popup` on the toolbar button
-// means `action.onClicked` no longer fires.
+// polyfill maps `browser.*` onto `chrome.*`. The shim uses it to
+// toggle the sidebar from the toolbar icon, since the Firefox
+// manifest declares no `default_popup` (a popup would suppress
+// `action.onClicked`).
 
 import "webextension-polyfill";
+import { registerSidebarToggle } from "./sidebarToggle";
 
 // The `@types/chrome` definitions in scope are stricter than what
 // Firefox exposes; we type the polyfilled globals as `unknown` and
@@ -31,6 +33,15 @@ const browserApi: any = g.browser ?? g.chrome;
 if (browserApi && !g.chrome) {
 	g.chrome = browserApi;
 }
+
+// The Firefox build's UI is the manifest's `sidebar_action`, and the manifest
+// deliberately has no `action.default_popup`, so the toolbar click reaches
+// `action.onClicked`. Register the toggle HERE, at import time, rather than
+// from the `sidePanel` stub: a future Firefox that ships a real `sidePanel`
+// would skip the stub and silently stop the icon from toggling the sidebar.
+// This module is imported only by the background entry, so the listener exists
+// in exactly one extension context.
+registerSidebarToggle(browserApi);
 
 // If `chrome.sidePanel` is missing, polyfill it with no-op stubs.
 // The manifest's `sidebar_action` configuration is what actually
@@ -48,24 +59,12 @@ if (!browserApi.sidePanel) {
 		}): Promise<void> {
 			// Intentionally empty.
 		},
-		// No-op: Firefox has no `openPanelOnActionClick` runtime toggle.
-		// The toolbar button now declares `action.default_popup`
-		// (firefox/vite.config.ts), which SUPPRESSES `action.onClicked`
-		// entirely — so this listener is a no-op on current builds. It is
-		// kept as a fallback for a build without the popup. When the popup
-		// IS declared, the popup's "Open side panel" button calls
-		// `sidebarAction.open()` itself, so the sidebar remains reachable.
-		async setPanelBehavior(options: {
+		// No-op: Firefox has no `openPanelOnActionClick` runtime toggle. The
+		// toolbar click is handled by the listener registered above.
+		async setPanelBehavior(_options: {
 			openPanelOnActionClick?: boolean;
 		}): Promise<void> {
-			if (!options.openPanelOnActionClick) return;
-			if (browserApi.sidebarAction?.open && browserApi.action?.onClicked) {
-				browserApi.action.onClicked.addListener(() => {
-					browserApi.sidebarAction.open().catch(() => {
-						// Sidebar may already be open; ignore.
-					});
-				});
-			}
+			// Intentionally empty.
 		},
 	};
 }

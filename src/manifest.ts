@@ -15,7 +15,12 @@ export default defineManifest({
 		128: "img/logo-128.png",
 	},
 	action: {
-		default_popup: "popup.html",
+		// No `default_popup`: the toolbar icon must toggle the side panel
+		// instead of opening a popup. Chrome does this natively through
+		// `sidePanel.setPanelBehavior({ openPanelOnActionClick: true })`
+		// (background/index.ts); Firefox toggles the sidebar from the
+		// `action.onClicked` listener the Firefox shim installs.
+		default_title: "Toggle HTR NControl",
 		default_icon: "img/logo-48.png",
 	},
 	options_page: "options.html",

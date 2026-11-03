@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+	type Dispatch,
+	type SetStateAction,
+	useCallback,
+	useEffect,
+	useState,
+} from "react";
 import "./ConnectedTabs.css";
 
-interface TabInfo {
+export interface TabInfo {
 	id: number;
 	url: string;
 	title: string;
@@ -10,23 +16,26 @@ interface TabInfo {
 	index: number;
 }
 
+/** The connected-tab list shared by the side panel's tab bar and Tabs view. */
+export interface ConnectedTabsState {
+	tabs: TabInfo[];
+	setTabs: Dispatch<SetStateAction<TabInfo[]>>;
+	refresh: () => Promise<void>;
+}
+
 // The host access the content scripts need in order to connect tabs for
 // remote control. On Chrome this is granted at install time; on Firefox
 // MV3 `<all_urls>` is opt-in, so the extension has to request it from a
 // user gesture before any tab can connect.
 const REMOTE_CONTROL_ORIGINS = ["<all_urls>"];
 
-export function ConnectedTabs() {
+/**
+ * Owns the connected-tab list. Called once in the side panel root so the tab
+ * bar's count badge and the Tabs view read the same state. Re-syncs on mount
+ * and polls the background every 3s.
+ */
+export function useConnectedTabs(): ConnectedTabsState {
 	const [tabs, setTabs] = useState<TabInfo[]>([]);
-	const [collapsed, setCollapsed] = useState(false);
-	// `null` while we haven't checked yet. `true`/`false` once known.
-	const [hasAccess, setHasAccess] = useState<boolean | null>(null);
-	const [requesting, setRequesting] = useState(false);
-	// Outcome of the last grant attempt, surfaced in the panel because the
-	// sidebar console is invisible to most users and the failure reasons
-	// (gesture requirement, <all_urls> not requestable, API absent) differ.
-	const [grantResult, setGrantResult] = useState<string | null>(null);
-	const [copiedTabId, setCopiedTabId] = useState<number | null>(null);
 
 	const refresh = useCallback(async (): Promise<void> => {
 		try {
@@ -40,6 +49,41 @@ export function ConnectedTabs() {
 			console.warn("[HTR NControl] GET_READY_TABS failed:", err);
 		}
 	}, []);
+
+	useEffect(() => {
+		// On mount, do a full sync so already-running content scripts are detected
+		// after a background restart (which clears readyTabs).
+		void chrome.runtime
+			.sendMessage({ type: "SYNC_READY_TABS" })
+			.then((res: { success?: boolean; tabs?: TabInfo[] } | undefined) => {
+				if (res?.success && Array.isArray(res.tabs))
+					setTabs([...res.tabs].sort((a, b) => a.index - b.index));
+			})
+			.catch((err: unknown) => {
+				console.warn(
+					"[HTR NControl] SYNC_READY_TABS failed; falling back to GET_READY_TABS:",
+					err,
+				);
+				void refresh();
+			});
+		const id = setInterval(() => {
+			void refresh();
+		}, 3000);
+		return () => clearInterval(id);
+	}, [refresh]);
+
+	return { tabs, setTabs, refresh };
+}
+
+export function ConnectedTabs({ tabs, setTabs, refresh }: ConnectedTabsState) {
+	// `null` while we haven't checked yet. `true`/`false` once known.
+	const [hasAccess, setHasAccess] = useState<boolean | null>(null);
+	const [requesting, setRequesting] = useState(false);
+	// Outcome of the last grant attempt, surfaced in the panel because the
+	// sidebar console is invisible to most users and the failure reasons
+	// (gesture requirement, <all_urls> not requestable, API absent) differ.
+	const [grantResult, setGrantResult] = useState<string | null>(null);
+	const [copiedTabId, setCopiedTabId] = useState<number | null>(null);
 
 	const checkAccess = useCallback(async (): Promise<void> => {
 		// `chrome.permissions` is unavailable in some contexts; treat its
@@ -135,130 +179,96 @@ export function ConnectedTabs() {
 		} finally {
 			setRequesting(false);
 		}
-	}, [refresh]);
+	}, [refresh, setTabs]);
 
 	useEffect(() => {
 		void checkAccess();
-		// On mount, do a full sync so already-running content scripts are detected
-		// after a background restart (which clears readyTabs).
-		void chrome.runtime
-			.sendMessage({ type: "SYNC_READY_TABS" })
-			.then((res: { success?: boolean; tabs?: TabInfo[] } | undefined) => {
-				if (res?.success && Array.isArray(res.tabs))
-					setTabs([...res.tabs].sort((a, b) => a.index - b.index));
-			})
-			.catch(() => void refresh());
-		const id = setInterval(() => {
-			void refresh();
-		}, 3000);
-		return () => clearInterval(id);
-	}, [checkAccess, refresh]);
+	}, [checkAccess]);
 
 	const needsAccess = hasAccess === false;
 
 	return (
 		<div className="connected-tabs">
-			<button
-				type="button"
-				className="ct-header"
-				onClick={() => setCollapsed((c) => !c)}
-				onKeyDown={(event) => {
-					if (event.key === "Enter" || event.key === " ") {
-						event.preventDefault();
-						setCollapsed((c) => !c);
-					}
-				}}
-			>
-				<span className="ct-title">
-					Connected Tabs
-					<span className="ct-count">{tabs.length}</span>
-				</span>
-				<span className="ct-chevron">{collapsed ? "▸" : "▾"}</span>
-			</button>
-
-			{!collapsed && (
-				<ul className="ct-list">
-					{needsAccess ? (
-						<li className="ct-empty">
-							<span>This extension needs access to your tabs.</span>
-							<span className="ct-hint">
-								Firefox doesn't grant site access automatically. Click below and
-								allow access to all sites so tabs can connect for remote
-								control.
-							</span>
+			<ul className="ct-list">
+				{needsAccess ? (
+					<li className="ct-empty">
+						<span>This extension needs access to your tabs.</span>
+						<span className="ct-hint">
+							Firefox doesn't grant site access automatically. Click below and
+							allow access to all sites so tabs can connect for remote control.
+						</span>
+						<button
+							type="button"
+							className="ct-grant"
+							onClick={() => void requestAccess()}
+							disabled={requesting}
+						>
+							{requesting ? "Requesting…" : "Grant access to tabs"}
+						</button>
+						{grantResult && <span className="ct-hint">{grantResult}</span>}
+					</li>
+				) : tabs.length === 0 ? (
+					<li className="ct-empty">
+						<span>No tabs connected.</span>
+						<span className="ct-hint">
+							Open or reload an http(s) page to connect it. On Firefox, site
+							access may still need granting even when it reports as granted —
+							use the button below, then reload the page.
+						</span>
+						<button
+							type="button"
+							className="ct-grant"
+							onClick={() => void requestAccess()}
+							disabled={requesting}
+						>
+							{requesting ? "Requesting…" : "Grant access to tabs"}
+						</button>
+						{grantResult && <span className="ct-hint">{grantResult}</span>}
+					</li>
+				) : (
+					tabs.map((tab) => (
+						<li key={tab.id} className="ct-item-wrap">
 							<button
 								type="button"
-								className="ct-grant"
-								onClick={() => void requestAccess()}
-								disabled={requesting}
+								className={`ct-item${tab.active ? " ct-active" : ""}`}
+								title="Switch to this tab (middle-click to close)"
+								onClick={() => void activateTab(tab.id)}
+								onMouseDown={(e) => {
+									if (e.button === 1) e.preventDefault();
+								}}
+								onAuxClick={(e) => {
+									if (e.button === 1) {
+										e.preventDefault();
+										void closeTab(tab.id);
+									}
+								}}
 							>
-								{requesting ? "Requesting…" : "Grant access to tabs"}
+								{tab.favIconUrl ? (
+									<img className="ct-favicon" src={tab.favIconUrl} alt="" />
+								) : (
+									<span className="ct-favicon-placeholder" />
+								)}
+								<div className="ct-info">
+									<span className="ct-name">{tab.title || "(no title)"}</span>
+									<span className="ct-id">ID: {tab.id}</span>
+								</div>
+								{tab.active && <span className="ct-badge">active</span>}
 							</button>
-							{grantResult && <span className="ct-hint">{grantResult}</span>}
-						</li>
-					) : tabs.length === 0 ? (
-						<li className="ct-empty">
-							<span>No tabs connected.</span>
-							<span className="ct-hint">
-								Open or reload an http(s) page to connect it. On Firefox, site
-								access may still need granting even when it reports as granted —
-								use the button below, then reload the page.
-							</span>
 							<button
 								type="button"
-								className="ct-grant"
-								onClick={() => void requestAccess()}
-								disabled={requesting}
+								className="ct-copy-id"
+								title="Copy tab ID"
+								onClick={(e) => {
+									e.stopPropagation();
+									void copyTabId(tab.id);
+								}}
 							>
-								{requesting ? "Requesting…" : "Grant access to tabs"}
+								{copiedTabId === tab.id ? "Copied!" : "Copy"}
 							</button>
-							{grantResult && <span className="ct-hint">{grantResult}</span>}
 						</li>
-					) : (
-						tabs.map((tab) => (
-							<li key={tab.id} className="ct-item-wrap">
-								<button
-									type="button"
-									className={`ct-item${tab.active ? " ct-active" : ""}`}
-									title="Switch to this tab (middle-click to close)"
-									onClick={() => void activateTab(tab.id)}
-									onMouseDown={(e) => {
-										if (e.button === 1) e.preventDefault();
-									}}
-									onAuxClick={(e) => {
-										if (e.button === 1) {
-											e.preventDefault();
-											void closeTab(tab.id);
-										}
-									}}
-								>
-									{tab.favIconUrl ? (
-										<img className="ct-favicon" src={tab.favIconUrl} alt="" />
-									) : (
-										<span className="ct-favicon-placeholder" />
-									)}
-									<div className="ct-info">
-										<span className="ct-name">{tab.title || "(no title)"}</span>
-										<span className="ct-id">ID: {tab.id}</span>
-									</div>
-									{tab.active && <span className="ct-badge">active</span>}
-								</button>
-								<button
-									type="button"
-									className="ct-copy-id"
-									title="Copy tab ID"
-									onClick={(e) => {
-										e.stopPropagation();
-										void copyTabId(tab.id);
-									}}
-								>
-									{copiedTabId === tab.id ? "Copied!" : "Copy"}
-								</button>
-							</li>
-						))
-					)}
-				</ul>
-			)}
+					))
+				)}
+			</ul>
 		</div>
 	);
 }

@@ -86,13 +86,9 @@ function buildFirefoxManifest(): Plugin {
 				action: {
 					default_title: packageData.displayName || packageData.name,
 					default_icon: "img/logo-48.png",
-					// Declaring a popup here means Firefox fires
-					// `action.onClicked` NO LONGER (a `default_popup`
-					// suppresses it) — which the shim relied on to call
-					// `sidebarAction.open()`. The popup's "Open side
-					// panel" button now calls `sidebarAction.open()`
-					// itself, so the sidebar stays one click away.
-					default_popup: "firefox/popup.html",
+					// Deliberately NO `default_popup`: a popup suppresses
+					// `action.onClicked`, and the shim needs that event to
+					// toggle the sidebar (`sidebarAction.toggle()`).
 				},
 				options_ui: {
 					page: "firefox/options.html",
@@ -222,7 +218,6 @@ export default defineConfig(() => {
 					// Listed as relative paths so Vite preserves
 					// the directory structure in the output.
 					sidepanel: "firefox/sidepanel.html",
-					popup: "firefox/popup.html",
 					options: "firefox/options.html",
 					// Background service worker and content scripts —
 					// not loaded by HTML, but referenced by the

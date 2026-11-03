@@ -102,7 +102,6 @@ Built with Vite + `@crxjs/vite-plugin` (Chrome only). Entry points defined in `s
 
 - **`src/background/index.ts`** — Service worker. Orchestrates recording sessions, captures screenshots via `chrome.tabs.captureVisibleTab`, manages state. Registers the recorder with `setRecordingDeps` so the `recording*` native commands can reach it. Note: the shared `debuggerManager` (refcounted attach for network/dialog capture) is used by both capture features, and `cdpInput.ts` now routes through it via `attachShared`/`detachShared` (concurrent attaches are coalesced into one real attach). `CDP_EVAL` and the `chrome.debugger.attach` calls in `index.ts`/`networkMock.ts` still attach directly.
 - **`src/background/recordingCommands.ts`** — Pure dispatch logic for the `recordingStart|Stop|Status|List|Get|Delete` actions (htrcli `recordings …`). Browser-agnostic: no `chrome.debugger`, so it works on Chrome and Firefox. Side effects are injected via `RecordingCommandDeps`.
-- **`src/popup/Popup.tsx`** — Toolbar popup: manual Start/Stop, optional title, audio toggle, recent recordings.
 - **`src/contentScript/index.ts`** — Injected into every `http/https` page. Submodules handle:
   - `clickHandler.ts` / `inputHandler.ts` — Track interactions
   - `collectList.ts` — Virtualized-list extraction (scroll + accumulate + de-dupe)
@@ -111,9 +110,9 @@ Built with Vite + `@crxjs/vite-plugin` (Chrome only). Entry points defined in `s
   - `connectionManager.ts` — Manages native messaging lifecycle
   - `elementFinder.ts` / `selectorGenerator.ts` / `xpathGenerator.ts` — DOM query helpers
   - `highlighter.ts` — Visual overlay on elements before screenshot
-- **`src/sidepanel/`** — React 18 UI shown in Chrome's side panel / Firefox sidebar.
+- **`src/sidepanel/`** — React 18 UI shown in Chrome's side panel / Firefox sidebar. There is no toolbar popup: the toolbar icon toggles the panel (Chrome `sidePanel.setPanelBehavior`, Firefox `sidebarAction.toggle()` in `firefox/src/firefox-shims.ts`). Two views, `Recording` and `Tabs`, are selected via `src/sidepanel/tabState.ts` (persisted in `localStorage`; both panels stay mounted so switching cannot drop recording state).
   - `context/` — `RecordingContext.tsx` uses `useReducer` for all recording state
-  - `components/` — UI components
+  - `components/` — UI components (`ConnectedTabs` = tab registry for remote control, `RecentRecordings` = stored-session list/delete)
 - **`src/types/recording.ts`** — All shared TypeScript interfaces and `MessageType` union
 - **`src/utils/`** — Export helpers (JSON, Markdown, ZIP via jszip), sensitive field detection
 - **`src/nativeHost.ts`** — Native messaging bridge to `htrcli` host

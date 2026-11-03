@@ -568,7 +568,7 @@ describe("stripMediaData / hasMediaData", () => {
 });
 
 describe("assertNotLiveSession", () => {
-	// The DELETE_SESSION message the popup sends and the recordingDelete command
+	// The DELETE_SESSION message the side panel sends and the recordingDelete command
 	// both route through this one function, so these are the tests that make the
 	// guard structural rather than a rule each call site has to remember.
 	it("refuses the session that is currently recording", () => {

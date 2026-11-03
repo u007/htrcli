@@ -1,55 +1,22 @@
+/* The list owns the remaining height of the side panel's Tabs view and scrolls
+   there, so the panel's fixed height is never exceeded. */
 .connected-tabs {
-	border-top: 1px solid var(--border-color);
-	font-size: 0.78rem;
-}
-
-.ct-header {
+	flex: 1;
+	min-height: 0;
 	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	padding: 8px 16px;
-	cursor: pointer;
-	user-select: none;
-	color: var(--text-secondary);
-}
-
-.ct-header:hover {
-	background: var(--bg-hover);
-}
-
-.ct-title {
-	font-weight: 600;
-	text-transform: uppercase;
-	letter-spacing: 0.05em;
-	font-size: 0.7rem;
-	display: flex;
-	align-items: center;
-	gap: 6px;
-}
-
-.ct-count {
-	background: var(--bg-tertiary);
-	color: var(--text-secondary);
-	border-radius: 10px;
-	padding: 0 6px;
-	font-size: 0.68rem;
-	font-weight: 500;
-}
-
-.ct-chevron {
-	font-size: 0.75rem;
+	flex-direction: column;
+	font-size: 0.82rem;
 }
 
 .ct-list {
 	list-style: none;
 	margin: 0;
-	padding: 0 8px 8px;
+	padding: 8px;
 	display: flex;
 	flex-direction: column;
-	gap: 3px;
-	/* Cap the list so many tabs scroll here instead of squeezing the
-	   Timeline and ExportPanel out of the fixed-height side panel. */
-	max-height: 40vh;
+	gap: 4px;
+	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
 }
 

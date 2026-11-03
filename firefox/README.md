@@ -15,7 +15,6 @@ firefox/
 ├── vite.config.ts               # Vite config (plain Vite, no @crxjs)
 ├── tsconfig.json                # TS config (extends the project tsconfig)
 ├── sidepanel.html               # Firefox sidebar HTML
-├── popup.html                   # Toolbar popup HTML
 ├── options.html                 # Options page HTML
 ├── public/                      # Icons & static assets (mirrors ../public)
 └── src/
@@ -23,7 +22,6 @@ firefox/
     ├── background-entry.ts      # Firefox background service worker entry
     ├── contentScript-entry.ts   # Firefox content script entry
     ├── sidepanel-entry.ts       # Firefox sidebar (React) entry
-    ├── popup-entry.ts           # Firefox popup entry
     └── options-entry.ts         # Firefox options entry
 ```
 
@@ -74,7 +72,6 @@ firefox/build/
 ├── content.js
 ├── firefox/
 │   ├── sidepanel.html
-│   ├── popup.html
 │   └── options.html
 ├── assets/        # Hashed JS+CSS chunks
 ├── img/           # Icons
@@ -89,6 +86,10 @@ firefox/build/
 
 The extension is loaded for the current session. Reload by clicking
 **Reload** in the same panel after each rebuild.
+
+Click the extension's toolbar icon to toggle the sidebar. The manifest
+declares no `action.default_popup`, so `action.onClicked` reaches the
+background and the Firefox shim runs `sidebarAction.toggle()`.
 
 ### 3b. Build a distributable `.xpi`
 
@@ -129,6 +130,7 @@ add-on after each change (`bun run firefox:build` is fast — sub-second).
 | ----------------- | ----------------------------------- | -------------------------------------------------- |
 | Manifest version  | MV3                                 | MV3                                                |
 | UI surface        | `side_panel` (right-side panel)     | `sidebar_action` (left-side sidebar)               |
+| Toolbar icon      | toggles the side panel              | toggles the sidebar (`sidebarAction.toggle()`)     |
 | Permissions       | + `sidePanel`                       | (no `sidePanel`; `sidebar_action` is a UI key)     |
 | `chrome.*` API    | Native                              | Aliased to `browser.*` via `webextension-polyfill` |
 | Service worker    | Yes                                 | Yes                                                |

@@ -336,11 +336,11 @@ async function disableRecordingInTab(tabId: number): Promise<void> {
  * Start a new recording session
  *
  * Refuses when a session is already in flight. This guard lives HERE, at the
- * single point where `currentSession` is mutated, because there are three
- * entry points — the toolbar popup and the side panel (both via
- * `chrome.runtime.sendMessage`) and htrcli (via the `recordingStart` native
- * command) — and an in-flight session lives in memory only. Overwriting it
- * would silently discard every step captured so far.
+ * single point where `currentSession` is mutated, because there are two
+ * entry points — the side panel (via `chrome.runtime.sendMessage`) and htrcli
+ * (via the `recordingStart` native command) — and an in-flight session lives
+ * in memory only. Overwriting it would silently discard every step captured
+ * so far.
  */
 async function startRecording(
 	title: string,
@@ -1133,8 +1133,8 @@ chrome.runtime.onMessage.addListener(
 						await dbDeleteSession(msg.sessionId);
 
 						// Tell every open surface so the row disappears without a
-						// manual reload — the panel and popup each keep their own
-						// copy of the session list.
+						// manual reload — the side panel keeps its own copy of the
+						// stored-session list.
 						broadcastToSidePanel({
 							type: "DELETE_SESSION_RESULT",
 							sessionId: msg.sessionId,
@@ -1664,23 +1664,20 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 	}
 });
 
-// Open side panel when extension icon is clicked
-chrome.action.onClicked.addListener(async (tab) => {
-	if (tab.windowId) {
-		// Use setOptions to open the side panel for this tab
-		await chrome.sidePanel.setOptions({
-			tabId: tab.id,
-			path: "sidepanel.html",
-			enabled: true,
-		});
-	}
-});
+// Clicking the extension icon toggles the side panel. Chrome does this
+// natively via `setPanelBehavior({ openPanelOnActionClick: true })` below;
+// the manifest deliberately has no `default_popup` because a popup would
+// suppress the action click. Firefox's shim implements the same toggle with
+// `sidebarAction.toggle()` from its own `action.onClicked` listener.
 
 // Set up side panel behavior
 chrome.sidePanel
 	.setPanelBehavior({ openPanelOnActionClick: true })
-	.catch(() => {
-		// API might not be available in all contexts
+	.catch((error: unknown) => {
+		console.warn(
+			"[HTR NControl] attempted sidePanel.setPanelBehavior({ openPanelOnActionClick: true }) failed:",
+			error,
+		);
 	});
 
 // Start native host connection

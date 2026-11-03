@@ -268,9 +268,9 @@ export async function handleRecordingCommand(
 			// The "already recording" refusal deliberately lives in the real
 			// startRecording (src/background/index.ts), not here. That function is
 			// the single point where the in-memory session is mutated, and it is
-			// reached from three entry points — this native command, the toolbar
-			// popup, and the side panel. A guard in only one of them would let the
-			// other two silently discard every step captured so far, because an
+			// reached from two entry points — this native command and the side
+			// panel. A guard in only one of them would let the other silently
+			// discard every step captured so far, because an
 			// in-flight session is never written to IndexedDB until it stops.
 			// So we just forward, and let the dep's rejection propagate.
 			// Audio requires microphone capture. Default it OFF so a remote

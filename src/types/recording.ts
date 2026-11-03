@@ -234,7 +234,7 @@ export interface DeleteAnnotationMessage extends BaseMessage {
 /**
  * Delete a stored recording session.
  *
- * Sent by the side panel / popup. It deliberately does NOT delete directly
+ * Sent by the side panel. It deliberately does NOT delete directly
  * against IndexedDB from the UI: the background owns the live session, so it is
  * the only place that can refuse to delete the recording in progress. Routing
  * through it keeps the UI on the same `assertNotLiveSession` guard as the
@@ -250,7 +250,7 @@ export interface DeleteSessionResultMessage extends BaseMessage {
 	type: "DELETE_SESSION_RESULT";
 	sessionId: string;
 	success: boolean;
-	/** True when nothing was removed because no such stored session existed. */
+	/** True when a stored session was removed; false when none existed. */
 	deleted: boolean;
 	error?: string;
 }

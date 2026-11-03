@@ -15,7 +15,6 @@
 		"../src/**/*.ts",
 		"../src/**/*.tsx",
 		"./sidepanel.html",
-		"./popup.html",
 		"./options.html"
 	],
 	"exclude": ["build", "node_modules", "../build", "../node_modules"]

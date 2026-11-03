@@ -12,8 +12,9 @@ The same source code ships as a **Chrome extension** (Manifest V3) and a **Firef
 - 🎯 **Smart Element Detection** - Tracks clicks and inputs with intelligent selectors
 - 🔒 **Sensitive Data Protection** - Automatically masks passwords and sensitive fields
 - 📝 **Multiple Export Formats** - JSON, Markdown, and ZIP with images
-- 🦊 **Cross-browser** - Chrome side panel and Firefox sidebar (identical UI, same React source)
+- 🦊 **Cross-browser** - Chrome side panel and Firefox sidebar (identical UI, same React source); the toolbar icon toggles the panel
 - 🎨 **Visual Timeline** - Side panel interface for managing recordings
+- 🗂️ **Two views** - **Recording** (start/stop, timeline, export, recent recordings) and **Tabs** (the connected-tab list used by remote control) in one panel
 - 🧾 **Console Capture** - Read page `console.*` output with `htrcli console read/watch`
 - 🎙️ **Audio Support** (planned) - Add voice narration to recordings
 
@@ -68,8 +69,11 @@ See [`firefox/README.md`](./firefox/README.md) for the full architecture, the po
 ## Usage
 
 1. **Start Recording**
-   - Click the extension icon or open the side panel
-   - Click "Start Recording"
+   - Click the extension icon to toggle the side panel (Chrome) or sidebar (Firefox)
+   - Open the **Recording** tab and click "Start New Recording"
+   - The panel also has a **Tabs** tab with the connected tabs used by remote control, and it remembers the last tab you used
+
+   > No toolbar popup: the icon always toggles the panel, so the tab list is one click away.
 
 2. **Perform Actions**
    - Navigate websites, click buttons, fill forms

@@ -292,3 +292,8 @@ regression test that failed beforehand (or, where noted, a real-Chromium check).
 ## htrcli raw CDP verb (`cdp`) — known limitations (2026-10-28)
 
 - `cdp <Domain.method>` is stateless per invocation: each call opens and closes its own CDP session. Keeping one session open across invocations, so `Emulation.*`, `Fetch.enable` or `Network.setExtraHTTPHeaders` persist between commands, is out of scope. Persistent emulation uses the `emulate` verb group.
+
+## Extension side panel — unautomated coverage (2026-11-03)
+
+- **Toolbar-icon show/hide is not automated.** The two-view panel itself is covered (SSR structure in `src/sidepanel/SidePanel.test.tsx`, persistence/navigation in `tabState.test.ts`, and a live headless-Chromium CDP check of tab switching). Chrome's toggle is registered (`sidePanel.getPanelBehavior()` → `{openPanelOnActionClick:true}`) and the Firefox click path is unit-tested (`firefox/src/sidebarToggle.test.ts`, asserts the listener is registered and `sidebarAction.toggle()` is called synchronously). What remains unexecuted is the real browser gesture: Chrome 156 ignores `--load-extension` and the extension UI is browser chrome, so an actual icon click cannot be scripted, and this host cannot run `web-ext`/GUI automation. A manual Firefox 159 check (load `firefox/build`, click the icon twice, confirm the sidebar opens then closes) is still required before release.
+- The Firefox `sidebar_action` launcher button the browser adds itself is separate from the extension's `action` button; confirm a click on the launcher does not double-toggle alongside our `action.onClicked` handler.
