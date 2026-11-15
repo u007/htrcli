@@ -25,10 +25,20 @@ func refStorePath() string {
 
 // RefStore persists @eN → backendNodeId mappings across CDP CLI invocations.
 // The JSON file is stored at ~/.htrcli/refs.json.
+//
+// LoaderIDs records the document identity (main-frame loaderId) each ref was
+// minted in, which lets `wait --gone` tell "this node was pruned in the same
+// document" apart from "the document that held it navigated away". The field is
+// additive and optional: a file written by an older build has no "loaderIds"
+// key, so a missing entry means the identity is unknown, never that it
+// mismatched. That keeps the existing refs.json readable by both directions, so
+// the file format needs no version bump; an older build ignores the key on read
+// and drops it on its next write.
 type RefStore struct {
-	NextRef int              `json:"nextRef"`
-	Refs    map[string]int64 `json:"refs"`
-	path    string           // populated on load, not serialized
+	NextRef   int               `json:"nextRef"`
+	Refs      map[string]int64  `json:"refs"`
+	LoaderIDs map[string]string `json:"loaderIds,omitempty"`
+	path      string            // populated on load, not serialized
 }
 
 // LoadRefStore reads the ref store from disk, or returns an empty store if the
@@ -38,7 +48,7 @@ func LoadRefStore() (*RefStore, error) {
 	if path == "" {
 		return nil, fmt.Errorf("cannot determine home directory for ref store")
 	}
-	rs := &RefStore{NextRef: 0, Refs: map[string]int64{}, path: path}
+	rs := &RefStore{NextRef: 0, Refs: map[string]int64{}, LoaderIDs: map[string]string{}, path: path}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -52,6 +62,9 @@ func LoadRefStore() (*RefStore, error) {
 	if rs.Refs == nil {
 		rs.Refs = map[string]int64{}
 	}
+	if rs.LoaderIDs == nil {
+		rs.LoaderIDs = map[string]string{}
+	}
 	rs.path = path
 	return rs, nil
 }
@@ -64,10 +77,30 @@ func (rs *RefStore) Alloc(backendNodeID int64) string {
 	return refID
 }
 
+// AllocInDocument mints the next @eN id for a backendNodeId and records the
+// document it was minted in (the main frame's loaderId). An empty loaderID
+// leaves the identity unknown, so the ref behaves like one written by an older
+// build.
+func (rs *RefStore) AllocInDocument(backendNodeID int64, loaderID string) string {
+	refID := rs.Alloc(backendNodeID)
+	if loaderID != "" {
+		rs.LoaderIDs[refID] = loaderID
+	}
+	return refID
+}
+
 // Lookup resolves a ref id to its backendNodeId.
 func (rs *RefStore) Lookup(refID string) (int64, bool) {
 	id, ok := rs.Refs[refID]
 	return id, ok
+}
+
+// LookupDocument returns the loaderId of the document the ref was minted in.
+// ok is false when the identity is unknown (a ref written before loaderIDs were
+// recorded), which callers must not treat as a mismatch.
+func (rs *RefStore) LookupDocument(refID string) (string, bool) {
+	id, ok := rs.LoaderIDs[refID]
+	return id, ok && id != ""
 }
 
 // Save writes the store back to disk, creating ~/.htrcli if needed.

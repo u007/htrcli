@@ -214,19 +214,23 @@ func waitCDPSelector(timeout int) error {
 // the sense is inverted: success is the absence of every match (use it to
 // prove a row was archived/deleted). A --gone @eN ref also needs
 // newWaitDocumentGuard: a missing node id is what a navigation produces too, so
-// absence only counts once the document is settled and unchanged.
+// absence only counts once the document holding the ref is known to be settled
+// — either the same document (the node was removed) or a different, settled one
+// (the document that held it navigated away).
 func waitCDPSelectorLoop(s *cdp.Session, target *api.TargetSelector, gone bool, timeout, interval int) error {
 	var probe waitRefProbe
 	var guard waitDocumentGuard
+	var mintedLoaderID string
 	if target.Ref != "" {
-		p, err := newWaitRefProbe(s, target.Ref)
+		p, minted, err := newWaitRefProbe(s, target.Ref)
 		if err != nil {
 			return err
 		}
 		probe = p
+		mintedLoaderID = minted
 		// The guard snapshots the document before the first poll: a missing
 		// node id also means "the document navigated", so --gone needs the
-		// snapshot to prove the document did not change while we waited.
+		// snapshot to prove the document's state.
 		if gone {
 			g, err := newWaitDocumentGuard(s)
 			if err != nil {
@@ -237,9 +241,9 @@ func waitCDPSelectorLoop(s *cdp.Session, target *api.TargetSelector, gone bool, 
 	}
 	deadline := time.Now().Add(time.Duration(timeout) * time.Millisecond)
 	// seenAttached records that this wait observed the ref's node connected to
-	// the document. Only that proves the ref was minted in this document; a node
-	// id that is already unresolvable on the first poll cannot be told apart
-	// from one minted in a document that has since navigated.
+	// the document. Only that proves the ref was minted in this document, and it
+	// is needed only for refs with no recorded mint-time identity; a known
+	// identity makes the loaderId comparison sufficient.
 	seenAttached := false
 	for {
 		var done, unsettled bool
@@ -261,16 +265,31 @@ func waitCDPSelectorLoop(s *cdp.Session, target *api.TargetSelector, gone bool, 
 			case state.Attached:
 				// Present: --gone keeps polling.
 			default:
-				// --gone succeeds only in a settled, unchanged document. A
-				// missing id is also what a navigation produces, and a detached
-				// node on a page that is still loading proves nothing yet.
-				reason, err := guard()
+				// Absence only counts as gone once the document is settled. A
+				// blank tab and a still-loading document prove nothing yet.
+				doc, err := guard()
 				if err != nil {
 					return err
 				}
 				switch {
-				case reason != "":
-					unsettledReason = reason
+				case doc.Blank:
+					unsettledReason = "the page is about:blank (no page loaded)"
+				case doc.Loading:
+					unsettledReason = "the document is still loading"
+				case mintedLoaderID != "":
+					// The ref records the document it was minted in. In that
+					// document a missing or detached node was removed; in a
+					// settled different document the element is gone because the
+					// document holding it was replaced by a navigation.
+					//
+					// shortcut: the ref store is not scoped to a CDP target, so a
+					// wait aimed at a different tab than the mint also reads as
+					// gone. Scope refs by target when refs become per-tab.
+					done = true
+				case doc.Navigated:
+					// Identity unknown (an older ref store): keep the
+					// conservative pre-fix answer.
+					unsettledReason = "the document navigated"
 				case state.Resolvable || seenAttached:
 					done = true
 				default:

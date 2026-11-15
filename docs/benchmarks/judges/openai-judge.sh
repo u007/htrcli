@@ -52,20 +52,35 @@ fi
 
 # Build the user message from all three parts. Sending only the rubric asks the
 # model to invent a score: it would never see what the run actually did.
-payload=$(printf '%s' "$doc" | jq -c --arg m "$JUDGE_MODEL" '{
+#
+# A small model drifts when the evidence is verbose, so the prompt names the
+# ONLY legal ids and the evidence is trimmed to what a grader needs. The
+# runner still rejects an unknown id, so a drift is an error, never a score.
+payload=$(printf '%s' "$doc" | jq -c --arg m "$JUDGE_MODEL" '
+	def trimmed_evidence:
+		{
+			summary: (.evidence.summary // {}),
+			steps: ((.evidence.steps // []) | map({
+				index, argv, ok, exit_code,
+				failure: (.failure // ""),
+				stdout: ((.stdout // "")[0:400]),
+				captured: (.captured // {})
+			}))
+		};
+	{
 	model: $m,
 	temperature: 0,
 	messages: [
 		{
 			role: "system",
-			content: "You grade a browser agent against a rubric. Reply with JSON only, no prose and no code fences: {\"scores\":[{\"id\":\"<rubric id>\",\"score\":<number 0 to 1>,\"reason\":\"<short reason>\"}]}"
+			content: ("You grade a browser agent against a rubric. Reply with JSON only, no prose and no code fences: {\"scores\":[{\"id\":\"<rubric id>\",\"score\":<number 0 to 1>,\"reason\":\"<short reason>\"}]}. The ONLY legal ids are: " + (.rubric | map("\"" + .id + "\"") | join(", ")) + ". Return exactly one entry per id and never use any other id.")
 		},
 		{
 			role: "user",
 			content: (
 				"Score every rubric item against the run evidence.\n\nScenario:\n" + (.scenario | tojson)
 				+ "\n\nRubric:\n" + (.rubric | tojson)
-				+ "\n\nEvidence (the step results of the run):\n" + (.evidence | tojson)
+				+ "\n\nEvidence (trimmed step results of the run):\n" + (trimmed_evidence | tojson)
 			)
 		}
 	]

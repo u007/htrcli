@@ -93,7 +93,9 @@ type BackendNodeState struct {
 	// node that the DOM agent has pruned and a document that navigated (every
 	// id from the old document is stale) both answer this way, so Resolvable
 	// alone cannot distinguish removal from navigation. A caller that needs to
-	// (wait --gone) must also prove the document did not change.
+	// (wait --gone) must supply the document identity the id was minted in —
+	// the CLI ref store records the main frame's loaderId for exactly this —
+	// or otherwise prove the document did not change.
 	Resolvable bool
 	// Attached is true while the resolved node is connected to its document.
 	Attached bool
@@ -157,11 +159,14 @@ func IsStaleExecutionContext(err error) bool {
 
 // isMissingNodeError matches the CDP error for a backendNodeId the target no
 // longer knows: the node was removed (and pruned), or the document navigated
-// and every id from the old document is stale. BackendNodePresence reports both
-// as Resolvable=false; only a caller that checks the document itself can tell
-// them apart.
+// and every id from the old document is stale. Chrome 157 phrases the
+// cross-document case as "Node with given id does not belong to the document",
+// which is the same absence. BackendNodePresence reports all of these as
+// Resolvable=false; only a caller that checks the document itself can tell
+// removal from navigation.
 func isMissingNodeError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "No node with given id found") ||
-		strings.Contains(msg, "Could not find node with given id")
+		strings.Contains(msg, "Could not find node with given id") ||
+		strings.Contains(msg, "does not belong to the document")
 }

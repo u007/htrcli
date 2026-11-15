@@ -127,3 +127,56 @@ func TestResolveRefTargets(t *testing.T) {
 		t.Fatalf("want selector 'button.primary', got %q", capturedSelector)
 	}
 }
+
+// BackendNodePresence must read every Chrome phrasing for an id the current
+// document cannot resolve as "not resolvable" (absence), not as a protocol
+// failure. A navigation answers "does not belong to the document"; a pruned
+// node answers "No node with given id found". Anything else is a real error.
+func TestBackendNodePresenceUnresolvableVersusProtocolFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		message string
+		wantErr bool
+	}{
+		{name: "pruned node", message: "No node with given id found"},
+		{name: "could not find node", message: "Could not find node with given id"},
+		{name: "navigated document", message: "Node with given id does not belong to the document"},
+		{name: "genuine protocol failure", message: "Database is locked", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			url := fakeCDP(t, func(m fakeMsg, conn *websocket.Conn) {
+				switch m.Method {
+				case "DOM.resolveNode":
+					conn.WriteJSON(map[string]any{"id": m.ID, "error": map[string]any{
+						"code":    -32000,
+						"message": tc.message,
+					}})
+				default:
+					conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+				}
+			})
+			s, err := Dial(url)
+			if err != nil {
+				t.Fatalf("dial: %v", err)
+			}
+			defer s.Close()
+
+			state, err := BackendNodePresence(s, 4242)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("message %q must surface as an error, got %+v", tc.message, state)
+				}
+				if !strings.Contains(err.Error(), tc.message) {
+					t.Fatalf("error %q does not mention %q", err, tc.message)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("message %q must mean absence, got error %v", tc.message, err)
+			}
+			if state.Resolvable || state.Attached {
+				t.Fatalf("message %q must mean absent, got %+v", tc.message, state)
+			}
+		})
+	}
+}

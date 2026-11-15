@@ -50,6 +50,13 @@ func runFindRefCDP(selector string, all bool) error {
 	}
 	defer s.Close()
 
+	// Record the document each ref is minted in, so `wait --gone` can later tell
+	// a removed node from a navigation without guessing.
+	document, err := readMainFrameIdentity(s)
+	if err != nil {
+		return fmt.Errorf("reading the document identity for refs: %w", err)
+	}
+
 	rs, err := LoadRefStore()
 	if err != nil {
 		return err
@@ -62,7 +69,7 @@ func runFindRefCDP(selector string, all bool) error {
 		}
 		refs := make([]string, len(ids))
 		for i, id := range ids {
-			refs[i] = rs.Alloc(id)
+			refs[i] = rs.AllocInDocument(id, document.LoaderID)
 		}
 		if err := rs.Save(); err != nil {
 			return fmt.Errorf("saving ref store: %w", err)
@@ -79,7 +86,7 @@ func runFindRefCDP(selector string, all bool) error {
 		if err != nil {
 			return fmt.Errorf("resolving backend node: %w", err)
 		}
-		ref := rs.Alloc(backendID)
+		ref := rs.AllocInDocument(backendID, document.LoaderID)
 		if err := rs.Save(); err != nil {
 			return fmt.Errorf("saving ref store: %w", err)
 		}

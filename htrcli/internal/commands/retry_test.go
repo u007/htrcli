@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spf13/pflag"
+	"github.com/spf13/cobra"
 )
 
 func TestNextRetryDelay(t *testing.T) {
@@ -129,23 +129,37 @@ func TestRunWithRetryEmitsAttemptCount(t *testing.T) {
 	}
 }
 
-func TestInheritedGlobalArgsForwardsOnlyChangedFlags(t *testing.T) {
-	fs := pflag.NewFlagSet("t", pflag.ContinueOnError)
-	fs.String("transport", "", "")
-	fs.Bool("json", false, "")
-	fs.String("tab", "", "")
-	if err := fs.Parse([]string{"--transport=cdp", "--json"}); err != nil {
-		t.Fatalf("parse: %v", err)
+// TestRetryChildArgsForwardsPersistentFlagsSetBeforeRetry drives a real cobra
+// tree and builds the child argv with the same function retryCmd.RunE uses.
+//
+// The old test parsed and inspected the same FlagSet, which always populated
+// pflag's `actual` map and hid the defect. Here cobra parses the flags itself
+// on the EXECUTED command's merged set, exactly as a user invocation does.
+func TestRetryChildArgsForwardsPersistentFlagsSetBeforeRetry(t *testing.T) {
+	root := &cobra.Command{Use: "htrcli"}
+	root.PersistentFlags().String("transport", "", "")
+	root.PersistentFlags().Bool("json", false, "")
+	root.PersistentFlags().String("tab", "", "")
+
+	var got []string
+	child := &cobra.Command{
+		Use: "retry -- <command> [args...]",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			got = retryChildArgs(cmd, args)
+			return nil
+		},
 	}
-	got := inheritedGlobalArgs(fs)
-	joined := strings.Join(got, " ")
-	if !strings.Contains(joined, "--transport=cdp") {
-		t.Errorf("transport flag must be forwarded, got %v", got)
+	// Command-local flags must never be forwarded to the child.
+	child.Flags().Int("times", 3, "")
+	root.AddCommand(child)
+
+	root.SetArgs([]string{"--transport", "cdp", "--json", "retry", "--times", "0", "--", "tabs", "list"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
 	}
-	if !strings.Contains(joined, "--json=true") {
-		t.Errorf("json flag must be forwarded, got %v", got)
-	}
-	if strings.Contains(joined, "--tab") {
-		t.Errorf("unset flags must not be forwarded, got %v", got)
+
+	want := []string{"--json=true", "--transport=cdp", "tabs", "list"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("child argv = %v, want %v", got, want)
 	}
 }

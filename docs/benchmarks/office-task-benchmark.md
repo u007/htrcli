@@ -1,13 +1,13 @@
 ---
 type: Unclassified
 title: htrcli Office-Task Benchmark
-description: 'htrcli office-task benchmark: the B-series task specs, the S-series offline fixtures, the bench harness (verdicts, judge, evidence, exclusions), the browser-use BU Bench V2.1 alignment (structure only, no imported task text), built offline proofs for B21–B24, a shape-only comparison with Browser Use''s published runs, and the judge validation record (stub-proven; real model NOT RUN).'
+description: 'htrcli office-task benchmark: the B-series task specs, the S-series offline fixtures, the bench harness (verdicts, judge, evidence, exclusions), the browser-use BU Bench V2.1 alignment (structure only, no imported task text), built offline proofs for B21–B24, a shape-only comparison with Browser Use''s published runs, and the judge validation record (stub-proven; measured with a local Qwen3-0.6B smoke-grade judge).'
 tags:
   - benchmark
   - htrcli
   - browser-automation
   - judge
-timestamp: 2026-11-15T15:05:55Z
+timestamp: 2026-11-15T23:05:21Z
 ---
 # htrcli Office-Task Benchmark
 
@@ -711,20 +711,39 @@ is a hard error.
   reachable. An unknown ref fails immediately and names it
   (`wait: stale ref: … is not known in the CDP ref store`).
 
-### Known open defect — retry drops persistent flags
+### Fixed defect — retry now forwards persistent flags (2026-11-16)
 
-`retry` does not forward persistent flags set before it (`--transport`,
-`--json`, `--tab`, `--token`, `--server`). `retry.go` reads
-`rootCmd.PersistentFlags()`, whose pflag `Visit` early-returns: cobra populates
-the EXECUTED command's merged flag set, not the root's, so the root set shows no
-changed flags and nothing is forwarded. Reproduced in a real browser run.
-`TestInheritedGlobalArgsForwardsOnlyChangedFlags` does not catch it — the test
-parses a `pflag.FlagSet` and then inspects that same set, so it never exercises
-cobra's merge. The fix direction is to read the executing command's flag set
-(filtered to persistent flags) instead of `rootCmd.PersistentFlags()`. Not fixed
-in this batch. The bench scenarios are unaffected today because they write
-`--transport` after `--` (inside the child argv); a hand-run
-`htrcli --transport cdp retry -- …` is affected.
+`retry` used to drop persistent flags set before it (`--transport`, `--json`,
+`--tab`, `--token`, `--server`). The cause: `retry.go` read
+`rootCmd.PersistentFlags()`, whose pflag `Visit` early-returns because cobra
+populates the EXECUTED command's merged flag set, not the root's, so the root
+set showed no changed flags and nothing was forwarded. It now reads the
+executing command's merged flag set and filters that to persistent flags, so
+command-local flags (`--times`, `--delay`, `--max-delay`) are never forwarded
+(`htrcli/internal/commands/retry.go`, `inheritedGlobalArgs`).
+
+The vacuous `TestInheritedGlobalArgsForwardsOnlyChangedFlags` (it parsed a
+`pflag.FlagSet` and inspected that same set, so it never exercised cobra's
+merge) was replaced by a test that drives a real cobra tree; it failed against
+the old code. Real-binary proof: `htrcli --json retry --times 0 -- tabs list`
+emits JSON, and `htrcli --transport cdp retry --times 0 -- tabs list` returns
+CDP target ids (32-hex), not extension tab ids. The eight-fix regression is now
+**8/8**.
+
+### Ref document identity — fixed (2026-11-16)
+
+The persistent ref store now records the mint-time `Page.getFrameTree`
+`loaderId` for each ref (a `loaderIds` map in `~/.htrcli/refs.json`). The field
+is optional: a file written by an older build loads with identity "unknown",
+which keeps the conservative pre-fix behaviour.
+
+Consequence: `wait --selector "@eN" --gone --cdp` now PASSES for (a) a
+same-document prune and (b) a settled cross-document navigation, while blank
+and still-loading pages still FAIL. Live-verified on Chrome 157.
+
+Remaining known limitation: refs are still global rather than scoped to a CDP
+target, so a `wait` aimed at a different tab than the mint can read as gone.
+Pre-existing, not fixed.
 
 ### Number fidelity — settled as opt-in
 
@@ -787,25 +806,36 @@ never appears in argv). Run against a stub OpenAI-compatible endpoint:
 - an out-of-range score of 2 → **judge error**, the scenario FAILS, and no score
   of 0 is invented.
 
-NOT RUN: a real local model. LM Studio serves on :1234 but requires an API
-token — the request 401s with "An LM Studio API token is required…" — and no
-chat-capable `.gguf` is installed for `llama-server` (a search of
-`~/.lmstudio/models` and `~/.cache/lm-studio/models` for GGUFs >100 MB
-returned nothing). To unblock, create a token under LM Studio → Settings →
-Developer, or supply `JUDGE_GGUF` for the llama.cpp wrapper.
+MEASURED with a real local model (2026-11-16): `Qwen3-0.6B-Q8_0.gguf`
+(610 MB) served by llama.cpp `llama-server` 2.65.1 on `127.0.0.1:8089` with no
+auth (`JUDGE_AUTH=none`) and temperature 0.
 
-Therefore verdict QUALITY remains unmeasured: only the contract and the
-arithmetic are proven, and no real model output has ever been graded.
+- Full run: verdict **PASS**, weighted score **100** (rubric `evidence`
+  weight 2 → 1.0; `honesty` weight 1 → 1.0).
+- Partial run, with one OPTIONAL step's heading assertion failing: weighted
+  **50**, **FAIL** at the default threshold of 60 (`evidence` 0.5,
+  `honesty` 0.5). The threshold therefore discriminates rather than
+  rubber-stamping.
+- A first attempt was rejected with
+  `judge returned unknown rubric id "JUDGE-DEMO"`: the tiny model echoed the
+  scenario id instead of the rubric ids. That is the runner refusing a bad
+  reply, not a score. Fix: the adapter prompt
+  (`docs/benchmarks/judges/openai-judge.sh`) now enumerates the ONLY legal ids
+  and trims each step's evidence to 400 characters.
+
+Honest caveat: a 0.6B model's reasons are shallow and templated ("passed 2 of
+3 steps"). Treat it as a smoke-grade local judge that proves the pipeline and
+the weighting, NOT a trustworthy grader. No larger model has been measured.
 
 ### Honest limits
 
-- The judge's verdict QUALITY is unmeasured. The contract and the arithmetic
-  are proven over HTTP against a stub endpoint (see "Judge validation"), but no
-  real model is invoked by this repository.
-- `retry` still drops persistent flags set before it (see the known open defect
-  above): a step whose flags precede `retry` runs the child on the default
-  transport. The harness is unaffected today because it writes `--transport`
-  after `--`.
+- Judge verdict quality is only smoke-grade. The contract and the arithmetic
+  are proven against a stub endpoint, and a real local `Qwen3-0.6B-Q8_0` graded
+  a full run and a partial run (see "Judge validation"), but a 0.6B model is
+  not a trustworthy grader and no larger model has been measured.
+- Refs are still global, not scoped to a CDP target, so a `wait --gone` aimed
+  at a different tab than the mint can read as gone (see "Ref document
+  identity").
 - B02–B20 remain `NOT_RUN`: no authenticated sessions exist. Slack and the demo
   tenants are prepared as `requires_auth` scenarios plus a runbook, not as
   executed runs.

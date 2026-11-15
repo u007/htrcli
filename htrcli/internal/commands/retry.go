@@ -41,7 +41,7 @@ Exit code is non-zero when every attempt fails.`,
 		// set, or the child silently runs with different settings — a
 		// `--transport cdp` retry would otherwise run over the extension
 		// transport.
-		childArgs := append(inheritedGlobalArgs(rootCmd.PersistentFlags()), args...)
+		childArgs := retryChildArgs(cmd, args)
 
 		return runWithRetry(
 			retryTimes,
@@ -113,11 +113,32 @@ func init() {
 	rootCmd.AddCommand(retryCmd)
 }
 
+// retryChildArgs is the child argv retry re-invokes: the persistent flags the
+// user set before `retry`, then the command and its arguments.
+func retryChildArgs(cmd *cobra.Command, args []string) []string {
+	return append(inheritedGlobalArgs(cmd), args...)
+}
+
 // inheritedGlobalArgs renders the persistent flags the user actually set as
 // CLI arguments, so a self-re-invoked child inherits them.
-func inheritedGlobalArgs(fs *pflag.FlagSet) []string {
+//
+// The executing command's merged flag set is the only source of truth: cobra
+// parses flags on it, so its `actual` map records what the user typed. The
+// root's own PersistentFlags() set only marks the shared *Flag as Changed;
+// its `actual` stays empty, and pflag's Visit early-returns on an empty
+// `actual`, which is why reading rootCmd.PersistentFlags() silently dropped
+// every flag. Local flags are filtered by name so retry's own --times,
+// --delay and --max-delay never reach the child.
+func inheritedGlobalArgs(cmd *cobra.Command) []string {
+	persistent := make(map[string]bool)
+	cmd.PersistentFlags().VisitAll(func(f *pflag.Flag) { persistent[f.Name] = true })
+	cmd.InheritedFlags().VisitAll(func(f *pflag.Flag) { persistent[f.Name] = true })
+
 	var out []string
-	fs.Visit(func(f *pflag.Flag) {
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		if !persistent[f.Name] {
+			return
+		}
 		out = append(out, "--"+f.Name+"="+f.Value.String())
 	})
 	return out
