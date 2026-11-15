@@ -166,7 +166,11 @@ func goneUnsettled(selector string, page *api.PageInfo) (bool, error) {
 // isDetachedRefError matches the page's DetachedRefError (src/contentScript/
 // refRegistry.ts): the @eN ref's element was removed from the document, which
 // is the gone condition. The "not known" ref error (never minted, or the page
-// navigated) is deliberately NOT matched and stays a failure.
+// navigated) is deliberately NOT matched, so on the extension path a navigation
+// stays a failure and never a pass. On CDP, @eN refs never reach the page
+// bundle (waitCDPSelectorLoop resolves them via waitRefProbe, and
+// newWaitDocumentGuard rejects a document that navigated), so this only covers
+// a page that resolves a ref itself.
 func isDetachedRefError(err error) bool {
 	return strings.Contains(err.Error(), "points to an element that is no longer in the document")
 }
@@ -192,38 +196,110 @@ func waitCDPSelector(timeout int) error {
 		return err
 	}
 	defer s.Close()
-	// Poll findAll each tick rather than one long page-side wait. A navigation
-	// during a single evaluate destroys its execution context, which is not
-	// retried; a fresh evaluate per tick follows the new document. findAll
-	// resolves the target the same way every other CDP DOM verb does (CSS,
-	// name=, role=, text=, label=, xpath and @eN refs) and matches on presence,
-	// as the page-side wait does. With --gone the sense is inverted: success is
-	// the absence of every match (use it to prove a row was archived/deleted).
-	deadline := time.Now().Add(time.Duration(timeout) * time.Millisecond)
-	for {
-		result, err := cdp.ExecDOM(s, api.Command{ID: "1", Action: "findAll", Target: target})
+	return waitCDPSelectorLoop(s, target, waitGone, timeout, waitInterval)
+}
+
+// waitCDPSelectorLoop polls one selector target until the wait condition holds
+// or the deadline passes. It takes the session and the wait options as
+// arguments (not the package globals) so a test can drive it against a fake
+// CDP endpoint.
+//
+// A CLI-minted @eN ref means nothing to the page bundle's in-page registry, so
+// it is resolved through the persistent ref store instead of findAll (see
+// newWaitRefProbe). Every other selector keeps the findAll path.
+//
+// findAll is polled each tick rather than one long page-side wait. A
+// navigation during a single evaluate destroys its execution context, which is
+// not retried; a fresh evaluate per tick follows the new document. With --gone
+// the sense is inverted: success is the absence of every match (use it to
+// prove a row was archived/deleted). A --gone @eN ref also needs
+// newWaitDocumentGuard: a missing node id is what a navigation produces too, so
+// absence only counts once the document is settled and unchanged.
+func waitCDPSelectorLoop(s *cdp.Session, target *api.TargetSelector, gone bool, timeout, interval int) error {
+	var probe waitRefProbe
+	var guard waitDocumentGuard
+	if target.Ref != "" {
+		p, err := newWaitRefProbe(s, target.Ref)
 		if err != nil {
 			return err
 		}
-		var done, unsettled bool
-		var matches []map[string]any
-		if err := commandError(result); err != nil {
-			if !waitGone || !isDetachedRefError(err) {
-				return err
-			}
-			// The ref's element was removed: that is the gone condition.
-			done = true
-		} else {
-			done, matches, err = evalWaitCheck(result.Data, waitGone)
+		probe = p
+		// The guard snapshots the document before the first poll: a missing
+		// node id also means "the document navigated", so --gone needs the
+		// snapshot to prove the document did not change while we waited.
+		if gone {
+			g, err := newWaitDocumentGuard(s)
 			if err != nil {
 				return err
 			}
-			if waitGone && done {
-				unsettled, err = goneUnsettled(waitSelector, result.PageInfo)
+			guard = g
+		}
+	}
+	deadline := time.Now().Add(time.Duration(timeout) * time.Millisecond)
+	// seenAttached records that this wait observed the ref's node connected to
+	// the document. Only that proves the ref was minted in this document; a node
+	// id that is already unresolvable on the first poll cannot be told apart
+	// from one minted in a document that has since navigated.
+	seenAttached := false
+	for {
+		var done, unsettled bool
+		var unsettledReason string
+		var matches []map[string]any
+		if probe != nil {
+			state, err := probe()
+			if err != nil {
+				return err
+			}
+			if state.Attached {
+				seenAttached = true
+			}
+			switch {
+			case !gone:
+				// An appear wait is satisfied by presence; absence keeps
+				// polling (a detached or unresolvable ref is "not there yet").
+				done = state.Attached
+			case state.Attached:
+				// Present: --gone keeps polling.
+			default:
+				// --gone succeeds only in a settled, unchanged document. A
+				// missing id is also what a navigation produces, and a detached
+				// node on a page that is still loading proves nothing yet.
+				reason, err := guard()
 				if err != nil {
 					return err
 				}
-				done = !unsettled
+				switch {
+				case reason != "":
+					unsettledReason = reason
+				case state.Resolvable || seenAttached:
+					done = true
+				default:
+					unsettledReason = "the ref was not resolvable when the wait started, so a navigation cannot be ruled out"
+				}
+			}
+		} else {
+			result, err := cdp.ExecDOM(s, api.Command{ID: "1", Action: "findAll", Target: target})
+			if err != nil {
+				return err
+			}
+			if err := commandError(result); err != nil {
+				if !gone || !isDetachedRefError(err) {
+					return err
+				}
+				// The ref's element was removed: that is the gone condition.
+				done = true
+			} else {
+				done, matches, err = evalWaitCheck(result.Data, gone)
+				if err != nil {
+					return err
+				}
+				if gone && done {
+					unsettled, err = goneUnsettled(waitSelector, result.PageInfo)
+					if err != nil {
+						return err
+					}
+					done = !unsettled
+				}
 			}
 		}
 		if done {
@@ -235,7 +311,16 @@ func waitCDPSelector(timeout int) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			if waitGone {
+			if probe != nil {
+				if gone {
+					if unsettledReason != "" {
+						return fmt.Errorf("wait: ref %q not confirmed gone after %dms: %s; re-run find --ref on the current page", target.Ref, timeout, unsettledReason)
+					}
+					return fmt.Errorf("wait: ref %q still present after %dms", target.Ref, timeout)
+				}
+				return fmt.Errorf("wait: ref %q is not resolvable after %dms (stale ref — re-run find --ref)", target.Ref, timeout)
+			}
+			if gone {
 				if unsettled {
 					return fmt.Errorf("wait: %q not confirmed gone, document still loading after %dms", waitSelector, timeout)
 				}
@@ -243,7 +328,7 @@ func waitCDPSelector(timeout int) error {
 			}
 			return fmt.Errorf("wait: timeout after %dms", timeout)
 		}
-		time.Sleep(time.Duration(waitInterval) * time.Millisecond)
+		time.Sleep(time.Duration(interval) * time.Millisecond)
 	}
 }
 

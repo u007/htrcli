@@ -1,0 +1,126 @@
+{
+	"scenarios": [
+		{
+			"id": "S27",
+			"ref": "B24",
+			"app": "Local bot-challenge page (no real content)",
+			"goal": "Detect a bot challenge and report it. The page renders only 'Verify you are human'; there is no article, no specification and no answer behind it. The scenario proves the challenge marker is present and that reading the requested content FAILS, so a run that pretends the task succeeded has nothing to stand on.",
+			"steps": [
+				{
+					"note": "open the challenge fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_CHALLENGE}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "the challenge block is rendered",
+					"argv": ["wait", "--selector", "#challenge", "--timeout", "10000"],
+					"retry": 2,
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the page declares itself a challenge in machine-readable form",
+					"argv": ["--json", "attr", "#challenge", "data-challenge"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "true"
+						}
+					}
+				},
+				{
+					"note": "DETECTION + REPORT: the step succeeds (exit 0) and its stdout carries the challenge marker. This is the assertion a successful-looking run must not skip.",
+					"argv": ["--json", "text", "#challenge-title"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Verify you are human"
+					}
+				},
+				{
+					"note": "the page states that no content has been released",
+					"argv": ["--json", "text", "#status"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "no content has been released"
+					}
+				},
+				{
+					"note": "the checkbox is disabled, so there is nothing the harness could legitimately operate",
+					"argv": ["--json", "attr", "#challenge-checkbox", "disabled"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": ""
+						}
+					}
+				},
+				{
+					"note": "no article container exists",
+					"argv": [
+						"wait",
+						"--selector",
+						"#content",
+						"--gone",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "no answer element exists",
+					"argv": [
+						"wait",
+						"--selector",
+						"#answer",
+						"--gone",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "no specification table exists",
+					"argv": [
+						"wait",
+						"--selector",
+						"#spec-table",
+						"--gone",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "GUARD: trying to read the requested content fails (exit 1). A run that claims it extracted an answer cannot have got one from this page.",
+					"argv": ["--json", "text", "#answer"],
+					"expect": {
+						"exit": 1
+					}
+				},
+				{
+					"note": "GUARD: the detection report is the whole outcome — the challenge heading is still the only content-bearing element",
+					"argv": ["--json", "text", "h1"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Security check"
+						}
+					}
+				}
+			]
+		}
+	]
+}

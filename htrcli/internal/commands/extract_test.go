@@ -245,3 +245,128 @@ func TestExtractListNamesVisibleFlagInPageError(t *testing.T) {
 		t.Fatalf("want error %q, got %v", want, err)
 	}
 }
+
+// extractOptionsServer records the options the CLI puts on the wire.
+func extractOptionsServer(t *testing.T, gotOptions *map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req api.CommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		*gotOptions = req.Command.Options
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(api.ApiResponse{
+			OK:   true,
+			Data: api.CommandResult{ID: "1", Success: true, Data: map[string]any{}},
+		})
+	}))
+}
+
+// --normalize-numbers is registered on BOTH subcommands, and parsing it sets
+// the flag that gates the payload field.
+func TestExtractNormalizeNumbersFlagIsRegistered(t *testing.T) {
+	if extractTableCmd.Flags().Lookup("normalize-numbers") == nil {
+		t.Fatal("extract table is missing --normalize-numbers")
+	}
+	if extractListCmd.Flags().Lookup("normalize-numbers") == nil {
+		t.Fatal("extract list is missing --normalize-numbers")
+	}
+
+	extractNormalizeNumbers = false
+	defer func() { extractNormalizeNumbers = false }()
+	if err := extractTableCmd.Flags().Parse([]string{"--normalize-numbers"}); err != nil {
+		t.Fatalf("parse --normalize-numbers: %v", err)
+	}
+	if !extractNormalizeNumbers {
+		t.Fatal("--normalize-numbers did not set extractNormalizeNumbers")
+	}
+}
+
+// The opt-in flag must reach the content script as options.normalizeNumbers.
+func TestExtractTableNormalizeNumbersSentInPayload(t *testing.T) {
+	var gotOptions map[string]any
+	server := extractOptionsServer(t, &gotOptions)
+	defer server.Close()
+
+	prevClient, prevTab, prevTransport := client, tabTarget, transportFlag
+	defer func() { client, tabTarget, transportFlag = prevClient, prevTab, prevTransport }()
+	client = api.NewClient(server.URL, "")
+	tabTarget = ""
+	transportFlag = "ext"
+
+	extractNormalizeNumbers = true
+	defer func() { extractNormalizeNumbers = false }()
+
+	if err := extractTableCmd.RunE(extractTableCmd, []string{"table"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if gotOptions["normalizeNumbers"] != true {
+		t.Fatalf("want options.normalizeNumbers true, got %v", gotOptions)
+	}
+}
+
+// Absent must stay byte-identical to today: no normalizeNumbers key at all.
+func TestExtractTableOmitsNormalizeNumbersByDefault(t *testing.T) {
+	var gotOptions map[string]any
+	server := extractOptionsServer(t, &gotOptions)
+	defer server.Close()
+
+	prevClient, prevTab, prevTransport := client, tabTarget, transportFlag
+	defer func() { client, tabTarget, transportFlag = prevClient, prevTab, prevTransport }()
+	client = api.NewClient(server.URL, "")
+	tabTarget = ""
+	transportFlag = "ext"
+
+	extractNormalizeNumbers = false
+
+	if err := extractTableCmd.RunE(extractTableCmd, []string{"table"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if _, ok := gotOptions["normalizeNumbers"]; ok {
+		t.Fatalf("default payload must not carry normalizeNumbers, got %v", gotOptions)
+	}
+}
+
+func TestExtractListNormalizeNumbersSentInPayload(t *testing.T) {
+	var gotOptions map[string]any
+	server := extractOptionsServer(t, &gotOptions)
+	defer server.Close()
+
+	prevClient, prevTab, prevTransport := client, tabTarget, transportFlag
+	defer func() { client, tabTarget, transportFlag = prevClient, prevTab, prevTransport }()
+	client = api.NewClient(server.URL, "")
+	tabTarget = ""
+	transportFlag = "ext"
+
+	extractNormalizeNumbers = true
+	defer func() { extractNormalizeNumbers = false }()
+
+	if err := extractListCmd.RunE(extractListCmd, []string{"div"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if gotOptions["normalizeNumbers"] != true {
+		t.Fatalf("want options.normalizeNumbers true, got %v", gotOptions)
+	}
+}
+
+func TestExtractListOmitsNormalizeNumbersByDefault(t *testing.T) {
+	var gotOptions map[string]any
+	server := extractOptionsServer(t, &gotOptions)
+	defer server.Close()
+
+	prevClient, prevTab, prevTransport := client, tabTarget, transportFlag
+	defer func() { client, tabTarget, transportFlag = prevClient, prevTab, prevTransport }()
+	client = api.NewClient(server.URL, "")
+	tabTarget = ""
+	transportFlag = "ext"
+
+	extractNormalizeNumbers = false
+
+	if err := extractListCmd.RunE(extractListCmd, []string{"div"}); err != nil {
+		t.Fatalf("RunE: %v", err)
+	}
+	if _, ok := gotOptions["normalizeNumbers"]; ok {
+		t.Fatalf("default payload must not carry normalizeNumbers, got %v", gotOptions)
+	}
+}

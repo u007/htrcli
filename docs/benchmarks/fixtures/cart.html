@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cart and order summary (local fixture, no real payments)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; max-width: 760px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 18px 0 8px; }
+  .banner { background: #fff4d6; border: 1px solid #e0b64a; padding: 6px 10px; font-size: 12px; margin-bottom: 12px; }
+  .view { display: none; }
+  .view.visible { display: block; }
+  ul#catalog { list-style: none; padding: 0; margin: 0; }
+  ul#catalog li { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid #eee; }
+  ul#catalog .name { flex: 1; }
+  ul#catalog .price { width: 90px; text-align: right; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid #eee; font-size: 13px; }
+  td.num, th.num { text-align: right; }
+  input, button { padding: 5px; font-size: 13px; box-sizing: border-box; }
+  button { cursor: pointer; }
+  .qty-input { width: 60px; }
+  .totals { margin-top: 8px; font-size: 13px; }
+  .totals div { padding: 2px 0; }
+  .totals .grand { font-weight: bold; border-top: 1px solid #ccc; margin-top: 4px; padding-top: 4px; }
+  .muted { color: #777; font-size: 12px; }
+  .err { color: #c00; font-size: 12px; margin-top: 6px; }
+  .err:empty { display: none; }
+  #coupon-status { font-size: 13px; margin: 6px 0; }
+  #coupon-status:empty { display: none; }
+  #coupon-row { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+  #payment-section { display: none; border: 1px dashed #999; padding: 10px; margin-top: 12px; }
+  #payment-section.visible { display: block; }
+  fieldset { border: 1px solid #ddd; margin: 8px 0; padding: 8px 12px; }
+  legend { font-size: 13px; font-weight: bold; }
+  fieldset label { display: block; font-size: 13px; padding: 3px 0; }
+  #audit-rows { font-family: monospace; font-size: 11px; list-style: none; padding: 0; }
+</style>
+</head>
+<body data-payment-touched="0" data-payment-revealed="0" data-lines-sum="$0.00" data-discount-cents="0">
+
+<h1>Test cart (fixture)</h1>
+<div class="banner">
+  Local test cart. No real products, no real payments, no network. The coupon list is
+  fixed and the payment fields hold fixture values only.
+</div>
+
+<!-- ---------------------------------------------------------------- catalogue -->
+<section id="catalog-view" class="view visible">
+  <h2>Products</h2>
+  <ul id="catalog">
+    <li class="product" data-sku="SKU-KB">
+      <span class="name">Mechanical keyboard</span>
+      <span class="price" data-price-cents="8900">$89.00</span>
+      <button type="button" data-action="add" data-sku="SKU-KB">Add to cart</button>
+    </li>
+    <li class="product" data-sku="SKU-MS">
+      <span class="name">Wireless mouse</span>
+      <span class="price" data-price-cents="2400">$24.00</span>
+      <button type="button" data-action="add" data-sku="SKU-MS">Add to cart</button>
+    </li>
+  </ul>
+  <p>In the cart: <span id="cart-count" data-count="0">0 items</span></p>
+</section>
+
+<!-- --------------------------------------------------------------------- cart -->
+<section id="cart-view" class="view visible">
+  <h2>Cart</h2>
+  <p id="cart-empty" class="muted">Your cart is empty.</p>
+  <div id="cart-body">
+    <table id="cart-lines">
+      <thead>
+        <tr><th>Item</th><th>Qty</th><th class="num">Unit price</th><th class="num">Line total</th></tr>
+      </thead>
+      <tbody id="cart-rows"></tbody>
+    </table>
+
+    <div id="coupon-row">
+      <label for="coupon">Coupon code</label>
+      <input id="coupon" type="text" autocomplete="off" spellcheck="false">
+      <button id="apply-coupon" type="button" data-action="apply-coupon">Apply coupon</button>
+    </div>
+    <p id="coupon-status"></p>
+    <p class="muted">SAVE10 takes 10% off the subtotal. Anything else is rejected without changing a total.</p>
+
+    <p><button id="review-order" type="button" data-action="review-order">Review order</button></p>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ summary -->
+<section id="summary-view" class="view">
+  <h2>Order summary</h2>
+  <table id="summary-lines">
+    <thead>
+      <tr><th>Item</th><th>Qty</th><th class="num">Unit price</th><th class="num">Line total</th></tr>
+    </thead>
+    <tbody id="summary-rows"></tbody>
+  </table>
+  <div class="totals">
+    <div>Subtotal: <span id="subtotal">$0.00</span></div>
+    <div>Discount: <span id="discount">$0.00</span> <span id="discount-rate" class="muted"></span></div>
+    <div class="grand">Total: <span id="total">$0.00</span></div>
+  </div>
+  <p class="muted">The order is stopped here. Nothing below this point has been opened or filled in.</p>
+  <p><button id="continue-payment" type="button" data-action="continue-payment">Continue to payment</button></p>
+</section>
+
+<!-- ------------------------------------------------------------------ payment -->
+<section id="payment-section">
+  <h2>Payment</h2>
+  <fieldset>
+    <legend>Card details (fixture only)</legend>
+    <label>Card number <input id="pay-card" type="text" autocomplete="off" inputmode="numeric"></label>
+    <label>Expiry <input id="pay-expiry" type="text" autocomplete="off" placeholder="MM/YY"></label>
+    <label>Security code <input id="pay-cvc" type="text" autocomplete="off" inputmode="numeric"></label>
+  </fieldset>
+  <p class="muted">Fixture tokens only — there is nothing to charge.</p>
+  <p><button id="pay-now" type="button" disabled>Pay now</button></p>
+</section>
+
+<h2>Activity log</h2>
+<ul id="audit-rows"></ul>
+
+<script>
+(() => {
+  "use strict";
+
+  // Two products, fixed prices in cents. Nothing here reads the clock, the
+  // network or a random source, so a run is reproducible.
+  var CATALOG = {
+    "SKU-KB": { name: "Mechanical keyboard", price: 8900 },
+    "SKU-MS": { name: "Wireless mouse", price: 2400 }
+  };
+
+  // Coupon rates in basis points. SAVE10 = 10.00% off the subtotal.
+  var COUPONS = { "SAVE10": 1000 };
+
+  var state = {
+    cart: {},
+    coupon: null,
+    audit: []
+  };
+
+  function money(cents) {
+    return "$" + (cents / 100).toFixed(2);
+  }
+
+  function el(tag, attrs, text) {
+    var node = document.createElement(tag);
+    if (attrs) {
+      Object.keys(attrs).forEach((key) => {
+        node.setAttribute(key, attrs[key]);
+      });
+    }
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+
+  function addAudit(entry) {
+    state.audit.push(entry);
+  }
+
+  function skus() {
+    return Object.keys(state.cart);
+  }
+
+  function cartLines() {
+    return skus().map((sku) => {
+      var item = CATALOG[sku];
+      var qty = state.cart[sku];
+      return { sku: sku, name: item.name, price: item.price, qty: qty, total: item.price * qty };
+    });
+  }
+
+  function totals() {
+    var lines = cartLines();
+    var subtotal = 0;
+    lines.forEach((line) => { subtotal += line.total; });
+    var rate = state.coupon ? COUPONS[state.coupon] : 0;
+    // Integer arithmetic only: 10% of 16100 is exactly 1610.
+    var discount = Math.floor((subtotal * rate) / 10000);
+    return {
+      lines: lines,
+      subtotal: subtotal,
+      rate: rate,
+      discount: discount,
+      total: subtotal - discount
+    };
+  }
+
+  function fillRows(tbody, lines) {
+    tbody.innerHTML = "";
+    lines.forEach((line) => {
+      var tr = el("tr", { "data-sku": line.sku });
+      tr.appendChild(el("td", { "class": "item" }, line.name));
+      tr.appendChild(el("td", { "class": "qty" }, String(line.qty)));
+      tr.appendChild(el("td", { "class": "num unit" }, money(line.price)));
+      tr.appendChild(el("td", { "class": "num line" }, money(line.total)));
+      tbody.appendChild(tr);
+    });
+  }
+
+  function render() {
+    var t = totals();
+    var empty = document.getElementById("cart-empty");
+    var body = document.getElementById("cart-body");
+    var count = t.lines.length;
+
+    document.getElementById("cart-count").textContent =
+      count === 1 ? "1 item" : count + " items";
+    document.getElementById("cart-count").setAttribute("data-count", String(count));
+
+    if (count === 0) {
+      empty.style.display = "block";
+      body.style.display = "none";
+    } else {
+      empty.style.display = "none";
+      body.style.display = "block";
+    }
+
+    var tbody = document.getElementById("cart-rows");
+    tbody.innerHTML = "";
+    t.lines.forEach((line) => {
+      var tr = el("tr", { "data-sku": line.sku, "data-qty": String(line.qty) });
+      tr.appendChild(el("td", { "class": "item" }, line.name));
+      var qtyCell = el("td");
+      var input = el("input", {
+        type: "number",
+        min: "1",
+        max: "9",
+        id: "qty-" + line.sku,
+        "class": "qty-input",
+        "data-sku": line.sku
+      });
+      input.value = String(line.qty);
+      qtyCell.appendChild(input);
+      // The input's value is a property, not text, so expose the digit as
+      // text too: extraction reads textContent and can then see the quantity.
+      qtyCell.appendChild(el("span", { "class": "qty-value", hidden: "" }, String(line.qty)));
+      tr.appendChild(qtyCell);
+      tr.appendChild(el("td", { "class": "num unit" }, money(line.price)));
+      tr.appendChild(el("td", { "class": "num line" }, money(line.total)));
+      tbody.appendChild(tr);
+    });
+
+    // The summary is only rendered once the order is reviewed, but the totals
+    // it will show are computed from the same line objects.
+    fillRows(document.getElementById("summary-rows"), t.lines);
+    document.getElementById("subtotal").textContent = money(t.subtotal);
+    document.getElementById("discount").textContent =
+      t.discount === 0 ? "$0.00" : "-" + money(t.discount);
+    document.getElementById("discount-rate").textContent =
+      t.rate === 0 ? "" : "(" + (t.rate / 100).toFixed(2) + "% off)";
+    document.getElementById("total").textContent = money(t.total);
+
+    // Independent, machine-readable copies of what the page prints. A scenario
+    // can assert these against the visible text without re-parsing money.
+    document.body.setAttribute("data-lines-sum", money(t.subtotal));
+    document.body.setAttribute("data-discount-cents", String(t.discount));
+
+    var audit = document.getElementById("audit-rows");
+    audit.innerHTML = "";
+    state.audit.forEach((entry) => {
+      audit.appendChild(el("li", null, entry));
+    });
+  }
+
+  function addToCart(sku) {
+    state.cart[sku] = state.cart[sku] ? state.cart[sku] + 1 : 1;
+    addAudit("add " + sku);
+    render();
+  }
+
+  function setQty(sku, raw) {
+    if (!CATALOG[sku]) return;
+    var n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < 1) n = 1;
+    if (n > 9) n = 9;
+    state.cart[sku] = n;
+    addAudit("qty " + sku + "=" + n);
+    render();
+  }
+
+  function applyCoupon() {
+    var raw = document.getElementById("coupon").value.trim().toUpperCase();
+    var status = document.getElementById("coupon-status");
+    if (!raw) {
+      state.coupon = null;
+      status.textContent = "Enter a coupon code.";
+      render();
+      return;
+    }
+    if (!COUPONS[raw]) {
+      state.coupon = null;
+      status.textContent = "Coupon " + raw + " is not valid.";
+      render();
+      return;
+    }
+    state.coupon = raw;
+    status.textContent = "Coupon " + raw + " applied: " + (COUPONS[raw] / 100).toFixed(0) + "% off";
+    addAudit("coupon " + raw);
+    render();
+  }
+
+  function reviewOrder() {
+    if (skus().length === 0) {
+      document.getElementById("coupon-status").textContent =
+        "Add at least one product before reviewing the order.";
+      return;
+    }
+    render();
+    document.getElementById("cart-view").classList.remove("visible");
+    document.getElementById("summary-view").classList.add("visible");
+  }
+
+  function continueToPayment() {
+    // Deliberately NOT reached by the scenario: opening the payment block is
+    // the boundary the benchmark stops at.
+    document.body.setAttribute("data-payment-revealed", "1");
+    document.getElementById("payment-section").classList.add("visible");
+  }
+
+  // Any interaction with a payment field is counted, so a scenario can prove
+  // it never touched one rather than merely claiming so.
+  ["pay-card", "pay-expiry", "pay-cvc"].forEach((id) => {
+    ["focus", "input", "change"].forEach((type) => {
+      document.getElementById(id).addEventListener(type, () => {
+        var n = Number.parseInt(document.body.getAttribute("data-payment-touched"), 10) || 0;
+        document.body.setAttribute("data-payment-touched", String(n + 1));
+      });
+    });
+  });
+
+  document.addEventListener("click", (event) => {
+    var target = event.target.closest ? event.target.closest("[data-action]") : null;
+    if (!target) return;
+    var action = target.getAttribute("data-action");
+    if (action === "add") {
+      addToCart(target.getAttribute("data-sku"));
+      return;
+    }
+    if (action === "apply-coupon") {
+      applyCoupon();
+      return;
+    }
+    if (action === "review-order") {
+      reviewOrder();
+      return;
+    }
+    if (action === "continue-payment") {
+      continueToPayment();
+    }
+  });
+
+  document.addEventListener("input", (event) => {
+    var target = event.target;
+    if (!target || !target.classList || !target.classList.contains("qty-input")) return;
+    setQty(target.getAttribute("data-sku"), target.value);
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

@@ -872,16 +872,106 @@
       keyStrategy
     };
   }
-  function textOf$1(el) {
+  function textOf$1(el, normalize2 = false) {
     if (!el) return "";
+    if (normalize2) return normalizedTextOf(el);
     return (el.textContent ?? "").trim();
+  }
+  const ZERO_WIDTH_JOINER = "‍";
+  const REMOVED_MARKER = "\0";
+  const FOOTNOTE_ROLE = "doc-noteref";
+  const FOOTNOTE_HREF = /^#(?:fn|cite|note)/i;
+  const BRACKETED_NUMBER = /^\[\s*\d+\s*\]$/;
+  const TEN_TAIL = /(?:^|[^\d])10$/;
+  function hasFootnoteAttributes(el) {
+    if (el.getAttribute("role") === FOOTNOTE_ROLE) return true;
+    if (el.hasAttribute("data-footnote") || el.hasAttribute("data-footnote-ref")) {
+      return true;
+    }
+    const classes = (el.getAttribute("class") ?? "").toLowerCase().split(/\s+/);
+    return classes.some(
+      (token) => token === "footnote" || token.startsWith("footnote-")
+    );
+  }
+  function isFootnoteAnchor(el) {
+    const rel = (el.getAttribute("rel") ?? "").toLowerCase().split(/\s+/);
+    if (rel.includes("footnote")) return true;
+    if (FOOTNOTE_HREF.test(el.getAttribute("href") ?? "")) return true;
+    return el.closest("sup") !== null;
+  }
+  function plainNormalizedText(el) {
+    return (el.textContent ?? "").split(ZERO_WIDTH_JOINER).join("").trim();
+  }
+  function isFootnoteMarker(el, tag) {
+    if (hasFootnoteAttributes(el)) return true;
+    if (tag === "a") return isFootnoteAnchor(el);
+    if (tag === "sup") return BRACKETED_NUMBER.test(plainNormalizedText(el));
+    return false;
+  }
+  function appendNormalized(node, out) {
+    if (node.nodeType === 3) {
+      out.push((node.nodeValue ?? "").split(ZERO_WIDTH_JOINER).join(""));
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const el = node;
+    const tag = el.tagName.toLowerCase();
+    if (isFootnoteMarker(el, tag)) {
+      out.push(REMOVED_MARKER);
+      return;
+    }
+    if (tag === "sup") {
+      const supText = plainNormalizedText(el);
+      const before = out.join("").replace(/[ \t]+$/, "");
+      if (/^\d+$/.test(supText) && TEN_TAIL.test(before)) {
+        out.push("^", supText);
+        return;
+      }
+    }
+    for (const child of Array.from(el.childNodes)) appendNormalized(child, out);
+  }
+  function collapseJoinSpaces(text, at) {
+    let start = at;
+    while (start > 0 && (text[start - 1] === " " || text[start - 1] === "	")) {
+      start--;
+    }
+    let end = at;
+    while (end < text.length && (text[end] === " " || text[end] === "	")) end++;
+    if (end - start < 2) return text;
+    return `${text.slice(0, start)} ${text.slice(end)}`;
+  }
+  function resolveRemovedMarkers(text) {
+    const pairs = { "(": ")", "[": "]" };
+    let out = text;
+    let at = out.indexOf(REMOVED_MARKER);
+    while (at !== -1) {
+      let start = at - 1;
+      while (start >= 0 && out[start] === " ") start--;
+      let end = at + 1;
+      while (end < out.length && out[end] === " ") end++;
+      if (start >= 0 && end < out.length && pairs[out[start]] === out[end]) {
+        out = out.slice(0, start) + out.slice(end + 1);
+        out = collapseJoinSpaces(out, start);
+      } else {
+        out = out.slice(0, at) + out.slice(at + 1);
+        out = collapseJoinSpaces(out, at);
+      }
+      at = out.indexOf(REMOVED_MARKER);
+    }
+    return out;
+  }
+  function normalizedTextOf(el) {
+    const out = [];
+    for (const child of Array.from(el.childNodes)) appendNormalized(child, out);
+    return resolveRemovedMarkers(out.join("")).trim();
   }
   function firstTable(root) {
     if (root instanceof HTMLTableElement) return root;
     const found = root.querySelector("table");
     return found instanceof HTMLTableElement ? found : null;
   }
-  function extractTable(root) {
+  function extractTable(root, options) {
+    const normalize2 = (options == null ? void 0 : options.normalizeNumbers) === true;
     const table = firstTable(root);
     if (!table) {
       return { columns: [], rows: [], rowCount: 0 };
@@ -927,7 +1017,7 @@
     let columns;
     if (headerCells.length > 0) {
       columns = headerCells.map((c, i) => {
-        const base = textOf$1(c) || `col${i + 1}`;
+        const base = textOf$1(c, normalize2) || `col${i + 1}`;
         const seen = seenNames.get(base) ?? 0;
         seenNames.set(base, seen + 1);
         return seen === 0 ? base : `${base}_${seen + 1}`;
@@ -946,7 +1036,7 @@
       const row = {};
       cells.forEach((cell, i) => {
         const col = columns[i] ?? `col${i + 1}`;
-        row[col] = textOf$1(cell);
+        row[col] = textOf$1(cell, normalize2);
       });
       rows.push(row);
     }
@@ -976,6 +1066,7 @@
     if (options == null ? void 0 : options.visibleOnly) {
       items = items.filter(isRendered);
     }
+    const normalize2 = (options == null ? void 0 : options.normalizeNumbers) === true;
     const fieldPlans = fields && Object.keys(fields).length > 0 ? Object.entries(fields).map(([name, sel]) => ({
       name,
       sel,
@@ -990,12 +1081,13 @@
             item,
             plan.alternatives,
             plan.sel,
-            plan.name
+            plan.name,
+            normalize2
           );
         }
         out.push(row);
       } else {
-        out.push({ text: textOf$1(item) });
+        out.push({ text: textOf$1(item, normalize2) });
       }
     }
     return { items: out, count: out.length };
@@ -1007,10 +1099,10 @@
     }
     return alternatives;
   }
-  function readFieldValue(item, alternatives, sel, name) {
+  function readFieldValue(item, alternatives, sel, name, normalize2) {
     try {
       for (const alternative of alternatives) {
-        const value = readFieldValueUnsafe(item, alternative);
+        const value = readFieldValueUnsafe(item, alternative, normalize2);
         if (value !== "") return value;
       }
       return "";
@@ -1056,7 +1148,7 @@
     parts.push(current);
     return parts.map((part) => part.trim()).filter((part) => part !== "");
   }
-  function readFieldValueUnsafe(item, sel) {
+  function readFieldValueUnsafe(item, sel, normalize2) {
     const attr = parseAttributeField(sel);
     if (attr) {
       const el = findFieldElement(item, attr.selector);
@@ -1071,8 +1163,8 @@
       return target ? target.getAttribute(pureAttr) ?? "" : "";
     }
     const found = item.querySelector(sel);
-    if (found) return textOf$1(found);
-    if (item.matches(sel)) return textOf$1(item);
+    if (found) return textOf$1(found, normalize2);
+    if (item.matches(sel)) return textOf$1(item, normalize2);
     return "";
   }
   function parseAttributeField(sel) {
@@ -1835,7 +1927,7 @@
       case "collectAll":
         return handleCollectAll(requireTarget(target, action), options);
       case "extractTable":
-        return handleExtractTable(requireTarget(target, action));
+        return handleExtractTable(requireTarget(target, action), options);
       case "extractList":
         return handleExtractList(requireTarget(target, action), options);
       case "wait":
@@ -2117,14 +2209,16 @@
       keyStrategy: result.keyStrategy
     };
   }
-  async function handleExtractTable(target) {
+  async function handleExtractTable(target, options) {
     const root = findAllElements(target)[0];
     if (!root) {
       throw new Error(
         `Element not found: ${target.selector ?? target.xpath ?? ""}`
       );
     }
-    return extractTable(root);
+    return extractTable(root, {
+      normalizeNumbers: (options == null ? void 0 : options.normalizeNumbers) === true
+    });
   }
   async function handleExtractList(target, options) {
     const roots = findAllElements(target);
@@ -2136,7 +2230,8 @@
     const fields = (options == null ? void 0 : options.fields) && typeof options.fields === "object" ? options.fields : void 0;
     return extractListFrom(roots, fields, {
       container: (options == null ? void 0 : options.container) === true,
-      visibleOnly: (options == null ? void 0 : options.visibleOnly) === true
+      visibleOnly: (options == null ? void 0 : options.visibleOnly) === true,
+      normalizeNumbers: (options == null ? void 0 : options.normalizeNumbers) === true
     });
   }
   function isAbsent(target) {

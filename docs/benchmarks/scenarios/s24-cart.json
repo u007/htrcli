@@ -1,0 +1,379 @@
+{
+	"scenarios": [
+		{
+			"id": "S24",
+			"ref": "B21",
+			"app": "Cart fixture (local, no real payments)",
+			"goal": "Add both products, set the mouse quantity to 3, apply SAVE10 (10% off), and reach the order summary. The printed subtotal must equal the sum of the line totals ($89.00 + $72.00 = $161.00), the discount must be exactly 10% ($16.10), and the total $144.90. The run stops at the summary: the payment block exists but is never revealed, and no payment field is ever focused, typed into or changed.",
+			"steps": [
+				{
+					"note": "open the cart fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_CART}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "the product list is rendered",
+					"argv": [
+						"wait",
+						"--selector",
+						"#catalog .product",
+						"--timeout",
+						"10000"
+					],
+					"retry": 2,
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the cart starts empty",
+					"argv": ["--json", "text", "#cart-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0 items"
+						}
+					}
+				},
+				{
+					"note": "no payment field has been touched before the cart work begins",
+					"argv": ["--json", "attr", "body", "data-payment-touched"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0"
+						}
+					}
+				},
+				{
+					"note": "add the first product (mechanical keyboard, $89.00)",
+					"argv": ["click", "[data-action='add'][data-sku='SKU-KB']"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "add the second product (wireless mouse, $24.00)",
+					"argv": ["click", "[data-action='add'][data-sku='SKU-MS']"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "both products are in the cart",
+					"argv": ["--json", "text", "#cart-count"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "2 items"
+						}
+					}
+				},
+				{
+					"note": "set the mouse quantity to 3",
+					"argv": ["fill", "#qty-SKU-MS", "3"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the cart now holds two lines with the quantities that were typed",
+					"argv": [
+						"extract",
+						"list",
+						"#cart-lines tbody tr",
+						"--fields",
+						"item:.item,qty:.qty-value,line:.line"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "line 1 is 1 x $89.00 = $89.00",
+					"argv": [
+						"extract",
+						"list",
+						"#cart-lines tbody tr",
+						"--fields",
+						"item:.item,qty:.qty-value,line:.line"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.0.line",
+							"equals": "$89.00"
+						}
+					}
+				},
+				{
+					"note": "line 2 is 3 x $24.00 = $72.00, and the quantity really is 3",
+					"argv": [
+						"extract",
+						"list",
+						"#cart-lines tbody tr",
+						"--fields",
+						"item:.item,qty:.qty-value,line:.line"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.1.line",
+							"equals": "$72.00"
+						}
+					}
+				},
+				{
+					"note": "and the extracted quantity for the mouse is 3, not the 1 it had at add time",
+					"argv": [
+						"extract",
+						"list",
+						"#cart-lines tbody tr",
+						"--fields",
+						"item:.item,qty:.qty-value,line:.line"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.1.qty",
+							"equals": "3"
+						}
+					}
+				},
+				{
+					"note": "the page's own sum of the lines is $161.00 (89.00 + 72.00)",
+					"argv": ["--json", "attr", "body", "data-lines-sum"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$161.00"
+						}
+					}
+				},
+				{
+					"note": "the printed subtotal matches that sum to the cent",
+					"argv": ["--json", "text", "#subtotal"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$161.00"
+						}
+					}
+				},
+				{
+					"note": "enter the coupon code (lower case is accepted and normalised)",
+					"argv": ["fill", "#coupon", "save10"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "apply the coupon",
+					"argv": ["click", "#apply-coupon"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the page confirms SAVE10 was accepted",
+					"argv": ["--json", "text", "#coupon-status"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "Coupon SAVE10 applied: 10% off"
+						}
+					}
+				},
+				{
+					"note": "the discount is exactly 10% of $161.00 = $16.10",
+					"argv": ["--json", "text", "#discount"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "-$16.10"
+						}
+					}
+				},
+				{
+					"note": "the machine-readable discount is 1610 cents, not a rounded 16 dollars",
+					"argv": ["--json", "attr", "body", "data-discount-cents"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "1610"
+						}
+					}
+				},
+				{
+					"note": "the rate label states the same 10%",
+					"argv": ["--json", "text", "#discount-rate"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "(10.00% off)"
+						}
+					}
+				},
+				{
+					"note": "total = 161.00 - 16.10 = 144.90",
+					"argv": ["--json", "text", "#total"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$144.90"
+						}
+					}
+				},
+				{
+					"note": "review the order: this is the last step that belongs to the cart",
+					"argv": ["click", "#review-order"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the order summary is visible",
+					"argv": [
+						"wait",
+						"--selector",
+						"#summary-view.visible",
+						"--timeout",
+						"5000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the summary repeats both lines, with the mouse still at 3",
+					"argv": [
+						"extract",
+						"list",
+						"#summary-lines tbody tr",
+						"--fields",
+						"item:.item,qty:.qty,line:.line"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "2"
+						}
+					}
+				},
+				{
+					"note": "the summary's second line total is still $72.00",
+					"argv": [
+						"extract",
+						"list",
+						"#summary-lines tbody tr",
+						"--fields",
+						"item:.item,qty:.qty,line:.line"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.1.line",
+							"equals": "$72.00"
+						}
+					}
+				},
+				{
+					"note": "the summary shows the same subtotal, discount and total",
+					"argv": ["--json", "text", "#subtotal"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$161.00"
+						}
+					}
+				},
+				{
+					"note": "the summary total is $144.90",
+					"argv": ["--json", "text", "#total"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "$144.90"
+						}
+					}
+				},
+				{
+					"note": "STOP: the payment block was never revealed",
+					"argv": [
+						"wait",
+						"--selector",
+						"#payment-section.visible",
+						"--gone",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "no payment field was focused, typed into or changed",
+					"argv": ["--json", "attr", "body", "data-payment-touched"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0"
+						}
+					}
+				},
+				{
+					"note": "the reveal counter is still 0",
+					"argv": ["--json", "attr", "body", "data-payment-revealed"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "0"
+						}
+					}
+				},
+				{
+					"note": "POSITIVE CONTROL: the card field really exists in the DOM, so 'not touched' is a fact about behaviour, not about a missing element",
+					"argv": ["wait", "--selector", "#pay-card", "--timeout", "3000"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "POSITIVE CONTROL: the button that would reveal the payment block exists and was deliberately not clicked",
+					"argv": [
+						"wait",
+						"--selector",
+						"#continue-payment",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				}
+			]
+		}
+	]
+}

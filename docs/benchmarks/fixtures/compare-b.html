@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Aurora X2 e-reader — specifications (source B, list, local fixture)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; max-width: 720px; }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  .src { color: #666; font-size: 12px; margin: 0 0 14px; }
+  dl#spec-list { margin: 8px 0; }
+  dl#spec-list div { padding: 6px 0; border-bottom: 1px solid #eee; font-size: 13px; }
+  dt { display: inline-block; width: 120px; font-weight: bold; }
+  dd { display: inline; margin: 0; }
+  .price, .battery { display: inline-block; }
+  #missing-note { color: #b00; font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>Aurora X2 e-reader</h1>
+  <p class="src">Source B — a retailer's bullet list for the same product.</p>
+
+  <!-- Source B is a description LIST, not a table, and the weight is not stated
+       at all. A comparison must extract the same field names from both sources
+       and must leave the absent field empty rather than inventing a value. -->
+  <dl id="spec-list">
+    <div class="spec">
+      <dt>Price</dt><dd class="price">$229.00</dd>
+      <dt>Battery life</dt><dd class="battery">42 hours</dd>
+    </div>
+  </dl>
+
+  <p id="missing-note">Weight: not stated on this listing.</p>
+</body>
+</html>

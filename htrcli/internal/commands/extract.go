@@ -11,10 +11,21 @@ import (
 )
 
 var (
-	extractFields    string
-	extractContainer bool
-	extractVisible   bool
+	extractFields           string
+	extractContainer        bool
+	extractVisible          bool
+	extractNormalizeNumbers bool
 )
+
+// normalizeNumbersHelp documents --normalize-numbers for both subcommands.
+// It is opt-in: the default output stays the raw textContent read.
+const normalizeNumbersHelp = `
+--normalize-numbers opts into clean-up of number text the DOM flattens. It is
+OFF by default: without it the output is unchanged.
+  "299792458\u200d[2]"                     ->  "299792458"
+  "6.02214076×10<sup>23</sup>" flattened   ->  "6.02214076×10^23"
+Footnote markers are removed structurally, so a literal "[2]" in prose stays,
+and 1<sup>st</sup> keeps its normal "1st" rendering.`
 
 var extractCmd = &cobra.Command{
 	Annotations: FrameAwareAnnotations(),
@@ -43,7 +54,7 @@ Field selectors:
   ".a||.b"          ALTERNATIVES, first non-empty wins (read and unread rows
                     often use different classes); a || inside a quoted
                     attribute value is not a separator
-`,
+` + normalizeNumbersHelp,
 	Args: cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Dispatch to the right subcommand based on args[0].
@@ -62,6 +73,7 @@ var extractTableCmd = &cobra.Command{
 	Annotations: FrameAwareAnnotations(),
 	Use:         "table <selector>",
 	Short:       "Extract an HTML table into columns + rows",
+	Long:        "Extract an HTML table into columns + rows." + normalizeNumbersHelp,
 	Args:        cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runExtractTable(args[0])
@@ -80,11 +92,21 @@ var extractListCmd = &cobra.Command{
 a previous view (Gmail keeps the last list around). It needs
 Element.checkVisibility on the page (Chrome 105+, Firefox 125+) and fails
 instead of returning hidden rows when the page lacks it.
-`,
+` + normalizeNumbersHelp,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runExtractList(args[0])
 	},
+}
+
+// extractTableOptions carries --normalize-numbers to the page. It returns nil
+// when the flag is off, so the emitted payload has no "options" key at all and
+// stays byte-identical to the pre-flag shape.
+func extractTableOptions() map[string]any {
+	if !extractNormalizeNumbers {
+		return nil
+	}
+	return map[string]any{"normalizeNumbers": true}
 }
 
 func runExtractTable(selector string) error {
@@ -97,7 +119,7 @@ func runExtractTable(selector string) error {
 			return err
 		}
 		defer s.Close()
-		cmd := api.Command{ID: "1", Action: "extractTable", Target: parseSelector(selector)}
+		cmd := api.Command{ID: "1", Action: "extractTable", Target: parseSelector(selector), Options: extractTableOptions()}
 		result, err := cdp.ExecDOM(s, cmd)
 		if err != nil {
 			return err
@@ -117,7 +139,7 @@ func runExtractTable(selector string) error {
 	if err != nil {
 		return err
 	}
-	payload := api.Command{ID: "1", Action: "extractTable", Target: parseSelector(selector)}
+	payload := api.Command{ID: "1", Action: "extractTable", Target: parseSelector(selector), Options: extractTableOptions()}
 	result, err := c.ExecuteCommand(tabID, payload)
 	if err != nil {
 		return err
@@ -179,6 +201,9 @@ func runExtractList(selector string) error {
 	if extractVisible {
 		options["visibleOnly"] = true
 	}
+	if extractNormalizeNumbers {
+		options["normalizeNumbers"] = true
+	}
 	if UseCDP() {
 		s, _, err := cdpSession()
 		if err != nil {
@@ -227,6 +252,8 @@ func init() {
 	extractListCmd.Flags().StringVar(&extractFields, "fields", "", "Comma-separated name:selector pairs for list extraction")
 	extractListCmd.Flags().BoolVar(&extractContainer, "container", false, "Treat the selector as a container and use its children as the items")
 	extractListCmd.Flags().BoolVar(&extractVisible, "visible", false, "Skip items the page reports as hidden (rows an SPA left in the DOM)")
+	extractTableCmd.Flags().BoolVar(&extractNormalizeNumbers, "normalize-numbers", false, "Clean number text: strip zero-width joiners and footnote markers, render 10<sup>N</sup> as 10^N")
+	extractListCmd.Flags().BoolVar(&extractNormalizeNumbers, "normalize-numbers", false, "Clean number text: strip zero-width joiners and footnote markers, render 10<sup>N</sup> as 10^N")
 	extractCmd.AddCommand(extractTableCmd)
 	extractCmd.AddCommand(extractListCmd)
 	rootCmd.AddCommand(extractCmd)

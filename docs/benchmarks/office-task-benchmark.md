@@ -1,3 +1,14 @@
+---
+type: Unclassified
+title: htrcli Office-Task Benchmark
+description: 'htrcli office-task benchmark: the B-series task specs, the S-series offline fixtures, the bench harness (verdicts, judge, evidence, exclusions), the browser-use BU Bench V2.1 alignment (structure only, no imported task text), built offline proofs for B21–B24, a shape-only comparison with Browser Use''s published runs, and the judge validation record (stub-proven; real model NOT RUN).'
+tags:
+  - benchmark
+  - htrcli
+  - browser-automation
+  - judge
+timestamp: 2026-11-15T15:05:55Z
+---
 # htrcli Office-Task Benchmark
 
 Evaluation suite for htrcli (browser automation) on common cowork / office jobs.
@@ -22,7 +33,8 @@ so regressions or wins are visible. htrcli is the browser path under test.
 
 ## Metrics (record per run)
 
-- `success`: PASS / PARTIAL / FAIL
+- `success`: PASS / PARTIAL / FAIL (the harness also reports NOT_RUN, TIMEOUT
+  and EXCLUDED; none of those is a PASS)
 - `commands`: number of htrcli invocations
 - `wall_ms`: wall-clock milliseconds
 - `retries`: number of retries / recoveries
@@ -533,6 +545,308 @@ scenarios, not assertions.
   every harvest, so a row hidden on one pass and rendered on a later one is
   still collected once.
 
+## External alignment: browser-use BU Bench V2.1
+
+### Source and licence constraint
+
+The `browser-use/benchmark` repository publishes BU Bench V2.1: 200 tasks
+scored against weighted findings rubrics, with a continuous score and partial
+credit, judged by an LLM that receives the full rubric, the saved trajectory and
+the per-task screenshots. Its task dataset is encrypted (Fernet,
+`BU_Bench_V2.enc`), and `Stealth_Bench_V1.enc` holds the CAPTCHA and anti-bot
+tasks. The README states: "The tasks are encrypted to keep their text out of web
+crawlers and model training data. Please do not publish decrypted tasks or
+rubrics in plaintext or use them for model training."
+
+We adopt the structure only — taxonomy, protocol and scoring model. No task text
+is imported, and their dataset files must not be added to this repository.
+
+### Adopt / reject
+
+| Adopted | Rejected, with reason |
+|---|---|
+| • Task taxonomy for the four gaps below (B21–B24).<br>• Protocol rules: a hard per-task deadline, one attempt, no silent retry, an exclusions list, per-task evidence capture.<br>• An opt-in weighted-rubric score with partial credit, alongside the existing pass/fail result. | • Their encrypted task text — it cannot be decrypted by us and must not be published or used for training.<br>• A mandatory LLM-judge API key — the harness must stay runnable offline; a judge is opt-in and pluggable.<br>• Their SaaS browser backends — we drive local Chrome/Firefox through CDP or the extension.<br>• A 3,600 s default deadline — our tasks take minutes, not an hour. |
+
+### B21 — Shopping cart → order summary, stop before payment — P1
+- **App**: store web (offline fixture cart)
+- **Goal**: Add two distinct products, change one quantity, apply a coupon code,
+  and reach the order summary without entering a payment step.
+- **Proves**: The cart task is the single largest category in their suite (361 of
+  500 retained consumer tasks, all of which stop before checkout), and the
+  arithmetic is where a browser agent fails silently: a summary page that
+  renders can still show a subtotal that does not match its lines.
+- **Pass/fail**: Two distinct products added; one quantity changed; the coupon
+  applied; the order summary reached; NO payment step attempted; the printed
+  subtotal equals the sum of the line items and the discount is arithmetically
+  correct.
+- **Offline proof (built 2026-11-15)**: S24 (`scenarios/s24-cart.json`, 32
+  commands) drives `fixtures/cart.html` through `make bench-cart`. It adds two
+  products, changes one quantity, applies SAVE10, and stops at the summary: the
+  discount is exactly 10% of $161.00 = $16.10 (1610 cents, not a rounded 16
+  dollars), total $144.90. The payment block is proven untouched with a positive
+  control — the card field and the reveal button both exist and were not used —
+  and `data-payment-revealed` stays 0.
+
+### B22 — Public-information retrieval citing N=3 sources — P1
+- **App**: static reference pages
+- **Goal**: Answer one factual question from three independent pages, returning
+  each URL with the quoted supporting string.
+- **Proves**: Public-information retrieval is the other large category in their
+  suite (139 of 500), and its failure mode is not a wrong click but a confident
+  answer with no traceable source, or a silent pick when sources disagree.
+- **Pass/fail**: One answer; three URLs, each with the quoted supporting string;
+  when two pages disagree, the run says which it trusts and why.
+- **Offline proof (built 2026-11-15)**: S25 (`scenarios/s25-retrieval.json`, 16
+  commands) drives `fixtures/retrieval-1.html`..`-3.html` through
+  `make bench-retrieval`. All three pages answer the same question; pages 1 and
+  3 say 6,000 m and page 2 says 8,000 m. Each page's value and opaque source id
+  are captured, so the contradiction stays visible instead of being averaged or
+  silently replaced by the last read. The offline proxy proves the disagreement
+  is reported; it does not yet assert a trust narrative, which stays a driver
+  step.
+
+### B23 — Cross-site comparison table — P2
+- **App**: two or three product/offer sites
+- **Goal**: Compare the same product or offer across two to three sites and
+  produce a ranked table.
+- **Proves**: A comparison is the first task whose artifact is a join across
+  pages, so a row can be plausible and still untraceable — the failure is an
+  invented or carried-over cell, not a missed one.
+- **Pass/fail**: A ranked table with price and the deciding attribute for each
+  row; no row that is not traceable to a page; an explicit "not stated" where a
+  field is absent.
+- **Offline proof (built 2026-11-15)**: S26 (`scenarios/s26-compare.json`, 15
+  commands) drives `fixtures/compare-a.html` (table markup) and
+  `compare-b.html` (list markup) through `make bench-compare`. Both pages use
+  the same field names, so a row can be joined across pages; B deliberately does
+  not state the weight, and the field is reported empty rather than invented
+  (the page's own prose confirms the absence).
+
+### B24 — Anti-bot / CAPTCHA detection and report (never solve) — P2
+- **App**: any page serving a challenge
+- **Goal**: Recognise a challenge or access-block page, do NOT attempt to defeat
+  it, and report the run as blocked with evidence.
+- **Proves**: `Stealth_Bench_V1.enc` covers anti-bot behaviour; detection and
+  honest reporting are testable without ever solving a challenge, and the
+  existing safety rule already forbids solving one.
+- **Pass/fail**: The challenge or block recognised; no attempt to defeat it; the
+  run reported as blocked with the URL, the page title and the challenge marker.
+- **Offline proof (built 2026-11-15)**: S27 (`scenarios/s27-challenge.json`, 11
+  commands) drives `fixtures/challenge.html` through `make bench-challenge`.
+  The challenge marker and disabled checkbox are detected and reported, no
+  content element exists, and an attempted read of the answer fails (exit 1) —
+  the refusal is asserted, not just described.
+
+### Harness backlog (built 2026-11-15)
+
+- [x] Built: `deadline_seconds` per scenario — a hard stop reported as TIMEOUT,
+  with a per-step override.
+- [x] Built: `attempts` policy (default 1). A step's `retry` may not exceed
+  `attempts-1`.
+- [x] Built: `--evidence-dir` writes one full-output JSON artifact per step. It
+  does NOT capture screenshots or page HTML: that would need an extra browser
+  call per step.
+- [x] Built: `--exclusions <file>` takes `{"excluded":[{"id","reason"}]}`;
+  excluded IDs are reported EXCLUDED and counted separately.
+- [x] Built: `bench run --judge-cmd` weighted-rubric scoring with partial credit,
+  the judge invoked as a local argv so the offline contract holds. Pass/fail
+  remains the default.
+
+The offline contract is the default: no network, no API key, and no date or
+random dependence.
+
+### Harness schema and flags (built 2026-11-15)
+
+`htrcli bench run` now accepts these scenario fields:
+
+- `requires_network` (bool) — without `--allow-network` the verdict is
+  `NOT_RUN`, never PASS. It mirrors `requires_auth` exactly, so a suite cannot
+  silently depend on connectivity.
+- `usage` `{model,tokens_in,tokens_out}` — DRIVER-supplied token accounting.
+  htrcli spends no tokens; it echoes what the calling loop declares. An absent
+  `usage` prints an em-dash, never `0`, and a run-level total appears only when
+  at least one scenario declares it ("not measured" is not "free").
+- `deadline_seconds` — the scenario wall-clock budget; a step may override it.
+  A required step that exceeds its deadline is killed and reported `TIMEOUT`.
+- `attempts` (default 1) — caps a step's total attempts; a step's `retry` may
+  not exceed `attempts-1`.
+- `context` — injected as `--context <name>` into every step and included in
+  the reported argv.
+- `rubric` `[{id,weight,criterion}]` — ids are unique and every weight is > 0;
+  declaring a rubric without `--judge-cmd` is a load-time error.
+
+Flags: `--allow-network`, `--judge-cmd` (repeat once per argv element; never a
+shell string), `--judge-pass-score` (default 60), `--evidence-dir`,
+`--exclusions <file>`, plus the existing `--out`.
+
+Verdicts: `PASS`, `PARTIAL`, `FAIL`, `NOT_RUN`, `TIMEOUT`, `EXCLUDED`. The
+summary counts each separately; `NOT_RUN`, `TIMEOUT` and `EXCLUDED` can never
+count as PASS.
+
+Judge contract: stdin is
+`{"scenario":{"id","goal","app"},"rubric":[...],"evidence":{"steps":[...],"summary":{...}}}`;
+stdout is `{"scores":[{"id","score","reason"}]}` with each score in 0..1. The
+RUNNER computes the weighted total (0..100, `sum(weight*score)/sum(weight)`). A
+non-zero exit, unparsable output, an unknown/missing/duplicate id, or an
+out-of-range score is a judge error that FAILS the scenario — never a score of
+0. The report keeps the judge argv and the raw stdout. A judged scenario passes
+when the weighted score reaches the pass score; only a scenario whose steps
+finished PASS or PARTIAL is graded.
+
+Evidence: `--evidence-dir` writes
+`<dir>/<scenario-id>/<NNN>-step.json` with full, untruncated stdout/stderr.
+Screenshots are NOT captured.
+
+Exclusions: `{"excluded":[{"id","reason"}]}`; an unknown id or an empty reason
+is a hard error.
+
+### Fixes in this batch (2026-11-15)
+
+- `--judge-timeout` (default 120 s) bounds the judge process. A judge that
+  overruns is a judge error: the scenario FAILS. It is never recorded as a score
+  of 0.
+- `wait --selector "@eN" --cdp` resolves the ref through the persistent ref
+  store (its `backendNodeId`) instead of the page bundle's in-page registry, so
+  both the present and `--gone` cases work and the detached-ref path is
+  reachable. An unknown ref fails immediately and names it
+  (`wait: stale ref: … is not known in the CDP ref store`).
+
+### Known open defect — retry drops persistent flags
+
+`retry` does not forward persistent flags set before it (`--transport`,
+`--json`, `--tab`, `--token`, `--server`). `retry.go` reads
+`rootCmd.PersistentFlags()`, whose pflag `Visit` early-returns: cobra populates
+the EXECUTED command's merged flag set, not the root's, so the root set shows no
+changed flags and nothing is forwarded. Reproduced in a real browser run.
+`TestInheritedGlobalArgsForwardsOnlyChangedFlags` does not catch it — the test
+parses a `pflag.FlagSet` and then inspects that same set, so it never exercises
+cobra's merge. The fix direction is to read the executing command's flag set
+(filtered to persistent flags) instead of `rootCmd.PersistentFlags()`. Not fixed
+in this batch. The bench scenarios are unaffected today because they write
+`--transport` after `--` (inside the child argv); a hand-run
+`htrcli --transport cdp retry -- …` is affected.
+
+### Number fidelity — settled as opt-in
+
+`htrcli extract table|list --normalize-numbers` is implemented. Without the
+flag the output is byte-identical to before. With it:
+
+- U+200D zero-width joiners are removed.
+- A `<sup>` renders as `^N` only when its text is all digits AND it directly
+  follows `10`, `×10`, or `x10`. So `10<sup>23</sup>` becomes `10^23`, while
+  `1<sup>st</sup>` keeps its normal `1st` rendering.
+- Footnote markers are removed STRUCTURALLY — an `<a>`, `<sup>` or
+  footnote-class element inside the cell — never by regex. A literal `[2]` in
+  prose survives, and a footnote-ish `<sup>` wins over the exponent rule.
+
+Two real-page examples from B14:
+
+| Raw `textContent` | With `--normalize-numbers` |
+|---|---|
+| `"299792458\u200d[2]"` (zero-width joiner + footnote anchor) | `"299792458"` |
+| `"6.02214076×10<sup>23</sup>"`, flattened raw to `"6.02214076×1023"` | `"6.02214076×10^23"` |
+
+The CLI sends `options.normalizeNumbers: true` in the command payload; both
+`extractTable` and `extractList` honour it.
+
+### Session reuse — corrected record
+
+Named browser contexts already existed: `htrcli context list`, the persistent
+`--context` flag, and one isolated persistent `--user-data-dir` per context
+(`htrcli/internal/cdp/context.go`). What was missing was bench-level pinning,
+now solved by the scenario `context` field. A persisted profile is only
+*AUTHENTICATED* after a human logs in once; the harness cannot create that
+session.
+
+### Built offline proofs (S24–S28)
+
+S24–S27 pass against a real Chrome on CDP 9555 through the CDP transport:
+S24/B21 (32 commands), S25/B22 (16), S26/B23 (15), S27/B24 (11). The
+B12/B12a Slack pair (S28, 5 + 5 commands) is prepared but unexecuted:
+`requires_auth` reports `NOT_RUN`, never PASS. The fixture table below records
+what each proves.
+
+**Live addition (same day)**: S29/B22 (`scenarios/s29-b22-live.json`,
+`requires_network`) ran PASS read-only against three Wikipedia pages — 6
+commands, 2.09 s — with no login and no write.
+
+Fixtures are addressed through env vars (`BENCH_FIXTURE_CART`,
+`BENCH_FIXTURE_RETRIEVAL_1..3`, `BENCH_FIXTURE_COMPARE_A`/`_B`,
+`BENCH_FIXTURE_CHALLENGE`) expanded by the Make targets. Running a scenario
+JSON directly without those vars leaves a literal `${...}` and fails.
+
+### Judge validation — what is proven and what is not
+
+PROVEN end to end over real HTTP: `judges/openai-judge.sh` is env-only
+(requires `JUDGE_URL`, `JUDGE_MODEL`, `JUDGE_AUTH`; `JUDGE_API_TOKEN` only when
+`JUDGE_AUTH=bearer`, and the token reaches curl through a config file so it
+never appears in argv). Run against a stub OpenAI-compatible endpoint:
+
+- valid scores → PASS with a weighted **86.67** from score 0.9 (weight 2) and
+  score 0.8 (weight 1): `(2×0.9 + 1×0.8) / 3 × 100`;
+- an out-of-range score of 2 → **judge error**, the scenario FAILS, and no score
+  of 0 is invented.
+
+NOT RUN: a real local model. LM Studio serves on :1234 but requires an API
+token — the request 401s with "An LM Studio API token is required…" — and no
+chat-capable `.gguf` is installed for `llama-server` (a search of
+`~/.lmstudio/models` and `~/.cache/lm-studio/models` for GGUFs >100 MB
+returned nothing). To unblock, create a token under LM Studio → Settings →
+Developer, or supply `JUDGE_GGUF` for the llama.cpp wrapper.
+
+Therefore verdict QUALITY remains unmeasured: only the contract and the
+arithmetic are proven, and no real model output has ever been graded.
+
+### Honest limits
+
+- The judge's verdict QUALITY is unmeasured. The contract and the arithmetic
+  are proven over HTTP against a stub endpoint (see "Judge validation"), but no
+  real model is invoked by this repository.
+- `retry` still drops persistent flags set before it (see the known open defect
+  above): a step whose flags precede `retry` runs the child on the default
+  transport. The harness is unaffected today because it writes `--transport`
+  after `--`.
+- B02–B20 remain `NOT_RUN`: no authenticated sessions exist. Slack and the demo
+  tenants are prepared as `requires_auth` scenarios plus a runbook, not as
+  executed runs.
+- The upstream browser-use task text stays off-limits: it is encrypted, and
+  decrypted task text or rubrics must not be republished or used for training.
+  The source constraint above is unchanged.
+
+## Comparison with Browser Use (shape, not like-for-like)
+
+Provenance for their column: `official_results/*.json` in
+`browser-use/benchmark` at HEAD `77b4df3`. Each row is one 100-task run; cost is
+that run's total divided by the tasks it completed.
+
+| Run | tasks | success | steps/task | seconds/task | cost/task |
+|---|---|---|---|---|---|
+| bu-v4-opus-4-8 (Cloud API v4) | 100 | 85 | 29.9 | 218 | $1.121 |
+| bu-v4-luna (Cloud API v4) | 100 | 78 | 46.4 | 245 | $0.063 |
+| Browser Use 0.13.7 + claude-opus-4-7 | 100 | 74 | 19.8 | 478 | not recorded ($0.000) |
+| Browser Use 0.13.7 + gpt-5.6-luna | 100 | 31 | 7.1 | 68 | not recorded |
+| Browser Use 0.13.7 + gpt-5.5 | 100 | 66 | 17.6 | 371 | not recorded |
+| Browser Use 0.13.7 + qwen3.6-plus | 100 | 45 | 36.5 | 1130 | not recorded |
+
+Our runs today, in the same columns, measured by `htrcli bench run` (the report
+fields are `commands` and `wall_ms`):
+
+| Scenario | commands | seconds | verdict |
+|---|---|---|---|
+| S24 cart (offline fixture) | 32 | 0.83 | PASS |
+| S25 retrieval (3 offline pages) | 16 | 0.28 | PASS |
+| S26 comparison (2 offline pages) | 15 | 0.24 | PASS |
+| S27 challenge detect/refuse | 11 | 0.18 | PASS |
+| B22 live, 3 Wikipedia pages | 6 | 2.09 | PASS |
+
+These numbers are NOT a score against their benchmark. The task sets differ:
+their runs are 100 tasks; ours are four offline fixtures plus one live scenario.
+There is also no LLM in our loop — the driver is this session's tool calls, not a
+model choosing actions. So our figures measure harness overhead per task, not
+agent competence. Only the SHAPE is comparable: steps/task, seconds/task,
+success rate, and cost where a run recorded one. Our token column stays `—`
+until a driver supplies `usage`.
+
 ## Running the benchmark
 
 The harness is `htrcli bench run <scenario-file>`. A scenario file is JSON
@@ -584,7 +898,9 @@ The harness is `htrcli bench run <scenario-file>`. A scenario file is JSON
   hard-coded text.
 
 Verdicts: PASS (all steps met their expectations), PARTIAL (only optional
-steps failed), FAIL (a required step failed), NOT_RUN (skipped).
+steps failed), FAIL (a required step failed), NOT_RUN (skipped), TIMEOUT (a
+required step exceeded its deadline), EXCLUDED (skipped by `--exclusions`).
+None of NOT_RUN, TIMEOUT or EXCLUDED is ever a PASS.
 
 The report is written to `--out` (default
 `docs/benchmarks/results/<timestamp>.json`) and holds the per-step exit code,
@@ -621,6 +937,11 @@ a three-step survey wizard whose answers live in the page's model).
 | S21 | `scenarios/s21-survey-fixture.json` | B20 three-page survey: per-question and per-row gates, Back restoring radio/select from the model, multi-select add and remove, 10-character boundary (9 refused, 10 accepted), second submission refused, confirmation + response list survive `reload` |
 | S22 | `scenarios/s22-finance-fixture.json` | B18 read-only statement: current vs available balance, period filter moving rows/total but never the balance, running balance reconciling with the header, account-scoped reads, and a live access log proving NO write (zero transfer entries, `data-writes` 0) across a `reload` |
 | S23 | `scenarios/s23-store-fixture.json` | B16 re-order: quantities carried over while prices come from today's catalogue (one line disagrees), a discontinued line shown but excluded from subtotal and review, shipping included in the grand total, sequential address-then-payment gates, a NEW order id captured (source order untouched), zero 1-click and zero new-card use, and a two-step cancel that survives a `reload` |
+| S24 | `scenarios/s24-cart.json` | B21 cart → order summary: two products, one quantity change, SAVE10 = $16.10, total $144.90, payment block never revealed (32 commands) |
+| S25 | `scenarios/s25-retrieval.json` | B22 three-page retrieval: page 2 contradicts pages 1 and 3, both values and source ids captured (16 commands) |
+| S26 | `scenarios/s26-compare.json` | B23 join across table and list markup: the field absent on B is reported empty, not invented (15 commands) |
+| S27 | `scenarios/s27-challenge.json` | B24 challenge: detection and refusal asserted, nothing behind the challenge extracted (11 commands) |
+| S28 | `scenarios/s28-slack.json` | B12/B12a Slack: `requires_auth`, reports NOT_RUN, never PASS (5 + 5 commands) |
 
 ```bash
 make bench-smoke      # S01
@@ -640,9 +961,14 @@ make bench-social     # S20
 make bench-survey     # S21
 make bench-finance    # S22
 make bench-store      # S23
+make bench-cart       # S24
+make bench-retrieval  # S25
+make bench-compare    # S26
+make bench-challenge  # S27
+make bench-slack      # S28 (NOT_RUN offline)
 ```
 
-Both need a Chrome on the CDP port (9555 by default in
+Every target needs a Chrome on the CDP port (9555 by default in
 `~/.htrcli/config.json`).
 
 ### Safety when running the real scenarios

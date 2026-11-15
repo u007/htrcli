@@ -1,0 +1,123 @@
+{
+	"scenarios": [
+		{
+			"id": "B12",
+			"ref": "B12",
+			"app": "Slack web (live workspace required)",
+			"goal": "Post a message to a channel. This scenario needs an authenticated Slack session and the network; it is reported as NOT_RUN without them and must never be recorded as PASS offline.",
+			"requires_auth": true,
+			"requires_network": true,
+			"steps": [
+				{
+					"note": "open the channel (unauthenticated access lands on the sign-in page, so this cannot pass offline)",
+					"argv": ["open", "https://app.slack.com/client/T024BE7LD/C08GENERAL"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "the message composer is only rendered for a signed-in member",
+					"argv": [
+						"wait",
+						"--selector",
+						"[data-qa='message_input']",
+						"--timeout",
+						"30000"
+					],
+					"retry": 2,
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "compose the message",
+					"argv": [
+						"fill",
+						"[data-qa='message_input']",
+						"Benchmark check-in: posting from the automation harness."
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "send it",
+					"argv": ["click", "[data-qa='texty_send_button']"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the channel transcript now shows the posted text",
+					"argv": ["--json", "text", "[data-qa='message_content']"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Benchmark check-in"
+					}
+				}
+			]
+		},
+		{
+			"id": "B12a",
+			"ref": "B12a",
+			"app": "Slack web (live workspace required)",
+			"goal": "Reply in a thread. Like B12 this needs an authenticated session and the network; without them the scenario is NOT_RUN, never PASS.",
+			"requires_auth": true,
+			"requires_network": true,
+			"steps": [
+				{
+					"note": "open an existing thread in the channel",
+					"argv": [
+						"open",
+						"https://app.slack.com/client/T024BE7LD/C08GENERAL/thread/C08GENERAL-1760000000.000100"
+					],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "the thread reply composer is only rendered for a signed-in member",
+					"argv": [
+						"wait",
+						"--selector",
+						"[data-qa='reply_input']",
+						"--timeout",
+						"30000"
+					],
+					"retry": 2,
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "compose the reply",
+					"argv": [
+						"fill",
+						"[data-qa='reply_input']",
+						"Thread reply from the automation harness."
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "send the reply",
+					"argv": ["click", "[data-qa='send_reply_button']"],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "the thread now shows the reply",
+					"argv": ["--json", "text", "[data-qa='message_content']"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Thread reply from the automation harness"
+					}
+				}
+			]
+		}
+	]
+}

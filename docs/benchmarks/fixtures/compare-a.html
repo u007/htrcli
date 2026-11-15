@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Aurora X2 e-reader — specifications (source A, table, local fixture)</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; max-width: 720px; }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  .src { color: #666; font-size: 12px; margin: 0 0 14px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  th, td { text-align: left; padding: 6px 8px; border: 1px solid #ddd; font-size: 13px; }
+  th { background: #f3f3f3; }
+</style>
+</head>
+<body>
+  <h1>Aurora X2 e-reader</h1>
+  <p class="src">Source A — the manufacturer's specification table.</p>
+
+  <!-- Source A is a TABLE. Source B lists the same three fields with different
+       markup. A joined comparison needs the same field names out of both. -->
+  <table id="spec-table">
+    <thead>
+      <tr><th>Price</th><th>Battery life</th><th>Weight</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="price">$229.00</td>
+        <td class="battery">42 hours</td>
+        <td class="weight">182 g</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p class="src">Table markup: one row, one column per field.</p>
+</body>
+</html>

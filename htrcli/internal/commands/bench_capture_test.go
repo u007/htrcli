@@ -312,3 +312,44 @@ func TestRunBenchScenarioExpectationUnresolvedCaptureFails(t *testing.T) {
 		t.Fatalf("failure = %q, want the unresolved name visible", res.Steps[0].Failure)
 	}
 }
+
+// TestRunBenchScenarioUnresolvedCaptureCannotSatisfyNegativeAssertion proves a
+// negative assertion cannot pass vacuously. An OPTIONAL capture step fails, so
+// the literal ${depth_2} survives into the later assertion; comparing that
+// literal never matches the output, which used to report the step OK. This is
+// the S25 shape (stdoutNotContains on a captured value) with the capture
+// missing, and the judge would otherwise promote the PARTIAL to a PASS.
+func TestRunBenchScenarioUnresolvedCaptureCannotSatisfyNegativeAssertion(t *testing.T) {
+	runner := expectRunner(map[string]string{
+		"--json text #answer": `{"data":"6,000 m"}`,
+	})
+	s := BenchScenario{
+		ID: "S25",
+		Steps: []BenchStep{
+			{
+				// Optional: a broken capture only downgrades the verdict, so
+				// the unresolved name must still fail the later assertion.
+				Argv:     []string{"--json", "text", "#answer"},
+				Optional: true,
+				Capture:  map[string]string{"depth_2": "missing.path"},
+			},
+			{
+				Argv:   []string{"--json", "text", "#answer"},
+				Expect: &BenchExpect{StdoutNotContains: "${depth_2}"},
+			},
+		},
+	}
+	res := runBenchScenario(s, runner)
+	if res.Steps[0].OK {
+		t.Fatalf("optional capture step = %+v, want the capture to fail", res.Steps[0])
+	}
+	if res.Steps[1].OK {
+		t.Fatalf("negative assertion passed vacuously on the unresolved ${depth_2}")
+	}
+	if !strings.Contains(res.Steps[1].Failure, "unresolved capture") {
+		t.Fatalf("failure = %q, want it to name the unresolved capture", res.Steps[1].Failure)
+	}
+	if res.Verdict != VerdictFail {
+		t.Fatalf("verdict = %q, want FAIL for a required step with an unresolved capture", res.Verdict)
+	}
+}

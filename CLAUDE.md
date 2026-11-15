@@ -2,6 +2,42 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Vision
+
+Be the fastest browser harness an AI agent can drive, and prove it with numbers
+rather than adjectives. The competitive set is Browser Use, Claude for Chrome and
+ChatGPT's browser agent.
+
+Four claims, in priority order:
+
+1. **Fewest steps per task.** One command per intent — `extract list`, `collect`,
+   `fill-form`, `upload`, `wait` — instead of a click-by-click loop. Steps are
+   counted, never estimated: `bench run` records `commands` per scenario and
+   `index`/`attempts` per step.
+2. **Reusable, secure sessions.** A session authenticated once is reused across
+   runs instead of re-earned per task. Reuse must not weaken isolation: bearer
+   tokens appear only as fingerprints, never in argv or in a report, and a
+   cached profile stays scoped to the browser that created it. Built at bench
+   level today (a scenario `context` pins one named persistent profile); the
+   profile is only *authenticated* after a human logs in once.
+3. **Accuracy before speed.** A fast wrong answer is a loss. Extracted values
+   must survive real markup — flattened superscripts, footnote anchors,
+   virtualized lists, attribute-only fields — and every claim must trace back to
+   a page.
+4. **Comparable numbers.** Every run is reported as pass rate, steps
+   (`commands`), wall-clock (`wall_ms`) and retries, so a comparison with
+   Browser Use is a table, not a claim.
+
+Measured today: `bench run` records `wall_ms` and `commands` per scenario, and
+`attempts` plus `wall_ms` per step. **Not measured:** token/usage cost — usage is
+spent by the calling agent loop, so a comparison must say where the number came
+from instead of implying the harness measured it.
+
+Upstream reference: `browser-use/benchmark` reports score against cost per task
+(weighted rubric, partial credit). Match the metric shape; do not import their
+task text — it is encrypted and the README forbids republishing it. Adoption
+detail lives in `docs/benchmarks/office-task-benchmark.md`.
+
 ## Commands
 
 ```bash
@@ -41,8 +77,11 @@ make bench-smoke     # Run one offline benchmark scenario (also: bench-office,
                      # bench-tasks, bench-form, bench-booking, bench-expense,
                      # bench-files, bench-mail, bench-crm, bench-messaging,
                      # bench-research, bench-tickets, bench-leave,
-                     # bench-social, bench-survey, bench-finance, bench-store;
-                     # all need a real Chrome on the CDP port)
+                     # bench-social, bench-survey, bench-finance, bench-store,
+                     # bench-cart, bench-retrieval, bench-compare,
+                     # bench-challenge, bench-slack;
+                     # all need a real Chrome on the CDP port, and bench-slack
+                     # reports NOT_RUN because it requires auth)
 ```
 
 ### Benchmark harness

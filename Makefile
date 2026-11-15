@@ -13,6 +13,11 @@
 		bench-finance \
 		bench-store \
 		bench-research \
+		bench-cart \
+		bench-retrieval \
+		bench-compare \
+		bench-challenge \
+		bench-slack \
 		htrcli-build htrcli-build-all htrcli-build-linux htrcli-install htrcli-clean \
 		ext-build ext-dev ext-zip firefox-build firefox-install firefox-zip
 
@@ -133,6 +138,27 @@ bench-store: htrcli-build
 
 bench-research: htrcli-build
 	$(call bench_run,BENCH_FIXTURE_RESEARCH_A="$(BENCH_FIXTURES)/research-source-a.html" BENCH_FIXTURE_RESEARCH_B="$(BENCH_FIXTURES)/research-source-b.html" BENCH_FIXTURE_RESEARCH_SUMMARY="$(BENCH_FIXTURES)/research-summary.html",s16-research-fixture.json,research)
+
+# Cart: add both products, set one quantity, apply a coupon, stop at the summary
+# (the payment block is never revealed).
+bench-cart: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_CART="$(BENCH_FIXTURES)/cart.html",s24-cart.json,cart)
+
+# Retrieval: the same question on three pages, one of which contradicts the other two.
+bench-retrieval: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_RETRIEVAL_1="$(BENCH_FIXTURES)/retrieval-1.html" BENCH_FIXTURE_RETRIEVAL_2="$(BENCH_FIXTURES)/retrieval-2.html" BENCH_FIXTURE_RETRIEVAL_3="$(BENCH_FIXTURES)/retrieval-3.html",s25-retrieval.json,retrieval)
+
+# Comparison: the same three fields out of a table and out of a list.
+bench-compare: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_COMPARE_A="$(BENCH_FIXTURES)/compare-a.html" BENCH_FIXTURE_COMPARE_B="$(BENCH_FIXTURES)/compare-b.html",s26-compare.json,compare)
+
+# Challenge: detect and report a bot check; nothing behind it is extracted.
+bench-challenge: htrcli-build
+	$(call bench_run,BENCH_FIXTURE_CHALLENGE="$(BENCH_FIXTURES)/challenge.html",s27-challenge.json,challenge)
+
+# Slack: needs an authenticated session, so it is reported NOT_RUN offline.
+bench-slack: htrcli-build
+	$(call bench_run,,s28-slack.json,slack)
 
 # ── Extension ──────────────────────────────────────────────────────────
 

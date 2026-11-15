@@ -1,0 +1,68 @@
+{
+  "started_at": "2026-01-02T03:04:05Z",
+  "transport": "ext",
+  "scenarios": [
+    {
+      "id": "B01",
+      "goal": "find the totals",
+      "verdict": "PASS",
+      "commands": 1,
+      "wall_ms": 12,
+      "retries": 0,
+      "steps": [
+        {
+          "index": 1,
+          "argv": [
+            "open",
+            "https://x"
+          ],
+          "ok": true,
+          "exit_code": 0,
+          "attempts": 1,
+          "wall_ms": 12,
+          "stdout": "ok"
+        }
+      ],
+      "judge": {
+        "cmd": [
+          "/tmp/judge",
+          "--flag"
+        ],
+        "pass_score": 60,
+        "score": 75,
+        "scores": [
+          {
+            "id": "accuracy",
+            "score": 1,
+            "reason": "right"
+          },
+          {
+            "id": "brevity",
+            "score": 0,
+            "reason": "too long"
+          }
+        ],
+        "raw_stdout": "{\"scores\":[]}"
+      }
+    },
+    {
+      "id": "B02",
+      "verdict": "EXCLUDED",
+      "commands": 0,
+      "wall_ms": 0,
+      "retries": 0,
+      "failure_mode": "no browser",
+      "steps": []
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "pass": 1,
+    "partial": 0,
+    "fail": 0,
+    "not_run": 0,
+    "timeout": 0,
+    "excluded": 1,
+    "wall_ms": 12
+  }
+}

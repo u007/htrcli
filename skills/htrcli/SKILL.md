@@ -528,6 +528,13 @@ htrcli wait --selector ".row[data-idx='3']" --gone --timeout 5000
 matches and the wait times out. `--gone` cannot be combined with `--text` or
 `--url`.
 
+Over `--cdp`, `--selector` also accepts a persistent `@eN` ref, and `--gone`
+works with one: `wait --selector "@e1" --cdp` resolves the ref through the
+persistent ref store (`~/.htrcli/refs.json` → `backendNodeId`) before polling,
+so a ref minted by an earlier `find … --ref` is usable here. `--selector` is the
+flag form (`--selector "@e1"`), not a positional argument. An unknown ref fails
+immediately as a stale ref instead of polling.
+
 A selector that never matched also satisfies `--gone` immediately, so on a row
 that might not exist yet, `wait --selector` for its presence first — otherwise
 a typo passes vacuously.
@@ -594,6 +601,24 @@ A scenario is a list of steps, each a raw htrcli argv plus its expectations:
   one place.
 - `optional: true` downgrades a failing step to PARTIAL.
 - `requires_auth: true` is reported as NOT_RUN, never as PASS.
+- `requires_network: true` is NOT_RUN unless the run passed `--allow-network`
+  (`"requires_network": true`). Offline is the default.
+- `usage` is DRIVER-SUPPLIED token accounting; htrcli never measures it:
+  `"usage": {"model": "x", "tokens_in": 1200, "tokens_out": 340}`. Absent,
+  the report prints `—`, never `0`.
+- `deadline_seconds` bounds the whole scenario (`"deadline_seconds": 30`). A
+  step may override it with its own `deadline_seconds`; an overrun is killed
+  and reported as TIMEOUT.
+- `attempts` caps a step's total attempts (`"attempts": 3`). It is optional:
+  absent means no declared cap; a step with no `retry` still runs once. When
+  declared, a step's `retry` may not exceed `attempts-1` (`retry: 2` needs
+  `attempts: 3`); the file is rejected otherwise.
+- `context` injects `--context <name>` into every step (`"context": "work"`)
+  — the way a scenario reuses a named persistent profile.
+- `rubric` lists weighted grading criteria
+  (`{"id": "accuracy", "weight": 2, "criterion": "the list is correct"}`)
+  and requires `--judge-cmd`; a rubric without a judge is rejected at load
+  time.
 - `${VAR}` in an argv expands from the environment.
 
 `capture` carries a value from one step into a later one — the only way to
@@ -668,9 +693,64 @@ htrcli --json attr "#messages .message[data-message-id='m2']" data-reply-count
 - Switch channel and back, then re-read the count: that is the only check that
   separates model state from a DOM append.
 
-Verdicts: PASS / PARTIAL / FAIL / NOT_RUN. The report holds the per-step
-exit code, attempts, wall time and output, plus the per-scenario
-`commands`/`wall_ms`/`retries`/`failure_mode` metrics.
+### Verdicts
+
+PASS / PARTIAL / FAIL / NOT_RUN / TIMEOUT / EXCLUDED. NOT_RUN, TIMEOUT and
+EXCLUDED are never counted as PASS: NOT_RUN means the scenario was skipped
+(auth or network), TIMEOUT means a required step overran its deadline, and
+EXCLUDED means `--exclusions` skipped it and ran no step. PARTIAL is a pass
+with failed optional steps. A judge error FAILS the scenario — it is never
+reported as a zero score.
+
+The report holds the per-step exit code, attempts, wall time and output, plus
+the per-scenario `commands`/`wall_ms`/`retries`/`failure_mode` metrics.
+
+### `bench run` flags
+
+| flag | meaning | default |
+|---|---|---|
+| `--allow-network` | run scenarios marked `requires_network`; offline is the default | off |
+| `--judge-cmd ARG` | judge argv; repeat once per argument (`--judge-cmd /path/judge --judge-cmd --flag`), never a shell string | — |
+| `--judge-pass-score N` | minimum weighted judge score (0..100) for a judged PASS | 60 |
+| `--judge-timeout SEC` | judge deadline; an overrun is a judge error that FAILS the scenario | 120 |
+| `--evidence-dir DIR` | one artifact per step at `<dir>/<scenario-id>/<NNN>-step.json` with untruncated stdout/stderr; screenshots are NOT captured | — |
+| `--exclusions FILE` | JSON file `{"excluded":[{"id","reason"}]}`; an unknown id is an error | — |
+| `--out FILE` | report path | `docs/benchmarks/results/<timestamp>.json` |
+
+### Judge contract
+
+With `--judge-cmd`, the runner sends the judge this document on **stdin**:
+
+```json
+{"scenario": {"id": "B01", "goal": "...", "app": "..."},
+ "rubric": [{"id": "accuracy", "weight": 2, "criterion": "..."}],
+ "evidence": {"steps": [...],
+   "summary": {"commands": 4, "retries": 0, "wall_ms": 1200,
+               "steps": 3, "passed": 3, "failed": 0}}}
+```
+
+The judge must print on **stdout**:
+
+```json
+{"scores": [{"id": "accuracy", "score": 0.5, "reason": "..."}]}
+```
+
+`score` is 0..1. Every rubric id must appear exactly once; an unknown, missing
+or duplicate id, a score outside 0..1, a bad exit, unparsable output or a judge
+timeout is a judge error that FAILS the scenario. The runner computes the
+weighted total `sum(weight*score)/sum(weight)` and reports it 0..100.
+
+### Make targets
+
+These need a real Chrome on the `--cdp` port; the fixtures are offline:
+
+```bash
+make bench-cart         # cart: add products, set a quantity, apply a coupon, stop at summary
+make bench-retrieval    # the same question on three pages, one contradicts the others
+make bench-compare      # the same three fields out of a table and out of a list
+make bench-challenge    # detect a bot check and report it; extract nothing behind it
+make bench-slack        # needs an authenticated session → reports NOT_RUN offline
+```
 
 ## Screenshots
 
@@ -727,6 +807,8 @@ htrcli extract table <selector>     # HTML table -> {columns, rows}
 htrcli extract list <selector>       # List of items -> {items}
 htrcli extract list <selector> --fields "name:.name,age:.age"
 htrcli extract list <selector> --fields "title:.title,due:@data-due"   # @attr = an attribute
+htrcli extract table <selector> --normalize-numbers   # clean number text (opt-in)
+htrcli extract list <selector> --normalize-numbers
 # Zero matches is an ERROR (Element not found), deliberately: a typo'd selector
 # must not read as "no data". To assert emptiness, use :empty instead:
 #   htrcli wait --selector "#thread-replies:empty"
@@ -737,6 +819,20 @@ htrcli value <selector>             # Input value
 htrcli attr <selector> <attr>       # Attribute value (e.g. href, src)
 htrcli html <selector>              # innerHTML
 htrcli snapshot                     # Accessibility snapshot tree with refs
+```
+
+`--normalize-numbers` is **opt-in and OFF by default**, so raw output stays
+unchanged. It removes U+200D zero-width joiners, strips footnote markers
+structurally (a footnote anchor or footnote-ish `<sup>` is recognised as an
+element, so a literal `[2]` in prose is kept), and renders `<sup>` as `^N`
+only when the digits are all numeric and follow `10`/`×10`/`x10`. So a
+`1<sup>st</sup>` ordinal stays `1st`, and a footnote-ish `<sup>` wins over the
+exponent rule. Examples:
+
+```text
+"299792458\u200d[2]"                ->  "299792458"
+6.02214076×10<sup>23</sup>          ->  "6.02214076×10^23"
+   (textContent flattens it to "6.02214076×1023")
 ```
 
 **Virtualized lists:** `findAll` only sees the rows currently in the DOM. Long

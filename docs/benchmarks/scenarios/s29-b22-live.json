@@ -1,0 +1,47 @@
+{
+	"scenarios": [
+		{
+			"id": "B22",
+			"ref": "S29",
+			"app": "public reference pages (Wikipedia)",
+			"goal": "Answer one factual question from three independent pages, citing each source. Live, read-only.",
+			"requires_network": true,
+			"deadline_seconds": 120,
+			"steps": [
+				{
+					"argv": ["open", "https://en.wikipedia.org/wiki/Speed_of_light"],
+					"expect": { "exit": 0 },
+					"note": "source 1"
+				},
+				{
+					"argv": ["eval", "document.body.innerText.includes('299792458')"],
+					"expect": { "stdoutContains": "true" },
+					"note": "source 1 carries the value"
+				},
+				{
+					"argv": ["open", "https://en.wikipedia.org/wiki/Metre"],
+					"expect": { "exit": 0 },
+					"note": "source 2"
+				},
+				{
+					"argv": ["eval", "document.body.innerText.includes('299792458')"],
+					"expect": { "stdoutContains": "true" },
+					"note": "source 2 carries the same value"
+				},
+				{
+					"argv": [
+						"open",
+						"https://en.wikipedia.org/wiki/International_System_of_Units"
+					],
+					"expect": { "exit": 0 },
+					"note": "source 3"
+				},
+				{
+					"argv": ["eval", "document.body.innerText.includes('299792458')"],
+					"expect": { "stdoutContains": "true" },
+					"note": "source 3 carries the same value"
+				}
+			]
+		}
+	]
+}

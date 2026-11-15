@@ -571,3 +571,190 @@ describe("extractList at the executor level", () => {
 		expect(res.data?.items).toEqual([{ name: "Alice" }, { name: "Bob" }]);
 	});
 });
+
+describe("extractTable — number fidelity (opt-in)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	const rawTable = () => {
+		document.body.innerHTML = `
+			<table id="t"><tbody>
+				<tr>
+					<td>299792458\u200d<a href="#fn2">[2]</a></td>
+					<td>6.02214076×10<sup>23</sup></td>
+				</tr>
+			</tbody></table>`;
+		const el = document.getElementById("t");
+		if (!el) throw new Error("missing table");
+		return el;
+	};
+
+	it("default keeps the raw zero-width joiner and flattened exponent", () => {
+		const r = extractTable(rawTable());
+		expect(r.rows[0].col1).toBe("299792458\u200d[2]");
+		expect(r.rows[0].col2).toBe("6.02214076×1023");
+	});
+
+	it("flag removes the joiner and renders the exponent as ^", () => {
+		const r = extractTable(rawTable(), { normalizeNumbers: true });
+		expect(r.rows[0].col1).toBe("299792458");
+		expect(r.rows[0].col2).toBe("6.02214076×10^23");
+	});
+
+	it("leaves an ordinal superscript unchanged", () => {
+		document.body.innerHTML = `
+			<table id="t"><tbody><tr><td>1<sup>st</sup> place</td></tr></tbody></table>`;
+		const el = document.getElementById("t");
+		if (!el) throw new Error("missing table");
+		const r = extractTable(el, { normalizeNumbers: true });
+		expect(r.rows[0].col1).toBe("1st place");
+	});
+
+	it("strips a footnote anchor and the empty brackets it was wrapped in", () => {
+		document.body.innerHTML = `
+			<table id="t"><tbody>
+				<tr><td>299792458\u200d<a href="#fn2">[2]</a></td></tr>
+				<tr><td>Note (<a href="#fn1">[1]</a>)</td></tr>
+			</tbody></table>`;
+		const el = document.getElementById("t");
+		if (!el) throw new Error("missing table");
+		const r = extractTable(el, { normalizeNumbers: true });
+		expect(r.rows[0].col1).toBe("299792458");
+		expect(r.rows[1].col1).toBe("Note");
+	});
+
+	it("keeps a literal [2] in prose and one inside a plain element", () => {
+		// The strip is element-based: "[2]" that is only text is never a marker.
+		document.body.innerHTML = `
+			<table id="t"><tbody>
+				<tr><td>See [2] for details</td></tr>
+				<tr><td>a<span>[2]</span>b</td></tr>
+			</tbody></table>`;
+		const el = document.getElementById("t");
+		if (!el) throw new Error("missing table");
+		const r = extractTable(el, { normalizeNumbers: true });
+		expect(r.rows[0].col1).toBe("See [2] for details");
+		expect(r.rows[1].col1).toBe("a[2]b");
+	});
+
+	it("lets a footnote-ish <sup> win over the exponent rule", () => {
+		document.body.innerHTML = `
+			<table id="t"><tbody>
+				<tr><td>10<sup class="footnote">23</sup></td></tr>
+				<tr><td>110<sup>3</sup></td></tr>
+			</tbody></table>`;
+		const el = document.getElementById("t");
+		if (!el) throw new Error("missing table");
+		const r = extractTable(el, { normalizeNumbers: true });
+		expect(r.rows[0].col1).toBe("10");
+		// "110" is not "10", so this is not an exponent.
+		expect(r.rows[1].col1).toBe("1103");
+	});
+
+	it("keeps an ordinary numeric link", () => {
+		document.body.innerHTML = `
+			<table id="t"><tbody>
+				<tr><td>See <a href="/p/2">2</a></td></tr>
+				<tr><td>Year <a>2024</a></td></tr>
+			</tbody></table>`;
+		const el = document.getElementById("t");
+		if (!el) throw new Error("missing table");
+		const r = extractTable(el, { normalizeNumbers: true });
+		expect(r.rows[0].col1).toBe("See 2");
+		expect(r.rows[1].col1).toBe("Year 2024");
+	});
+
+	it("keeps an element with a generic reference class", () => {
+		document.body.innerHTML = `
+			<table id="t"><tbody>
+				<tr><td><span class="reference-item">2</span></td></tr>
+			</tbody></table>`;
+		const el = document.getElementById("t");
+		if (!el) throw new Error("missing table");
+		const r = extractTable(el, { normalizeNumbers: true });
+		expect(r.rows[0].col1).toBe("2");
+	});
+
+	it("strips a genuine note reference and cleans its brackets", () => {
+		document.body.innerHTML = `
+			<table id="t"><tbody>
+				<tr><td>Note (<a href="#cite_note-2" role="doc-noteref">[2]</a>)</td></tr>
+			</tbody></table>`;
+		const el = document.getElementById("t");
+		if (!el) throw new Error("missing table");
+		const r = extractTable(el, { normalizeNumbers: true });
+		expect(r.rows[0].col1).toBe("Note");
+	});
+
+	it("collapses whitespace only around a removed marker", () => {
+		document.body.innerHTML = `
+			<table id="t"><tbody>
+				<tr><td>a  b\tc</td></tr>
+				<tr><td>a <a href="#fn1">[1]</a> b</td></tr>
+			</tbody></table>`;
+		const el = document.getElementById("t");
+		if (!el) throw new Error("missing table");
+		const r = extractTable(el, { normalizeNumbers: true });
+		expect(r.rows[0].col1).toBe("a  b\tc");
+		expect(r.rows[1].col1).toBe("a b");
+	});
+});
+
+describe("extractList — number fidelity (opt-in)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("cleans a field value only when the flag is set", () => {
+		document.body.innerHTML = `
+			<div id="l">
+				<div class="row">
+					<span class="v">6.02214076×10<sup>23</sup><a href="#fn2">[2]</a></span>
+				</div>
+			</div>`;
+		const el = document.getElementById("l");
+		if (!el) throw new Error("missing list");
+
+		const raw = extractList(el, { v: ".v" });
+		expect(raw.items).toEqual([{ v: "6.02214076×1023[2]" }]);
+
+		const clean = extractList(el, { v: ".v" }, { normalizeNumbers: true });
+		expect(clean.items).toEqual([{ v: "6.02214076×10^23" }]);
+	});
+
+	it("cleans item text when no fields are given", () => {
+		document.body.innerHTML = `
+			<div id="l"><div class="row">299792458\u200d<a href="#fn2">[2]</a></div></div>`;
+		const el = document.getElementById("l");
+		if (!el) throw new Error("missing list");
+		const clean = extractList(el, undefined, { normalizeNumbers: true });
+		expect(clean.items).toEqual([{ text: "299792458" }]);
+	});
+
+	it("honours normalizeNumbers through the command payload", async () => {
+		document.body.innerHTML = `
+			<div class="row"><span class="v">299792458\u200d<a href="#fn2">[2]</a></span></div>`;
+		const { executeCommand } = await import("./commandExecutor");
+		const res = (await executeCommand({
+			id: "1",
+			action: "extractList",
+			target: { selector: ".row" },
+			options: { fields: { v: ".v" }, normalizeNumbers: true },
+		})) as { data?: { items?: unknown[] } };
+		expect(res.data?.items).toEqual([{ v: "299792458" }]);
+	});
+
+	it("honours normalizeNumbers for extractTable through the payload", async () => {
+		document.body.innerHTML = `
+			<table id="t"><tbody><tr><td>6.02214076×10<sup>23</sup></td></tr></tbody></table>`;
+		const { executeCommand } = await import("./commandExecutor");
+		const res = (await executeCommand({
+			id: "1",
+			action: "extractTable",
+			target: { selector: "#t" },
+			options: { normalizeNumbers: true },
+		})) as { data?: { rows?: Array<Record<string, string>> } };
+		expect(res.data?.rows?.[0].col1).toBe("6.02214076×10^23");
+	});
+});

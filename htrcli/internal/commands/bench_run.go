@@ -1,12 +1,17 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -28,6 +33,9 @@ type BenchStepResult struct {
 	Attempts int `json:"attempts"`
 	// WallMS is the step's total wall-clock time in milliseconds.
 	WallMS int64 `json:"wall_ms"`
+	// TimedOut reports that the step exceeded its deadline and was killed.
+	// A timed-out step always fails, even when its exit code looks normal.
+	TimedOut bool `json:"timed_out,omitempty"`
 	// Failure describes why the step failed.
 	Failure string `json:"failure,omitempty"`
 	// Captured holds the values this step pulled out for later steps.
@@ -36,6 +44,13 @@ type BenchStepResult struct {
 	Stdout string `json:"stdout,omitempty"`
 	// Stderr is the child's stderr (truncated).
 	Stderr string `json:"stderr,omitempty"`
+	// FullStdout is the child's untruncated stdout. It is kept OUT of the
+	// report (json:"-") and used only by --evidence-dir; the report carries
+	// the truncated Stdout so one chatty step cannot bloat it.
+	FullStdout string `json:"-"`
+	// FullStderr is the child's untruncated stderr, used only by
+	// --evidence-dir.
+	FullStderr string `json:"-"`
 }
 
 // BenchScenarioResult is the outcome of one scenario.
@@ -51,9 +66,15 @@ type BenchScenarioResult struct {
 	WallMS int64 `json:"wall_ms"`
 	// Retries is the number of retried attempts across all steps.
 	Retries int `json:"retries"`
+	// Usage is the scenario's driver-supplied token accounting, echoed from
+	// the scenario file. Absent when the driver declared none.
+	Usage *BenchUsage `json:"usage,omitempty"`
 	// FailureMode is a short description of the first failure.
 	FailureMode string            `json:"failure_mode,omitempty"`
 	Steps       []BenchStepResult `json:"steps"`
+	// Judge records the rubric evaluation when the scenario was judged. Absent
+	// when no judge ran.
+	Judge *BenchJudgeReport `json:"judge,omitempty"`
 }
 
 // BenchReport is the whole run.
@@ -75,8 +96,24 @@ type BenchSummary struct {
 	Partial int `json:"partial"`
 	Fail    int `json:"fail"`
 	NotRun  int `json:"not_run"`
+	// Timeout counts scenarios whose required step exceeded its deadline.
+	Timeout int `json:"timeout"`
+	// Excluded counts scenarios skipped by --exclusions. They are separate
+	// from NOT_RUN and are never counted as a pass.
+	Excluded int `json:"excluded"`
+	// Usage totals the driver-supplied token accounting. Absent when no
+	// scenario declared usage: a zero total would read as "free".
+	Usage *BenchUsageTotals `json:"usage,omitempty"`
 	// WallMS is the whole run's wall-clock time.
 	WallMS int64 `json:"wall_ms"`
+}
+
+// BenchUsageTotals sums driver-supplied token accounting across a run.
+type BenchUsageTotals struct {
+	// TokensIn is the run's total input tokens.
+	TokensIn int `json:"tokens_in"`
+	// TokensOut is the run's total output tokens.
+	TokensOut int `json:"tokens_out"`
 }
 
 // benchRunner executes one scenario. It is a function so the tests can
@@ -86,7 +123,9 @@ type benchRunner func(step BenchStep) BenchStepResult
 // runBenchScenario executes a scenario's steps and scores it.
 //
 // A scenario marked requires_auth is reported as NOT_RUN without executing
-// anything: an unauthenticated run must never look like a pass.
+// anything: an unauthenticated run must never look like a pass. Likewise a
+// requires_network scenario is NOT_RUN unless --allow-network opted in — the
+// offline contract is the default.
 func runBenchScenario(s BenchScenario, run benchRunner) BenchScenarioResult {
 	res := BenchScenarioResult{
 		ID:    s.ID,
@@ -100,21 +139,48 @@ func runBenchScenario(s BenchScenario, run benchRunner) BenchScenarioResult {
 		res.FailureMode = "requires an authenticated session"
 		return res
 	}
+	if s.RequiresNetwork && !benchAllowNetwork {
+		res.Verdict = VerdictNotRun
+		res.FailureMode = "requires network access (re-run with --allow-network)"
+		return res
+	}
+	// A skipped scenario spent no tokens: the driver's accounting belongs to
+	// the attempt, so attributing it to a NOT_RUN result would bill a run that
+	// never happened. This mirrors excludedBenchResult, which carries no usage.
+	res.Usage = s.Usage
 
 	start := time.Now()
+	scenarioDeadline := time.Duration(s.DeadlineSeconds) * time.Second
 	anyOptionalFailed := false
 	// caps lives for ONE scenario: a capture is a value read from the page in
 	// this run, so it must not leak into another scenario.
 	caps := make(map[string]string)
 	for i, step := range s.Steps {
 		prepared := step
-		prepared.Argv = substituteCaptures(step.Argv, caps)
+		prepared.Argv = injectBenchContext(substituteCaptures(step.Argv, caps), s.Context)
 		prepared.Expect = substituteExpectCaptures(step.Expect, caps)
-		sr := run(prepared)
+		deadline, exhausted := benchEffectiveDeadline(
+			scenarioDeadline,
+			time.Duration(step.DeadlineSeconds)*time.Second,
+			time.Since(start),
+		)
+		var sr BenchStepResult
+		if exhausted {
+			sr = BenchStepResult{
+				Argv:     benchArgv(prepared),
+				TimedOut: true,
+				Failure:  fmt.Sprintf("scenario deadline of %ds was exhausted before this step", s.DeadlineSeconds),
+			}
+		} else {
+			prepared.deadline = deadline
+			sr = run(prepared)
+		}
 		sr.Index = i + 1
 		sr.Note = step.Note
 		sr.Optional = step.Optional
-		if sr.Attempts < 1 {
+		// A step that never started (exhausted budget) made zero invocations;
+		// claiming one would inflate Commands.
+		if sr.Attempts < 1 && !sr.TimedOut {
 			sr.Attempts = 1
 		}
 		// Capture only from a step whose expectations held: pulling a value
@@ -136,13 +202,29 @@ func runBenchScenario(s BenchScenario, run benchRunner) BenchScenarioResult {
 		// the first try made exactly one invocation.
 		res.Steps = append(res.Steps, sr)
 		res.Commands += sr.Attempts
-		res.Retries += sr.Attempts - 1
+		// A step that never started made no invocation and therefore no retry.
+		if sr.Attempts > 0 {
+			res.Retries += sr.Attempts - 1
+		}
 		res.WallMS += sr.WallMS
 		if !sr.OK {
-			if step.Optional {
+			switch {
+			case step.Optional:
 				anyOptionalFailed = true
-			} else {
-				res.Verdict = VerdictFail
+			case sr.TimedOut:
+				// The FIRST required failure decides the verdict, so a timeout
+				// stays visible as TIMEOUT instead of being overwritten by a
+				// later step's ordinary failure.
+				if res.Verdict == "" {
+					res.Verdict = VerdictTimeout
+				}
+				if res.FailureMode == "" {
+					res.FailureMode = fmt.Sprintf("step %d timed out: %s", i+1, sr.Failure)
+				}
+			default:
+				if res.Verdict == "" {
+					res.Verdict = VerdictFail
+				}
 				if res.FailureMode == "" {
 					res.FailureMode = fmt.Sprintf("step %d failed: %s", i+1, sr.Failure)
 				}
@@ -326,6 +408,31 @@ func injectBenchTransport(argv []string, transport string) []string {
 	return append(out, argv...)
 }
 
+// benchHasContextFlag reports whether an argv already selects a context.
+func benchHasContextFlag(argv []string) bool {
+	for _, a := range argv {
+		if a == "--context" || strings.HasPrefix(a, "--context=") {
+			return true
+		}
+	}
+	return false
+}
+
+// injectBenchContext prefixes a step's argv with "--context <name>".
+//
+// The scenario runner injects it before the step runs and the reported argv is
+// the one actually executed, so a reader can see that the isolated profile was
+// in force. Validation rejects a step that names its own --context alongside a
+// scenario context, so this never has to pick a winner.
+func injectBenchContext(argv []string, name string) []string {
+	if name == "" {
+		return argv
+	}
+	out := make([]string, 0, len(argv)+2)
+	out = append(out, "--context", name)
+	return append(out, argv...)
+}
+
 // runBenchStepWithTransport executes one step over the given transport and
 // evaluates its expectations.
 func runBenchStepWithTransport(step BenchStep, transport string) BenchStepResult {
@@ -336,14 +443,16 @@ func runBenchStepWithTransport(step BenchStep, transport string) BenchStepResult
 // runBenchStep executes one step for real and evaluates its expectations.
 func runBenchStep(step BenchStep) BenchStepResult {
 	argv := benchArgv(step)
-	run := runSelf(argv)
+	run, timedOut := runSelfWithDeadline(argv, step.deadline)
 	res := BenchStepResult{
-		Argv:     argv,
-		ExitCode: run.ExitCode,
-		Attempts: 1,
-		WallMS:   run.Duration.Milliseconds(),
-		Stdout:   truncateForReport(run.Stdout),
-		Stderr:   truncateForReport(run.Stderr),
+		Argv:       argv,
+		ExitCode:   run.ExitCode,
+		Attempts:   1,
+		WallMS:     run.Duration.Milliseconds(),
+		Stdout:     truncateForReport(run.Stdout),
+		Stderr:     truncateForReport(run.Stderr),
+		FullStdout: run.Stdout,
+		FullStderr: run.Stderr,
 	}
 	if step.Retry > 0 {
 		// The retry wrapper performs the attempts and reports how many it
@@ -355,12 +464,123 @@ func runBenchStep(step BenchStep) BenchStepResult {
 			res.Attempts = observed
 		}
 	}
+	// A killed step always fails: its exit code is an artefact of the signal,
+	// and its output is whatever it managed to emit before the deadline.
+	if timedOut {
+		res.TimedOut = true
+		res.Failure = fmt.Sprintf("timed out after %s", step.deadline)
+		return res
+	}
+	if run.Err != nil {
+		// Only a start failure is an error here: a normal non-zero exit is an
+		// *exec.ExitError and is judged by the step's expectations below, so a
+		// step that deliberately fails must still be able to pass.
+		var exitErr *exec.ExitError
+		if !errors.As(run.Err, &exitErr) {
+			res.Failure = fmt.Sprintf("could not start step: %v", run.Err)
+			return res
+		}
+	}
 	if err := evaluateBenchExpect(expandBenchExpect(step.Expect), run); err != nil {
 		res.Failure = err.Error()
 		return res
 	}
 	res.OK = true
 	return res
+}
+
+// benchEffectiveDeadline bounds a step by its own deadline and by what remains
+// of the scenario budget.
+//
+// A step without its own deadline inherits the scenario value. The scenario
+// budget always caps the result, so a step cannot outlive the run. exhausted
+// reports that the scenario budget is already gone, in which case the step must
+// not start at all.
+func benchEffectiveDeadline(scenario, step, elapsed time.Duration) (deadline time.Duration, exhausted bool) {
+	d := step
+	if d == 0 {
+		d = scenario
+	}
+	if scenario > 0 {
+		remaining := scenario - elapsed
+		if remaining <= 0 {
+			return 0, true
+		}
+		if d == 0 || remaining < d {
+			d = remaining
+		}
+	}
+	return d, false
+}
+
+// runSelfWithDeadline re-invokes htrcli and kills it when the deadline elapses.
+//
+// A zero deadline runs the child to completion, exactly like runSelf.
+func runSelfWithDeadline(args []string, deadline time.Duration) (selfRun, bool) {
+	// With no deadline the shared runner is authoritative, so there is only one
+	// no-deadline path.
+	if deadline <= 0 {
+		return runSelf(args), false
+	}
+	cmd, err := selfCommand(args)
+	if err != nil {
+		return selfRun{ExitCode: 1, Err: err}, false
+	}
+	return runCmdWithDeadline(cmd, deadline)
+}
+
+// runCmdWithDeadline starts cmd, captures its output, and kills it when the
+// deadline elapses. timedOut reports that the kill was actually attempted, so a
+// child that finished just as the timer fired is not misreported as a timeout.
+//
+// shortcut: it kills only the direct child, so a step that re-execs further
+// children can leak them; upgrade to a process group if a timed-out step is
+// observed leaking grandchildren.
+func runCmdWithDeadline(cmd *exec.Cmd, deadline time.Duration) (selfRun, bool) {
+	return runCmdWithInputAndDeadline(cmd, deadline, nil)
+}
+
+// runCmdWithInputAndDeadline is the one child lifecycle the harness uses: it
+// starts the command, captures stdout/stderr, and kills it when the deadline
+// elapses. A nil stdin leaves the child with no input, as before.
+func runCmdWithInputAndDeadline(cmd *exec.Cmd, deadline time.Duration, stdin io.Reader) (selfRun, bool) {
+	start := time.Now()
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+	if stdin != nil {
+		cmd.Stdin = stdin
+	}
+	if err := cmd.Start(); err != nil {
+		return selfRun{ExitCode: 1, Duration: time.Since(start), Err: err}, false
+	}
+	var killed atomic.Bool
+	var timer *time.Timer
+	if deadline > 0 {
+		timer = time.AfterFunc(deadline, func() {
+			killed.Store(true)
+			_ = cmd.Process.Kill()
+		})
+	}
+	err := cmd.Wait()
+	if timer != nil {
+		timer.Stop()
+	}
+	run := selfRun{
+		Stdout:   stdoutBuf.String(),
+		Stderr:   stderrBuf.String(),
+		Duration: time.Since(start),
+	}
+	if err != nil {
+		run.Err = err
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			run.ExitCode = exitErr.ExitCode()
+		} else {
+			run.ExitCode = 1
+		}
+	}
+	return run, killed.Load()
 }
 
 // expandBenchExpect expands ${VAR} inside the expectation strings.
@@ -405,6 +625,15 @@ func evaluateBenchExpect(expect *BenchExpect, run selfRun) error {
 	if expect.Exit != run.ExitCode {
 		return fmt.Errorf("exit code %d, want %d: %s", run.ExitCode, expect.Exit, firstLine(run.Stderr))
 	}
+	// Anything still shaped like ${name} after capture and environment
+	// expansion names a capture that never resolved. Comparing it as a literal
+	// makes a negative assertion pass vacuously ("${name}" is never in the
+	// output either), which can hide a missing value inside a PASS.
+	for _, value := range []string{expect.StdoutContains, expect.StdoutNotContains, jsonPathEquals(expect.JSONPath)} {
+		if ref, ok := unresolvedBenchReference(value); ok {
+			return fmt.Errorf("expectation has an unresolved capture %s", ref)
+		}
+	}
 	if expect.StdoutContains != "" && !strings.Contains(run.Stdout, expect.StdoutContains) {
 		return fmt.Errorf("stdout does not contain %q", expect.StdoutContains)
 	}
@@ -417,6 +646,33 @@ func evaluateBenchExpect(expect *BenchExpect, run selfRun) error {
 		}
 	}
 	return nil
+}
+
+// jsonPathEquals returns the expectation's literal comparison value, or "" when
+// there is no JSON path. evaluateBenchExpect uses it to scan every string that
+// substitution could have left unresolved.
+func jsonPathEquals(expect *JSONPathExpect) string {
+	if expect == nil {
+		return ""
+	}
+	return expect.Equals
+}
+
+// unresolvedBenchReference returns the first ${...} placeholder left in value.
+//
+// It runs after capture and environment expansion, so a surviving placeholder
+// belongs to a capture that never resolved; callers turn it into a hard step
+// failure instead of comparing the literal text.
+func unresolvedBenchReference(value string) (string, bool) {
+	start := strings.Index(value, "${")
+	if start < 0 {
+		return "", false
+	}
+	end := strings.Index(value[start:], "}")
+	if end < 0 {
+		return "", false
+	}
+	return value[start : start+end+1], true
 }
 
 // evaluateJSONPath asserts on a value inside the step's JSON stdout.
@@ -464,6 +720,8 @@ func truncateForReport(s string) string {
 // summarizeBenchReport counts the verdicts of a report.
 func summarizeBenchReport(results []BenchScenarioResult, wallMS int64) BenchSummary {
 	sum := BenchSummary{Total: len(results), WallMS: wallMS}
+	tokensIn, tokensOut := 0, 0
+	anyUsage := false
 	for _, r := range results {
 		switch r.Verdict {
 		case VerdictPass:
@@ -474,7 +732,21 @@ func summarizeBenchReport(results []BenchScenarioResult, wallMS int64) BenchSumm
 			sum.Fail++
 		case VerdictNotRun:
 			sum.NotRun++
+		case VerdictTimeout:
+			sum.Timeout++
+		case VerdictExcluded:
+			sum.Excluded++
 		}
+		if r.Usage != nil {
+			anyUsage = true
+			tokensIn += r.Usage.TokensIn
+			tokensOut += r.Usage.TokensOut
+		}
+	}
+	// Only report totals when at least one scenario declared usage. A run with
+	// no accounting must not look like it cost nothing.
+	if anyUsage {
+		sum.Usage = &BenchUsageTotals{TokensIn: tokensIn, TokensOut: tokensOut}
 	}
 	return sum
 }

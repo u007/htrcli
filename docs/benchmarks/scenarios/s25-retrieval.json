@@ -1,0 +1,187 @@
+{
+	"scenarios": [
+		{
+			"id": "S25",
+			"ref": "B22",
+			"app": "Three local retrieval pages (one deliberately contradicts the others)",
+			"goal": "Answer the same factual question from three separate pages: what is the maximum operating depth of the Nereid-7 submersible? Pages 1 and 3 both say 6,000 m; page 2 says 8,000 m. Every value and source id is captured into the report, so the disagreement is visible instead of being averaged away or silently replaced by the last value read.",
+			"requires_network": false,
+			"steps": [
+				{
+					"note": "open source 1",
+					"argv": ["open", "file://${BENCH_FIXTURE_RETRIEVAL_1}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "the fact block is rendered",
+					"argv": ["wait", "--selector", "#answer", "--timeout", "10000"],
+					"retry": 2,
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "source 1 asks the same question the other pages ask",
+					"argv": ["--json", "text", "#question"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "What is the maximum operating depth of the Nereid-7 submersible?"
+						}
+					}
+				},
+				{
+					"note": "read source 1's depth into ${depth_1}",
+					"argv": ["--json", "text", "#answer"],
+					"capture": {
+						"depth_1": "data"
+					},
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "6,000 m"
+						}
+					}
+				},
+				{
+					"note": "read source 1's opaque reference into ${source_1}",
+					"argv": ["--json", "attr", "#source-id", "data-source-id"],
+					"capture": {
+						"source_1": "data"
+					},
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "DS-101"
+						}
+					}
+				},
+				{
+					"note": "open source 2 (the contradicting page)",
+					"argv": ["open", "file://${BENCH_FIXTURE_RETRIEVAL_2}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "the fact block is rendered",
+					"argv": ["wait", "--selector", "#answer", "--timeout", "10000"],
+					"retry": 2,
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "source 2 answers the SAME question — it is the number that differs",
+					"argv": ["--json", "text", "#question"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "What is the maximum operating depth of the Nereid-7 submersible?"
+						}
+					}
+				},
+				{
+					"note": "capture the conflicting value ${depth_2}, and prove in the same step that this page does NOT repeat source 1's 6,000 m",
+					"argv": ["--json", "text", "#answer"],
+					"capture": {
+						"depth_2": "data"
+					},
+					"expect": {
+						"exit": 0,
+						"stdoutNotContains": "${depth_1}",
+						"jsonPath": {
+							"path": "data",
+							"equals": "8,000 m"
+						}
+					}
+				},
+				{
+					"note": "the contradiction comes from a distinct source, not a re-read of page 1",
+					"argv": ["--json", "attr", "#source-id", "data-source-id"],
+					"capture": {
+						"source_2": "data"
+					},
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "DS-202"
+						}
+					}
+				},
+				{
+					"note": "open source 3",
+					"argv": ["open", "file://${BENCH_FIXTURE_RETRIEVAL_3}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "the fact block is rendered",
+					"argv": ["wait", "--selector", "#answer", "--timeout", "10000"],
+					"retry": 2,
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "source 3 answers the same question too",
+					"argv": ["--json", "text", "#question"],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "What is the maximum operating depth of the Nereid-7 submersible?"
+						}
+					}
+				},
+				{
+					"note": "source 3 agrees with source 1: the assertion compares against the captured ${depth_1}",
+					"argv": ["--json", "text", "#answer"],
+					"capture": {
+						"depth_3": "data"
+					},
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "${depth_1}"
+						}
+					}
+				},
+				{
+					"note": "source 3 has its own reference, so all three pages were actually read",
+					"argv": ["--json", "attr", "#source-id", "data-source-id"],
+					"capture": {
+						"source_3": "data"
+					},
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "data",
+							"equals": "DS-303"
+						}
+					}
+				},
+				{
+					"note": "the report carries depth_1 / depth_2 / depth_3 and the three source ids; source 3 rejects the captured ${depth_2} outright, so 6,000 vs 8,000 vs 6,000 stays visible instead of being resolved",
+					"argv": ["--json", "text", "#answer"],
+					"expect": {
+						"exit": 0,
+						"stdoutNotContains": "${depth_2}"
+					}
+				}
+			]
+		}
+	]
+}

@@ -1,0 +1,229 @@
+{
+	"scenarios": [
+		{
+			"id": "S26",
+			"ref": "B23",
+			"app": "Two local product pages with different markup (table vs list)",
+			"goal": "Extract the same three fields — price, battery life, weight — from two pages describing the same e-reader. Source A is a table, source B a description list. The extraction must use identical field names on both so the rows can be joined, must read the same price from both, and must leave B's weight empty because B never states it (its prose says 'not stated').",
+			"steps": [
+				{
+					"note": "open source A (the table)",
+					"argv": ["open", "file://${BENCH_FIXTURE_COMPARE_A}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "the specification table is rendered",
+					"argv": ["wait", "--selector", "#spec-table", "--timeout", "10000"],
+					"retry": 2,
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "source A really is a table: no list exists on this page",
+					"argv": [
+						"wait",
+						"--selector",
+						"#spec-list",
+						"--gone",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "extract A's three fields with the canonical field names",
+					"argv": [
+						"extract",
+						"list",
+						"#spec-table tbody tr",
+						"--fields",
+						"price:.price,battery:.battery,weight:.weight"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "A states the price, and it is captured as ${a_price} for the cross-page check",
+					"argv": [
+						"extract",
+						"list",
+						"#spec-table tbody tr",
+						"--fields",
+						"price:.price,battery:.battery,weight:.weight"
+					],
+					"capture": {
+						"a_price": "items.0.price",
+						"a_weight": "items.0.weight"
+					},
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.0.price",
+							"equals": "$229.00"
+						}
+					}
+				},
+				{
+					"note": "A states the battery life",
+					"argv": [
+						"extract",
+						"list",
+						"#spec-table tbody tr",
+						"--fields",
+						"price:.price,battery:.battery,weight:.weight"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.0.battery",
+							"equals": "42 hours"
+						}
+					}
+				},
+				{
+					"note": "A states a weight",
+					"argv": [
+						"extract",
+						"list",
+						"#spec-table tbody tr",
+						"--fields",
+						"price:.price,battery:.battery,weight:.weight"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.0.weight",
+							"equals": "182 g"
+						}
+					}
+				},
+				{
+					"note": "open source B (the list)",
+					"argv": ["open", "file://${BENCH_FIXTURE_COMPARE_B}"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "Navigated"
+					}
+				},
+				{
+					"note": "the specification list is rendered",
+					"argv": [
+						"wait",
+						"--selector",
+						"#spec-list .spec",
+						"--timeout",
+						"10000"
+					],
+					"retry": 2,
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "source B really is a list: no table exists on this page",
+					"argv": [
+						"wait",
+						"--selector",
+						"#spec-table",
+						"--gone",
+						"--timeout",
+						"3000"
+					],
+					"expect": {
+						"exit": 0
+					}
+				},
+				{
+					"note": "extract B with the SAME field names and the same three-field count",
+					"argv": [
+						"extract",
+						"list",
+						"#spec-list .spec",
+						"--fields",
+						"price:.price,battery:.battery,weight:.weight"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "count",
+							"equals": "1"
+						}
+					}
+				},
+				{
+					"note": "B's price is the captured ${a_price}: a joined table can trust the shared field",
+					"argv": [
+						"extract",
+						"list",
+						"#spec-list .spec",
+						"--fields",
+						"price:.price,battery:.battery,weight:.weight"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.0.price",
+							"equals": "${a_price}"
+						}
+					}
+				},
+				{
+					"note": "B states the same battery life",
+					"argv": [
+						"extract",
+						"list",
+						"#spec-list .spec",
+						"--fields",
+						"price:.price,battery:.battery,weight:.weight"
+					],
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.0.battery",
+							"equals": "42 hours"
+						}
+					}
+				},
+				{
+					"note": "B does NOT state a weight: the field is present in the shape and empty in value, never invented",
+					"argv": [
+						"extract",
+						"list",
+						"#spec-list .spec",
+						"--fields",
+						"price:.price,battery:.battery,weight:.weight"
+					],
+					"capture": {
+						"b_weight": "items.0.weight"
+					},
+					"expect": {
+						"exit": 0,
+						"jsonPath": {
+							"path": "items.0.weight",
+							"equals": ""
+						}
+					}
+				},
+				{
+					"note": "the page says so in prose, so an empty extraction is confirmed rather than assumed",
+					"argv": ["--json", "text", "#missing-note"],
+					"expect": {
+						"exit": 0,
+						"stdoutContains": "not stated"
+					}
+				}
+			]
+		}
+	]
+}

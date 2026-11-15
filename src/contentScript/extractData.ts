@@ -26,9 +26,172 @@ export interface ExtractedList {
 	count: number;
 }
 
-function textOf(el: Element | null): string {
+export interface ExtractTableOptions {
+	/**
+	 * Opt-in clean-up of number text that the DOM silently flattens.
+	 *
+	 * Off by default: without it the output is byte-identical to the raw
+	 * `textContent` read, including zero-width joiners and a `<sup>` exponent
+	 * flattened into the mantissa. See `textOf`.
+	 */
+	normalizeNumbers?: boolean;
+}
+
+function textOf(el: Element | null, normalize = false): string {
 	if (!el) return "";
+	if (normalize) return normalizedTextOf(el);
 	return (el.textContent ?? "").trim();
+}
+
+// A zero-width joiner that pages put immediately before a footnote marker, so
+// the citation does not leave a visible gap. It is not part of the value.
+const ZERO_WIDTH_JOINER = "\u200d";
+
+// Placeholder for a stripped footnote-marker element while a cell is
+// serialized. It is resolved (and removed) after the whole subtree is walked.
+const REMOVED_MARKER = "\u0000";
+
+const FOOTNOTE_ROLE = "doc-noteref";
+
+// A footnote-target href, e.g. "#fn2", "#cite_note-2", "#note-1".
+const FOOTNOTE_HREF = /^#(?:fn|cite|note)/i;
+
+// A footnote identifier in a <sup>: the brackets make it a marker rather than
+// an exponent, so a bare "<sup>2</sup>" keeps its normal flattened rendering.
+const BRACKETED_NUMBER = /^\[\s*\d+\s*\]$/;
+
+// The mantissa an exponent can follow: "10" or "×10"/"x10". The guard rejects
+// "110" (a different number), which also ends in "10".
+const TEN_TAIL = /(?:^|[^\d])10$/;
+
+/** True when the element carries an explicit footnote marker signal. */
+function hasFootnoteAttributes(el: Element): boolean {
+	if (el.getAttribute("role") === FOOTNOTE_ROLE) return true;
+	if (
+		el.hasAttribute("data-footnote") ||
+		el.hasAttribute("data-footnote-ref")
+	) {
+		return true;
+	}
+	const classes = (el.getAttribute("class") ?? "").toLowerCase().split(/\s+/);
+	return classes.some(
+		(token) => token === "footnote" || token.startsWith("footnote-"),
+	);
+}
+
+/** True when an <a> is structurally a footnote reference. */
+function isFootnoteAnchor(el: Element): boolean {
+	const rel = (el.getAttribute("rel") ?? "").toLowerCase().split(/\s+/);
+	if (rel.includes("footnote")) return true;
+	if (FOOTNOTE_HREF.test(el.getAttribute("href") ?? "")) return true;
+	return el.closest("sup") !== null;
+}
+
+/** textContent with zero-width joiners removed and outer space trimmed. */
+function plainNormalizedText(el: Element): string {
+	return (el.textContent ?? "").split(ZERO_WIDTH_JOINER).join("").trim();
+}
+
+/**
+ * True when the element IS a footnote marker and must be removed.
+ *
+ * The decision is made on the ELEMENT, never on the resulting string: a
+ * literal "[2]" in prose is a text node and survives, and an ordinary numeric
+ * link such as `<a href="/p/2">2</a>` is kept. An <a> counts only with a
+ * structural signal — `role="doc-noteref"`, a `rel` or class footnote token, an
+ * `href` starting `#fn`/`#cite`/`#note`, or a `<sup>` wrapper. A <sup> counts
+ * when its text is a bracketed identifier like "[2]"; a bare `<sup>2</sup>`
+ * keeps its flattened rendering.
+ */
+function isFootnoteMarker(el: Element, tag: string): boolean {
+	if (hasFootnoteAttributes(el)) return true;
+	if (tag === "a") return isFootnoteAnchor(el);
+	if (tag === "sup") return BRACKETED_NUMBER.test(plainNormalizedText(el));
+	return false;
+}
+
+/**
+ * Append a node's text to `out` with the normalize-numbers rules applied.
+ *
+ * Footnote markers (including a footnote-ish <sup>, which wins over the
+ * exponent rule) are skipped and leave a placeholder. A <sup> whose text is
+ * all digits and which directly follows "10"/"×10"/"x10" renders as "^N", so
+ * `6.02214076×10<sup>23</sup>` becomes `6.02214076×10^23`; every other
+ * superscript keeps its current flattened behaviour.
+ */
+function appendNormalized(node: Node, out: string[]): void {
+	if (node.nodeType === 3) {
+		out.push((node.nodeValue ?? "").split(ZERO_WIDTH_JOINER).join(""));
+		return;
+	}
+	if (node.nodeType !== 1) return;
+	const el = node as Element;
+	const tag = el.tagName.toLowerCase();
+	if (isFootnoteMarker(el, tag)) {
+		out.push(REMOVED_MARKER);
+		return;
+	}
+	if (tag === "sup") {
+		const supText = plainNormalizedText(el);
+		const before = out.join("").replace(/[ \t]+$/, "");
+		if (/^\d+$/.test(supText) && TEN_TAIL.test(before)) {
+			out.push("^", supText);
+			return;
+		}
+	}
+	for (const child of Array.from(el.childNodes)) appendNormalized(child, out);
+}
+
+/**
+ * Collapse a whitespace run opened at a removal join to one space.
+ *
+ * Only spaces/tabs touching `at` are considered, so multi-space text elsewhere
+ * in the cell is left exactly as written.
+ */
+function collapseJoinSpaces(text: string, at: number): string {
+	let start = at;
+	while (start > 0 && (text[start - 1] === " " || text[start - 1] === "\t")) {
+		start--;
+	}
+	let end = at;
+	while (end < text.length && (text[end] === " " || text[end] === "\t")) end++;
+	if (end - start < 2) return text;
+	return `${text.slice(0, start)} ${text.slice(end)}`;
+}
+
+/**
+ * Remove the placeholders left by stripped footnote markers.
+ *
+ * When the marker was wrapped in brackets ("(<a>[2]</a>)" or "[<a>2</a>]") the
+ * now-empty pair goes with it; a whitespace run opened by that removal
+ * collapses to one space. Text a removal never touched keeps its spacing. A
+ * literal "[2]" that was never an element is untouched.
+ */
+function resolveRemovedMarkers(text: string): string {
+	const pairs: Record<string, string> = { "(": ")", "[": "]" };
+	let out = text;
+	let at = out.indexOf(REMOVED_MARKER);
+	while (at !== -1) {
+		let start = at - 1;
+		while (start >= 0 && out[start] === " ") start--;
+		let end = at + 1;
+		while (end < out.length && out[end] === " ") end++;
+		if (start >= 0 && end < out.length && pairs[out[start]] === out[end]) {
+			out = out.slice(0, start) + out.slice(end + 1);
+			out = collapseJoinSpaces(out, start);
+		} else {
+			out = out.slice(0, at) + out.slice(at + 1);
+			out = collapseJoinSpaces(out, at);
+		}
+		at = out.indexOf(REMOVED_MARKER);
+	}
+	return out;
+}
+
+function normalizedTextOf(el: Element): string {
+	const out: string[] = [];
+	for (const child of Array.from(el.childNodes)) appendNormalized(child, out);
+	return resolveRemovedMarkers(out.join("")).trim();
 }
 
 function firstTable(root: Element): HTMLTableElement | null {
@@ -37,7 +200,11 @@ function firstTable(root: Element): HTMLTableElement | null {
 	return found instanceof HTMLTableElement ? found : null;
 }
 
-export function extractTable(root: Element): ExtractedTable {
+export function extractTable(
+	root: Element,
+	options?: ExtractTableOptions,
+): ExtractedTable {
+	const normalize = options?.normalizeNumbers === true;
 	const table = firstTable(root);
 	if (!table) {
 		return { columns: [], rows: [], rowCount: 0 };
@@ -102,7 +269,7 @@ export function extractTable(root: Element): ExtractedTable {
 	let columns: string[];
 	if (headerCells.length > 0) {
 		columns = headerCells.map((c, i) => {
-			const base = textOf(c) || `col${i + 1}`;
+			const base = textOf(c, normalize) || `col${i + 1}`;
 			const seen = seenNames.get(base) ?? 0;
 			seenNames.set(base, seen + 1);
 			return seen === 0 ? base : `${base}_${seen + 1}`;
@@ -123,7 +290,7 @@ export function extractTable(root: Element): ExtractedTable {
 		const row: Record<string, string> = {};
 		cells.forEach((cell, i) => {
 			const col = columns[i] ?? `col${i + 1}`;
-			row[col] = textOf(cell);
+			row[col] = textOf(cell, normalize);
 		});
 		rows.push(row);
 	}
@@ -133,10 +300,11 @@ export function extractTable(root: Element): ExtractedTable {
 export function extractList(
 	root: Element,
 	fields?: Record<string, string>,
+	options?: ExtractListOptions,
 ): ExtractedList {
 	// This helper's contract is "root is a container": it has always taken the
 	// root's children as the items, so keep that behaviour explicit.
-	return extractListFrom([root], fields, { container: true });
+	return extractListFrom([root], fields, { ...options, container: true });
 }
 
 /**
@@ -178,6 +346,11 @@ export interface ExtractListOptions {
 	 * the API this throws instead of keeping hidden items.
 	 */
 	visibleOnly?: boolean;
+	/**
+	 * Opt-in clean-up of number text that the DOM silently flattens. Off by
+	 * default, so absent/false is byte-identical to the raw output.
+	 */
+	normalizeNumbers?: boolean;
 }
 
 /**
@@ -212,6 +385,8 @@ export function extractListFrom(
 		items = items.filter(isRendered);
 	}
 
+	const normalize = options?.normalizeNumbers === true;
+
 	// Split and validate every field selector once, before the item loop, so a
 	// zero-item result still rejects a malformed selector.
 	const fieldPlans =
@@ -233,11 +408,12 @@ export function extractListFrom(
 					plan.alternatives,
 					plan.sel,
 					plan.name,
+					normalize,
 				);
 			}
 			out.push(row);
 		} else {
-			out.push({ text: textOf(item) });
+			out.push({ text: textOf(item, normalize) });
 		}
 	}
 	return { items: out, count: out.length };
@@ -277,6 +453,7 @@ function readFieldValue(
 	alternatives: string[],
 	sel: string,
 	name: string,
+	normalize: boolean,
 ): string {
 	// A malformed selector throws a bare DOMException that names neither the
 	// field nor the caller's intent, and aborts every other field with it.
@@ -287,7 +464,7 @@ function readFieldValue(
 		// (Gmail renders the sender in span.yP for some rows and span.zF for
 		// others), and an empty string is not a value worth reporting.
 		for (const alternative of alternatives) {
-			const value = readFieldValueUnsafe(item, alternative);
+			const value = readFieldValueUnsafe(item, alternative, normalize);
 			if (value !== "") return value;
 		}
 		return "";
@@ -345,7 +522,11 @@ function splitFieldAlternatives(sel: string): string[] {
 	return parts.map((part) => part.trim()).filter((part) => part !== "");
 }
 
-function readFieldValueUnsafe(item: Element, sel: string): string {
+function readFieldValueUnsafe(
+	item: Element,
+	sel: string,
+	normalize: boolean,
+): string {
 	const attr = parseAttributeField(sel);
 	if (attr) {
 		const el = findFieldElement(item, attr.selector);
@@ -365,8 +546,8 @@ function readFieldValueUnsafe(item: Element, sel: string): string {
 	// Plain selector: a descendant wins, because a field named ".title" means
 	// "the title inside this row", not "the row that has class title".
 	const found = item.querySelector(sel);
-	if (found) return textOf(found);
-	if (item.matches(sel)) return textOf(item);
+	if (found) return textOf(found, normalize);
+	if (item.matches(sel)) return textOf(item, normalize);
 	return "";
 }
 

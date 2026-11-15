@@ -1,0 +1,57 @@
+{
+  "scenario": {
+    "id": "B01",
+    "goal": "find the totals",
+    "app": "fixture"
+  },
+  "rubric": [
+    {
+      "id": "accuracy",
+      "weight": 3,
+      "criterion": "the numbers are right"
+    },
+    {
+      "id": "brevity",
+      "weight": 1,
+      "criterion": "the answer is short"
+    }
+  ],
+  "evidence": {
+    "steps": [
+      {
+        "index": 1,
+        "argv": [
+          "open",
+          "https://x"
+        ],
+        "ok": true,
+        "exit_code": 0,
+        "attempts": 1,
+        "wall_ms": 12,
+        "stdout": "ok"
+      },
+      {
+        "index": 2,
+        "argv": [
+          "extract",
+          "table",
+          "table"
+        ],
+        "ok": false,
+        "exit_code": 1,
+        "attempts": 2,
+        "wall_ms": 34,
+        "failure": "exit code 1",
+        "stderr": "boom"
+      }
+    ],
+    "summary": {
+      "commands": 3,
+      "retries": 1,
+      "wall_ms": 46,
+      "steps": 2,
+      "passed": 1,
+      "failed": 1
+    }
+  }
+}

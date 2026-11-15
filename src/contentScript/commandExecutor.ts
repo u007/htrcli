@@ -264,7 +264,7 @@ async function executeAction(command: Command): Promise<unknown> {
 		case "collectAll":
 			return handleCollectAll(requireTarget(target, action), options);
 		case "extractTable":
-			return handleExtractTable(requireTarget(target, action));
+			return handleExtractTable(requireTarget(target, action), options);
 		case "extractList":
 			return handleExtractList(requireTarget(target, action), options);
 		case "wait":
@@ -625,7 +625,10 @@ async function handleCollectAll(
 	};
 }
 
-async function handleExtractTable(target: TargetSelector): Promise<{
+async function handleExtractTable(
+	target: TargetSelector,
+	options?: Command["options"],
+): Promise<{
 	columns: string[];
 	rows: Record<string, string>[];
 	rowCount: number;
@@ -636,7 +639,9 @@ async function handleExtractTable(target: TargetSelector): Promise<{
 			`Element not found: ${target.selector ?? target.xpath ?? ""}`,
 		);
 	}
-	return extractTable(root);
+	return extractTable(root, {
+		normalizeNumbers: options?.normalizeNumbers === true,
+	});
 }
 
 async function handleExtractList(
@@ -661,6 +666,7 @@ async function handleExtractList(
 	return extractListFrom(roots, fields, {
 		container: options?.container === true,
 		visibleOnly: options?.visibleOnly === true,
+		normalizeNumbers: options?.normalizeNumbers === true,
 	});
 }
 
