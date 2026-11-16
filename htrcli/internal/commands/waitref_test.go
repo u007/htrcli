@@ -68,6 +68,14 @@ func withRefStore(t *testing.T, refs map[string]int64) {
 // document identity each was minted in.
 func withRefStoreDocuments(t *testing.T, refs map[string]int64, loaderIDs map[string]string) {
 	t.Helper()
+	withRefStoreIdentity(t, refs, loaderIDs, nil)
+}
+
+// withRefStoreIdentity points LoadRefStore at a temp file holding refs plus the
+// document and CDP target identity each was minted in. A nil map leaves that
+// identity unknown, exactly like a store written before the field existed.
+func withRefStoreIdentity(t *testing.T, refs map[string]int64, loaderIDs, targetIDs map[string]string) {
+	t.Helper()
 	refStorePathOverride = t.TempDir() + "/refs.json"
 	t.Cleanup(func() { refStorePathOverride = "" })
 	store, err := LoadRefStore()
@@ -76,6 +84,7 @@ func withRefStoreDocuments(t *testing.T, refs map[string]int64, loaderIDs map[st
 	}
 	store.Refs = refs
 	store.LoaderIDs = loaderIDs
+	store.TargetIDs = targetIDs
 	if err := store.Save(); err != nil {
 		t.Fatalf("save ref store: %v", err)
 	}
@@ -122,7 +131,7 @@ func TestWaitCDPRefPresentResolvesThroughStore(t *testing.T) {
 		return map[string]any{}, ""
 	})
 
-	if err := waitCDPSelectorLoop(s, parseSelector("@e1"), false, 1000, 10); err != nil {
+	if err := waitCDPSelectorLoop(s, parseSelector("@e1"), "", false, 1000, 10); err != nil {
 		t.Fatalf("wait @e1: %v", err)
 	}
 	if len(resolved) != 1 || resolved[0] != 4242 {
@@ -177,7 +186,7 @@ func TestWaitCDPRefGoneWhenNodeIsGone(t *testing.T) {
 			}
 			return map[string]any{}, ""
 		})
-		if err := waitCDPSelectorLoop(s, parseSelector("@e1"), true, 1000, 10); err != nil {
+		if err := waitCDPSelectorLoop(s, parseSelector("@e1"), "", true, 1000, 10); err != nil {
 			t.Fatalf("wait @e1 --gone: %v", err)
 		}
 		if resolves != 2 {
@@ -206,10 +215,10 @@ func TestWaitCDPRefGoneWhenNodeIsGone(t *testing.T) {
 			}
 			return map[string]any{}, ""
 		})
-		if err := waitCDPSelectorLoop(s, parseSelector("@e1"), true, 1000, 10); err != nil {
+		if err := waitCDPSelectorLoop(s, parseSelector("@e1"), "", true, 1000, 10); err != nil {
 			t.Fatalf("wait @e1 --gone: %v", err)
 		}
-		err := waitCDPSelectorLoop(s, parseSelector("@e1"), false, 40, 5)
+		err := waitCDPSelectorLoop(s, parseSelector("@e1"), "", false, 40, 5)
 		if err == nil || !strings.Contains(err.Error(), "is not resolvable") {
 			t.Fatalf("appear on a detached ref = %v, want a clear timeout", err)
 		}
@@ -231,7 +240,7 @@ func TestWaitCDPRefGoneBlankPageDoesNotSucceed(t *testing.T) {
 		}
 		return map[string]any{}, ""
 	})
-	err := waitCDPSelectorLoop(s, parseSelector("@e1"), true, 60, 5)
+	err := waitCDPSelectorLoop(s, parseSelector("@e1"), "", true, 60, 5)
 	if err == nil {
 		t.Fatal("wait @e1 --gone on about:blank: want a failure, got success")
 	}
@@ -272,7 +281,7 @@ func TestWaitCDPRefGoneAfterNavigationWithUnknownIdentityDoesNotSucceed(t *testi
 		}
 		return map[string]any{}, ""
 	})
-	err := waitCDPSelectorLoop(s, parseSelector("@e1"), true, 60, 5)
+	err := waitCDPSelectorLoop(s, parseSelector("@e1"), "", true, 60, 5)
 	if err == nil {
 		t.Fatal("wait @e1 --gone after a navigation: want a failure, got success")
 	}
@@ -309,7 +318,7 @@ func TestWaitCDPRefGoneUnresolvableAtStartWithUnknownIdentityDoesNotSucceed(t *t
 		}
 		return map[string]any{}, ""
 	})
-	err := waitCDPSelectorLoop(s, parseSelector("@e1"), true, 60, 5)
+	err := waitCDPSelectorLoop(s, parseSelector("@e1"), "", true, 60, 5)
 	if err == nil {
 		t.Fatal("wait @e1 --gone on an id that never resolved: want a failure, got success")
 	}
@@ -355,7 +364,7 @@ func TestWaitCDPRefGoneLoadingDocumentDoesNotSucceed(t *testing.T) {
 				}
 				return map[string]any{}, ""
 			})
-			err := waitCDPSelectorLoop(s, parseSelector("@e1"), true, 60, 5)
+			err := waitCDPSelectorLoop(s, parseSelector("@e1"), "", true, 60, 5)
 			if err == nil {
 				t.Fatalf("wait @e1 --gone on a loading document (%s): want a failure, got success", tc.name)
 			}
@@ -380,7 +389,7 @@ func TestWaitCDPRefGoneUnknownFailsImmediately(t *testing.T) {
 		calls++
 		return map[string]any{}, ""
 	})
-	err := waitCDPSelectorLoop(s, parseSelector("@e999"), true, 5000, 10)
+	err := waitCDPSelectorLoop(s, parseSelector("@e999"), "", true, 5000, 10)
 	if err == nil {
 		t.Fatal("wait @e999 --gone: want an error")
 	}
@@ -404,7 +413,7 @@ func TestWaitCDPRefUnknownFailsImmediately(t *testing.T) {
 		return map[string]any{}, ""
 	})
 	start := time.Now()
-	err := waitCDPSelectorLoop(s, parseSelector("@e999"), false, 5000, 10)
+	err := waitCDPSelectorLoop(s, parseSelector("@e999"), "", false, 5000, 10)
 	if err == nil {
 		t.Fatal("wait @e999: want an error")
 	}
@@ -440,7 +449,7 @@ func TestWaitCDPRefGoneSameDocumentPruneSucceeds(t *testing.T) {
 		}
 		return map[string]any{}, ""
 	})
-	if err := waitCDPSelectorLoop(s, parseSelector("@e1"), true, 1000, 10); err != nil {
+	if err := waitCDPSelectorLoop(s, parseSelector("@e1"), "", true, 1000, 10); err != nil {
 		t.Fatalf("wait @e1 --gone after a same-document prune: %v", err)
 	}
 	if resolves == 0 {
@@ -467,7 +476,7 @@ func TestWaitCDPRefGoneCrossDocumentSucceeds(t *testing.T) {
 	})
 	var err error
 	out := captureStdout(t, func() {
-		err = waitCDPSelectorLoop(s, parseSelector("@e1"), true, 1000, 10)
+		err = waitCDPSelectorLoop(s, parseSelector("@e1"), "", true, 1000, 10)
 	})
 	if err != nil {
 		t.Fatalf("wait @e1 --gone after a cross-document navigation: %v", err)
@@ -492,7 +501,7 @@ func TestWaitCDPRefGoneBlankPageWithKnownDocumentDoesNotSucceed(t *testing.T) {
 		}
 		return map[string]any{}, ""
 	})
-	err := waitCDPSelectorLoop(s, parseSelector("@e1"), true, 60, 5)
+	err := waitCDPSelectorLoop(s, parseSelector("@e1"), "", true, 60, 5)
 	if err == nil {
 		t.Fatal("wait @e1 --gone on about:blank: want a failure, got success")
 	}
@@ -533,7 +542,7 @@ func TestWaitCDPRefGoneLoadingDocumentWithKnownDocumentDoesNotSucceed(t *testing
 				}
 				return map[string]any{}, ""
 			})
-			err := waitCDPSelectorLoop(s, parseSelector("@e1"), true, 60, 5)
+			err := waitCDPSelectorLoop(s, parseSelector("@e1"), "", true, 60, 5)
 			if err == nil {
 				t.Fatalf("wait @e1 --gone on a loading document (%s): want a failure, got success", tc.name)
 			}
@@ -575,7 +584,7 @@ func TestWaitCDPRefGoneOldFormatStoreKeepsConservativeBehaviour(t *testing.T) {
 		}
 		return map[string]any{}, ""
 	})
-	err := waitCDPSelectorLoop(s, parseSelector("@e1"), true, 60, 5)
+	err := waitCDPSelectorLoop(s, parseSelector("@e1"), "", true, 60, 5)
 	if err == nil {
 		t.Fatal("wait @e1 --gone on an old-format ref: want a failure, got success")
 	}
@@ -586,5 +595,122 @@ func TestWaitCDPRefGoneOldFormatStoreKeepsConservativeBehaviour(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "still present") {
 		t.Fatalf("an old-format ref must not be reported as %q: %v", "still present", err)
+	}
+}
+
+// A ref minted in the target the wait is aimed at keeps the existing rules: a
+// present node satisfies an appear wait and a node pruned from the same settled
+// document satisfies --gone. Recording the target must not turn a legitimate
+// same-tab wait into a mismatch.
+func TestWaitCDPRefSameTargetKeepsExistingBehaviour(t *testing.T) {
+	t.Run("present satisfies appear", func(t *testing.T) {
+		withRefStoreIdentity(t,
+			map[string]int64{"@e1": 51},
+			map[string]string{"@e1": "loader-1"},
+			map[string]string{"@e1": "TAB-A"})
+		calls := 0
+		s := fakeWaitCDP(t, func(method string, params json.RawMessage) (any, string) {
+			calls++
+			switch method {
+			case "Page.getFrameTree":
+				return frameTreeResult("loader-1", "https://example.test/list"), ""
+			case "DOM.resolveNode":
+				return map[string]any{"object": map[string]any{"objectId": "obj-51"}}, ""
+			case "Runtime.callFunctionOn":
+				return map[string]any{"result": map[string]any{"type": "boolean", "value": true}}, ""
+			}
+			return map[string]any{}, ""
+		})
+		if err := waitCDPSelectorLoop(s, parseSelector("@e1"), "TAB-A", false, 1000, 10); err != nil {
+			t.Fatalf("wait @e1 in its own target: %v", err)
+		}
+		if calls == 0 {
+			t.Fatal("the ref must be probed in its own target")
+		}
+	})
+
+	t.Run("removed satisfies gone", func(t *testing.T) {
+		withRefStoreIdentity(t,
+			map[string]int64{"@e1": 52},
+			map[string]string{"@e1": "loader-1"},
+			map[string]string{"@e1": "TAB-A"})
+		s := fakeWaitCDP(t, func(method string, params json.RawMessage) (any, string) {
+			switch method {
+			case "Page.getFrameTree":
+				return frameTreeResult("loader-1", "https://example.test/list"), ""
+			case "Runtime.evaluate":
+				return readyStateResult("complete"), ""
+			case "DOM.resolveNode":
+				return nil, "No node with given id found"
+			}
+			return map[string]any{}, ""
+		})
+		if err := waitCDPSelectorLoop(s, parseSelector("@e1"), "TAB-A", true, 1000, 10); err != nil {
+			t.Fatalf("wait @e1 --gone in its own target after a same-document prune: %v", err)
+		}
+	})
+}
+
+// A backendNodeId only means something inside the target whose DOM tree issued
+// it, so a ref minted in tab A can be neither present nor absent in tab B.
+// Pointing a wait at another tab is a hard error naming both targets, never
+// "gone" (which would be a false success) and never a poll, in both senses.
+func TestWaitCDPRefDifferentTargetFails(t *testing.T) {
+	for _, gone := range []bool{false, true} {
+		name := "wait"
+		if gone {
+			name = "wait --gone"
+		}
+		t.Run(name, func(t *testing.T) {
+			withRefStoreIdentity(t,
+				map[string]int64{"@e1": 61},
+				map[string]string{"@e1": "loader-1"},
+				map[string]string{"@e1": "TAB-A"})
+			calls := 0
+			s := fakeWaitCDP(t, func(method string, params json.RawMessage) (any, string) {
+				calls++
+				return map[string]any{}, ""
+			})
+			err := waitCDPSelectorLoop(s, parseSelector("@e1"), "TAB-B", gone, 5000, 10)
+			if err == nil {
+				t.Fatalf("%s against a different target: want an error, got success", name)
+			}
+			for _, want := range []string{"@e1", "was minted in target TAB-A", "not TAB-B"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q missing %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), "gone") {
+				t.Fatalf("a different target must not be reported as gone: %v", err)
+			}
+			if calls != 0 {
+				t.Fatalf("a target mismatch must fail before touching the page, saw %d CDP calls", calls)
+			}
+		})
+	}
+}
+
+// A ref whose stored target is unknown (an old refs.json, or a mint that could
+// not resolve the target) is not a mismatch: the loaderId rules decide exactly
+// as before. Here the recorded document navigated away and settled, so --gone
+// succeeds for the pre-existing reason, and nothing mentions a target.
+func TestWaitCDPRefUnknownTargetKeepsLoaderIDRules(t *testing.T) {
+	withRefStoreIdentity(t,
+		map[string]int64{"@e1": 71},
+		map[string]string{"@e1": "loader-1"},
+		nil)
+	s := fakeWaitCDP(t, func(method string, params json.RawMessage) (any, string) {
+		switch method {
+		case "Page.getFrameTree":
+			return frameTreeResult("loader-2", "https://example.test/next"), ""
+		case "Runtime.evaluate":
+			return readyStateResult("complete"), ""
+		case "DOM.resolveNode":
+			return nil, "No node with given id found"
+		}
+		return map[string]any{}, ""
+	})
+	if err := waitCDPSelectorLoop(s, parseSelector("@e1"), "TAB-B", true, 1000, 10); err != nil {
+		t.Fatalf("unknown target identity must not block the loaderId path: %v", err)
 	}
 }

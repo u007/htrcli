@@ -28,16 +28,21 @@ func refStorePath() string {
 //
 // LoaderIDs records the document identity (main-frame loaderId) each ref was
 // minted in, which lets `wait --gone` tell "this node was pruned in the same
-// document" apart from "the document that held it navigated away". The field is
-// additive and optional: a file written by an older build has no "loaderIds"
-// key, so a missing entry means the identity is unknown, never that it
+// document" apart from "the document that held it navigated away". TargetIDs
+// records the CDP page target (tab) each ref was minted in, so a wait aimed at
+// a different tab is a hard error instead of a false "gone": a backendNodeId
+// means nothing outside the target whose DOM tree issued it.
+//
+// Both maps are additive and optional: a file written by an older build has
+// neither key, so a missing entry means the identity is unknown, never that it
 // mismatched. That keeps the existing refs.json readable by both directions, so
-// the file format needs no version bump; an older build ignores the key on read
-// and drops it on its next write.
+// the file format needs no version bump; an older build ignores the keys on
+// read and drops them on its next write.
 type RefStore struct {
 	NextRef   int               `json:"nextRef"`
 	Refs      map[string]int64  `json:"refs"`
 	LoaderIDs map[string]string `json:"loaderIds,omitempty"`
+	TargetIDs map[string]string `json:"targetIds,omitempty"`
 	path      string            // populated on load, not serialized
 }
 
@@ -48,7 +53,7 @@ func LoadRefStore() (*RefStore, error) {
 	if path == "" {
 		return nil, fmt.Errorf("cannot determine home directory for ref store")
 	}
-	rs := &RefStore{NextRef: 0, Refs: map[string]int64{}, LoaderIDs: map[string]string{}, path: path}
+	rs := &RefStore{NextRef: 0, Refs: map[string]int64{}, LoaderIDs: map[string]string{}, TargetIDs: map[string]string{}, path: path}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -65,6 +70,9 @@ func LoadRefStore() (*RefStore, error) {
 	if rs.LoaderIDs == nil {
 		rs.LoaderIDs = map[string]string{}
 	}
+	if rs.TargetIDs == nil {
+		rs.TargetIDs = map[string]string{}
+	}
 	rs.path = path
 	return rs, nil
 }
@@ -77,14 +85,17 @@ func (rs *RefStore) Alloc(backendNodeID int64) string {
 	return refID
 }
 
-// AllocInDocument mints the next @eN id for a backendNodeId and records the
-// document it was minted in (the main frame's loaderId). An empty loaderID
-// leaves the identity unknown, so the ref behaves like one written by an older
-// build.
-func (rs *RefStore) AllocInDocument(backendNodeID int64, loaderID string) string {
+// AllocInDocument mints the next @eN id for a backendNodeId and records where
+// it was minted: the main frame's loaderId and the CDP page target that served
+// the DOM query. An empty value leaves that identity unknown, so the ref
+// behaves like one written by an older build.
+func (rs *RefStore) AllocInDocument(backendNodeID int64, loaderID, targetID string) string {
 	refID := rs.Alloc(backendNodeID)
 	if loaderID != "" {
 		rs.LoaderIDs[refID] = loaderID
+	}
+	if targetID != "" {
+		rs.TargetIDs[refID] = targetID
 	}
 	return refID
 }
@@ -100,6 +111,14 @@ func (rs *RefStore) Lookup(refID string) (int64, bool) {
 // recorded), which callers must not treat as a mismatch.
 func (rs *RefStore) LookupDocument(refID string) (string, bool) {
 	id, ok := rs.LoaderIDs[refID]
+	return id, ok && id != ""
+}
+
+// LookupTarget returns the CDP page target the ref was minted in. ok is false
+// when the identity is unknown (a ref written before targetIDs were recorded),
+// which callers must not treat as a mismatch.
+func (rs *RefStore) LookupTarget(refID string) (string, bool) {
+	id, ok := rs.TargetIDs[refID]
 	return id, ok && id != ""
 }
 

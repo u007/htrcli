@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -142,5 +144,96 @@ func TestScrollDelta(t *testing.T) {
 		if dx != tc.dx || dy != tc.dy {
 			t.Fatalf("scrollDelta(%q, %d) = (%d, %d), want (%d, %d)", tc.direction, tc.pixels, dx, dy, tc.dx, tc.dy)
 		}
+	}
+}
+
+// runFindRefCDP must record the CDP target that served the DOM query alongside
+// the document, because a backendNodeId is only meaningful inside that target.
+// The mint here resolves its target from the browser's target list (no --tab),
+// which is the default path an operator takes.
+func TestRunFindRefCDPRecordsMintTarget(t *testing.T) {
+	resetTransportState()
+	cdpFlag = true
+	defer resetTransportState()
+	tabTarget = ""
+	defer func() { tabTarget = "" }()
+	useEmulationStore(t)
+	refStorePathOverride = t.TempDir() + "/refs.json"
+	defer func() { refStorePathOverride = "" }()
+
+	upgrader := websocket.Upgrader{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/json", func(w http.ResponseWriter, r *http.Request) {
+		targets := []map[string]any{{
+			"id":                   "TAB-A",
+			"type":                 "page",
+			"title":                "fixture",
+			"url":                  "https://example.test/list",
+			"webSocketDebuggerUrl": "ws://" + r.Host + "/devtools/page/TAB-A",
+		}}
+		if err := json.NewEncoder(w).Encode(targets); err != nil {
+			t.Errorf("encode targets: %v", err)
+		}
+	})
+	mux.HandleFunc("/devtools/page/TAB-A", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer conn.Close()
+		for {
+			var req struct {
+				ID     int64           `json:"id"`
+				Method string          `json:"method"`
+				Params json.RawMessage `json:"params"`
+			}
+			if err := conn.ReadJSON(&req); err != nil {
+				return // intentionally not logged: the client closing the socket ends the fake browser loop
+			}
+			result := map[string]any{}
+			switch req.Method {
+			case "Page.getFrameTree":
+				result = frameTreeResult("loader-A", "https://example.test/list")
+			case "DOM.getDocument":
+				result = map[string]any{"root": map[string]any{"nodeId": 1}}
+			case "DOM.querySelector":
+				result = map[string]any{"nodeId": 2}
+			case "DOM.describeNode":
+				result = map[string]any{"node": map[string]any{"backendNodeId": 4242}}
+			}
+			if err := conn.WriteJSON(map[string]any{"id": req.ID, "result": result}); err != nil {
+				return // intentionally not logged: the client closing the socket ends the fake browser loop
+			}
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse fake browser URL: %v", err)
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil {
+		t.Fatalf("fake browser port: %v", err)
+	}
+	setViperCDPPort(t, port)
+
+	if err := runFindRefCDP("#go", false); err != nil {
+		t.Fatalf("runFindRefCDP: %v", err)
+	}
+
+	rs, err := LoadRefStore()
+	if err != nil {
+		t.Fatalf("load ref store: %v", err)
+	}
+	if id, ok := rs.Lookup("@e1"); !ok || id != 4242 {
+		t.Fatalf("backendNodeId for @e1 = %d,%v, want 4242,true", id, ok)
+	}
+	if targetID, ok := rs.LookupTarget("@e1"); !ok || targetID != "TAB-A" {
+		t.Fatalf("LookupTarget(@e1) = %q,%v, want TAB-A,true", targetID, ok)
+	}
+	if loaderID, ok := rs.LookupDocument("@e1"); !ok || loaderID != "loader-A" {
+		t.Fatalf("LookupDocument(@e1) = %q,%v, want loader-A,true", loaderID, ok)
 	}
 }

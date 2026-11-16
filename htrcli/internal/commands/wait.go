@@ -191,12 +191,12 @@ func waitCDPSelector(timeout int) error {
 	if err := checkFrameTarget(target); err != nil {
 		return err
 	}
-	s, _, err := cdpSession()
+	s, targetID, err := cdpSession()
 	if err != nil {
 		return err
 	}
 	defer s.Close()
-	return waitCDPSelectorLoop(s, target, waitGone, timeout, waitInterval)
+	return waitCDPSelectorLoop(s, target, targetID, waitGone, timeout, waitInterval)
 }
 
 // waitCDPSelectorLoop polls one selector target until the wait condition holds
@@ -208,6 +208,11 @@ func waitCDPSelector(timeout int) error {
 // it is resolved through the persistent ref store instead of findAll (see
 // newWaitRefProbe). Every other selector keeps the findAll path.
 //
+// targetID is the CDP page target this loop is aimed at. A ref records the
+// target it was minted in, so a wait aimed at another tab fails immediately
+// instead of reading that tab's absence as "gone" (see newWaitRefProbe);
+// targetID "" (unresolved) keeps the conservative path.
+//
 // findAll is polled each tick rather than one long page-side wait. A
 // navigation during a single evaluate destroys its execution context, which is
 // not retried; a fresh evaluate per tick follows the new document. With --gone
@@ -217,12 +222,12 @@ func waitCDPSelector(timeout int) error {
 // absence only counts once the document holding the ref is known to be settled
 // — either the same document (the node was removed) or a different, settled one
 // (the document that held it navigated away).
-func waitCDPSelectorLoop(s *cdp.Session, target *api.TargetSelector, gone bool, timeout, interval int) error {
+func waitCDPSelectorLoop(s *cdp.Session, target *api.TargetSelector, targetID string, gone bool, timeout, interval int) error {
 	var probe waitRefProbe
 	var guard waitDocumentGuard
 	var mintedLoaderID string
 	if target.Ref != "" {
-		p, minted, err := newWaitRefProbe(s, target.Ref)
+		p, minted, err := newWaitRefProbe(s, target.Ref, targetID)
 		if err != nil {
 			return err
 		}
@@ -282,9 +287,9 @@ func waitCDPSelectorLoop(s *cdp.Session, target *api.TargetSelector, gone bool, 
 					// settled different document the element is gone because the
 					// document holding it was replaced by a navigation.
 					//
-					// shortcut: the ref store is not scoped to a CDP target, so a
-					// wait aimed at a different tab than the mint also reads as
-					// gone. Scope refs by target when refs become per-tab.
+					// A ref minted in a different CDP target never reaches this
+					// point: newWaitRefProbe rejects it before the first poll, so
+					// "absent in another tab" cannot read as gone.
 					done = true
 				case doc.Navigated:
 					// Identity unknown (an older ref store): keep the

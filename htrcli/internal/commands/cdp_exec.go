@@ -15,7 +15,9 @@ import (
 )
 
 // runFindRefCDP finds an element via CDP, mints a ref for it, and saves it
-// to the persistent ref store (~/.htrcli/refs.json).
+// to the persistent ref store (~/.htrcli/refs.json). Each ref records the CDP
+// target and document it was minted in, so a later wait can prove it is aimed
+// at the same page rather than reading another tab's absence as "gone".
 func runFindRefCDP(selector string, all bool) error {
 	if frameFlag != "" {
 		return fmt.Errorf("find --ref cannot be combined with --frame (refs are resolved in the top-level document)")
@@ -44,7 +46,7 @@ func runFindRefCDP(selector string, all bool) error {
 		return fmt.Errorf("find --ref on CDP requires a CSS selector or an @eN ref, got %q", selector)
 	}
 
-	s, _, err := cdpSession()
+	s, targetID, err := cdpSession()
 	if err != nil {
 		return err
 	}
@@ -69,7 +71,7 @@ func runFindRefCDP(selector string, all bool) error {
 		}
 		refs := make([]string, len(ids))
 		for i, id := range ids {
-			refs[i] = rs.AllocInDocument(id, document.LoaderID)
+			refs[i] = rs.AllocInDocument(id, document.LoaderID, targetID)
 		}
 		if err := rs.Save(); err != nil {
 			return fmt.Errorf("saving ref store: %w", err)
@@ -86,7 +88,7 @@ func runFindRefCDP(selector string, all bool) error {
 		if err != nil {
 			return fmt.Errorf("resolving backend node: %w", err)
 		}
-		ref := rs.AllocInDocument(backendID, document.LoaderID)
+		ref := rs.AllocInDocument(backendID, document.LoaderID, targetID)
 		if err := rs.Save(); err != nil {
 			return fmt.Errorf("saving ref store: %w", err)
 		}
@@ -146,6 +148,21 @@ func cdpSession() (*cdp.Session, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	// Resolve the target before dialing when --tab is unset: the returned ID is
+	// then the target PageSession actually dials, which is what a mint records.
+	// Dialing targets[0] from one listing and reporting targets[0] from a second
+	// one can disagree if tab order shifts between the two calls, and a ref
+	// stamped with the wrong target would make a later wait look at another tab.
+	if targetID == "" {
+		targets, err := cdp.ListTargets(port)
+		if err != nil {
+			return nil, "", err
+		}
+		if len(targets) == 0 {
+			return nil, "", errors.New("no page targets open")
+		}
+		targetID = targets[0].ID
+	}
 	s, err := cdp.PageSession(port, targetID)
 	if err != nil {
 		return nil, "", err
@@ -156,12 +173,6 @@ func cdpSession() (*cdp.Session, string, error) {
 		// intentionally not logged: the apply error is returned to the caller below, and a close failure on a session that already failed adds nothing
 		_ = s.Close()
 		return nil, "", fmt.Errorf("applying stored emulation for port %d: %w", port, err)
-	}
-	if targetID == "" {
-		targets, err := cdp.ListTargets(port)
-		if err == nil && len(targets) > 0 {
-			targetID = targets[0].ID
-		}
 	}
 	return s, targetID, nil
 }

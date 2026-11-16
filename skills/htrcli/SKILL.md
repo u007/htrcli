@@ -535,6 +535,10 @@ so a ref minted by an earlier `find … --ref` is usable here. `--selector` is t
 flag form (`--selector "@e1"`), not a positional argument. An unknown ref fails
 immediately as a stale ref instead of polling.
 
+A ref is scoped to the tab that minted it: `wait --selector "@e1"` against a
+different tab is a hard error naming both targets, never a pass or a timeout.
+Re-run `find … --ref` after switching tabs.
+
 A selector that never matched also satisfies `--gone` immediately, so on a row
 that might not exist yet, `wait --selector` for its presence first — otherwise
 a typo passes vacuously.

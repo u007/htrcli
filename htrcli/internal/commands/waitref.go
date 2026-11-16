@@ -42,9 +42,17 @@ type waitDocumentGuard func() (waitDocumentState, error)
 // It also returns the loaderId of the document the ref was minted in, or "" for
 // a ref written before the store recorded document identities.
 //
+// currentTargetID is the CDP page target this wait is aimed at. A backendNodeId
+// is only meaningful inside the target whose DOM tree issued it, so a ref
+// minted in a different target can never be present or absent here: reporting
+// its absence as "gone" would turn a mixed-up tab into a false success. That
+// case fails immediately, naming both targets. When either identity is unknown
+// (a ref store from before targetIDs existed, or an unresolved current target)
+// the check is skipped and the loaderId rules stay in charge.
+//
 // An unknown ref fails immediately: polling an id the store never issued can
 // never succeed, and a silent retry loop would hide a bad selector.
-func newWaitRefProbe(s *cdp.Session, ref string) (waitRefProbe, string, error) {
+func newWaitRefProbe(s *cdp.Session, ref, currentTargetID string) (waitRefProbe, string, error) {
 	rs, err := LoadRefStore()
 	if err != nil {
 		return nil, "", err
@@ -52,6 +60,9 @@ func newWaitRefProbe(s *cdp.Session, ref string) (waitRefProbe, string, error) {
 	backendNodeID, ok := rs.Lookup(ref)
 	if !ok {
 		return nil, "", fmt.Errorf("wait: stale ref: %s is not known in the CDP ref store (mint one with: htrcli find <selector> --ref)", ref)
+	}
+	if mintedTargetID, ok := rs.LookupTarget(ref); ok && currentTargetID != "" && mintedTargetID != currentTargetID {
+		return nil, "", fmt.Errorf("wait: ref %q was minted in target %s, not %s", ref, mintedTargetID, currentTargetID)
 	}
 	mintedLoaderID, _ := rs.LookupDocument(ref)
 	return func() (cdp.BackendNodeState, error) {
