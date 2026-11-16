@@ -843,9 +843,23 @@ the weighting, NOT a trustworthy grader. No larger model has been measured.
   decrypted task text or rubrics must not be republished or used for training.
   The source constraint above is unchanged.
 
-## Comparison with Browser Use (shape, not like-for-like)
+## Comparison with other harnesses
 
-Provenance for their column: `official_results/*.json` in
+### What is comparable, and what is not
+
+- **Browser Use** publishes per-run aggregates (`official_results/*.json`): tasks,
+  successes, total steps, total duration, total cost. Those reduce to a per-task
+  shape and are quoted below verbatim.
+- **Claude for Chrome** and **ChatGPT's browser agent** publish no per-task
+  steps, duration or cost. Their public claims are success rates on third-party
+  suites under their own task sets, which cannot be dropped into this table
+  without inventing numbers — so their cells read "not published".
+- **htrcli is not an agent.** It executes deterministic steps chosen by a driver
+  (this session, or a model loop). Its numbers measure harness overhead per task,
+  not competence. Only the shape is comparable: steps/task, seconds/task, success
+  rate, and cost where a run recorded one.
+
+Provenance for the Browser Use column: `official_results/*.json` in
 `browser-use/benchmark` at HEAD `77b4df3`. Each row is one 100-task run; cost is
 that run's total divided by the tasks it completed.
 
@@ -868,6 +882,20 @@ fields are `commands` and `wall_ms`):
 | S26 comparison (2 offline pages) | 15 | 0.24 | PASS |
 | S27 challenge detect/refuse | 11 | 0.18 | PASS |
 | B22 live, 3 Wikipedia pages | 6 | 2.09 | PASS |
+
+### Other harnesses
+
+| Harness | task set | success | steps/task | seconds/task | cost/task |
+|---|---|---|---|---|---|
+| Claude for Chrome | not published | not published | not published | not published | not published |
+| ChatGPT browser agent | not published | not published | not published | not published | not published |
+| htrcli (this repo) | our own B-series, S-fixtures | scenario pass rate | `commands` | `wall_ms` | `—` |
+
+A like-for-like comparison needs one task set driven through each harness with
+the same judge and the same recorded fields. Browser Use's tasks are encrypted,
+so the shared set would have to be public — which is exactly what B21–B24 build
+(cart-to-summary, three-source retrieval, two-markup comparison, challenge
+detection). Until such a run exists, claim the shape, never a win.
 
 These numbers are NOT a score against their benchmark. The task sets differ:
 their runs are 100 tasks; ours are four offline fixtures plus one live scenario.

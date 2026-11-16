@@ -2,7 +2,7 @@
 type: Gotcha
 title: extract table/list textContent is lossy for numbers (footnotes, flattened superscripts)
 description: 'extract table/list textContent is lossy for numbers: footnote markers and zero-width joiners stay in cells, and <sup> exponents flatten (e.g. 6.022×10^23 → 6.022×1023). Verified 2026-10-28 on Wikipedia infoboxes.'
-resource: docs/benchmarks/office-task-benchmark.md §B14 (live run, 2026-10-28); scenario S16 (offline fixture proxy)
+resource: benchmark.md §B14 (live run, 2026-10-28); scenario S16 (offline fixture proxy)
 tags:
   - gotcha
   - extract
@@ -10,7 +10,7 @@ tags:
   - fidelity
   - citation-audit
   - benchmark
-timestamp: 2026-10-31T09:07:25Z
+timestamp: 2026-11-16T04:47:33Z
 ---
 # extract table/list textContent is lossy for numbers
 
@@ -50,4 +50,4 @@ Critically, test a PERTURBED value too (`299792459`) — it must return `false`.
 
 What this cannot prove: that the composed prose reasons correctly. The honest pass condition is "every number and reference traces to a live page", never "the text is true".
 
-Context: live run recorded in `docs/benchmarks/office-task-benchmark.md` §B14 "Live run (2026-10-28)"; offline fixture proxy is scenario S16.
+Context: live run recorded in `benchmark.md` §B14 "Live run (2026-10-28)"; offline fixture proxy is scenario S16.

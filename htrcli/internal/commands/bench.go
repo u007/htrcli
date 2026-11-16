@@ -18,7 +18,7 @@ import (
 //	  "scenarios": [
 //	    {
 //	      "id": "B01",
-//	      "ref": "B01",                // link back to docs/benchmarks/office-task-benchmark.md
+//	      "ref": "B01",                // link back to benchmark.md
 //	      "app": "Gmail web",
 //	      "goal": "Search unread mail and return a structured list",
 //	      "requires_auth": true,       // reported as NOT_RUN without an authenticated session

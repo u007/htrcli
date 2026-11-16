@@ -36,7 +36,7 @@ from instead of implying the harness measured it.
 Upstream reference: `browser-use/benchmark` reports score against cost per task
 (weighted rubric, partial credit). Match the metric shape; do not import their
 task text — it is encrypted and the README forbids republishing it. Adoption
-detail lives in `docs/benchmarks/office-task-benchmark.md`.
+detail lives in `benchmark.md`.
 
 ## Commands
 
@@ -98,7 +98,7 @@ benchmarks more than a page visit and how a created record's id is reused as a
 selector.
 
 Scenarios live in `docs/benchmarks/scenarios/`, the spec in
-`docs/benchmarks/office-task-benchmark.md`, and the fixture page in
+`benchmark.md`, and the fixture page in
 `docs/benchmarks/fixtures/`. Runner code: `htrcli/internal/commands/bench*.go`.
 
 Single test file: `bun test src/path/to/file.test.ts`

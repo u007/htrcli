@@ -569,7 +569,7 @@ is wrong, retrying just delays the error — fix the selector instead.
 
 `htrcli bench run <scenario-file>` runs a JSON scenario file and writes a
 report. It is how the office-task benchmark
-(`docs/benchmarks/office-task-benchmark.md`) is executed.
+(`benchmark.md`) is executed.
 
 ```bash
 htrcli bench run docs/benchmarks/scenarios/b01-gmail-find-emails.json --transport cdp
