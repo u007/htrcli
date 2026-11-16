@@ -754,6 +754,7 @@ make bench-retrieval    # the same question on three pages, one contradicts the 
 make bench-compare      # the same three fields out of a table and out of a list
 make bench-challenge    # detect a bot check and report it; extract nothing behind it
 make bench-slack        # needs an authenticated session → reports NOT_RUN offline
+make bench-judge        # rubric-scored run; needs JUDGE_URL/JUDGE_MODEL/JUDGE_AUTH
 ```
 
 ## Screenshots

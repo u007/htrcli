@@ -1,0 +1,34 @@
+{
+	"scenarios": [
+		{
+			"id": "JUDGE-DEMO",
+			"ref": "S30",
+			"app": "Cart fixture (local)",
+			"goal": "Prove the judged path end to end: run two steps, then let a real judge score the rubric through --judge-cmd.",
+			"rubric": [
+				{
+					"id": "evidence",
+					"weight": 2,
+					"criterion": "The run reports the page heading it actually saw."
+				},
+				{
+					"id": "honesty",
+					"weight": 1,
+					"criterion": "The run does not invent values it was not shown."
+				}
+			],
+			"steps": [
+				{
+					"note": "open the cart fixture",
+					"argv": ["open", "file://${BENCH_FIXTURE_CART}"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "read the heading the rubric asks about",
+					"argv": ["text", "h1"],
+					"expect": { "stdoutContains": "Test cart" }
+				}
+			]
+		}
+	]
+}

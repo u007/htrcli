@@ -18,6 +18,7 @@
 		bench-compare \
 		bench-challenge \
 		bench-slack \
+		bench-judge \
 		htrcli-build htrcli-build-all htrcli-build-linux htrcli-install htrcli-clean \
 		ext-build ext-dev ext-zip firefox-build firefox-install firefox-zip
 
@@ -159,6 +160,21 @@ bench-challenge: htrcli-build
 # Slack: needs an authenticated session, so it is reported NOT_RUN offline.
 bench-slack: htrcli-build
 	$(call bench_run,,s28-slack.json,slack)
+
+# Judged run: the rubric is scored by an external judge command. Requires
+# JUDGE_URL / JUDGE_MODEL / JUDGE_AUTH (and JUDGE_API_TOKEN for bearer); see
+# .env.example. Fails fast when they are unset rather than guessing an endpoint.
+bench-judge: htrcli-build
+	@: $${JUDGE_URL:?set JUDGE_URL, see .env.example}
+	@: $${JUDGE_MODEL:?set JUDGE_MODEL, see .env.example}
+	@: $${JUDGE_AUTH:?set JUDGE_AUTH to none or bearer, see .env.example}
+	cd $(HTRCLI_DIR) && \
+		BENCH_FIXTURE_CART="$(BENCH_FIXTURES)/cart.html" \
+		./bin/htrcli bench run ../docs/benchmarks/scenarios/s30-judge-demo.json \
+		--transport cdp \
+		--judge-cmd ../docs/benchmarks/judges/openai-judge.sh \
+		--judge-pass-score 60 \
+		--out ../docs/benchmarks/results/judge-$$$$.json
 
 # ── Extension ──────────────────────────────────────────────────────────
 

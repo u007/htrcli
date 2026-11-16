@@ -787,7 +787,16 @@ what each proves.
 
 **Live addition (same day)**: S29/B22 (`scenarios/s29-b22-live.json`,
 `requires_network`) ran PASS read-only against three Wikipedia pages — 6
-commands, 2.09 s — with no login and no write.
+commands, 2.09 s — with no login and no write. S31/B23
+(`scenarios/s31-b23-live.json`) then ran PASS read-only as a live comparison: the
+same constant (`299792458`) is present on both the *Speed of light* and *Metre*
+articles, and the second heading is asserted NOT to contain the first, so the two
+sources are genuinely distinct — 6 commands, 0.9 s.
+
+**Judged proof (S30)**: `scenarios/s30-judge-demo.json` carries a two-item rubric
+and runs through `make bench-judge`, which requires `JUDGE_URL`, `JUDGE_MODEL`
+and `JUDGE_AUTH` and fails fast when they are absent. Against a local
+Qwen3-0.6B it scored 100 and passed.
 
 Fixtures are addressed through env vars (`BENCH_FIXTURE_CART`,
 `BENCH_FIXTURE_RETRIEVAL_1..3`, `BENCH_FIXTURE_COMPARE_A`/`_B`,
@@ -1024,6 +1033,10 @@ make bench-retrieval  # S25
 make bench-compare    # S26
 make bench-challenge  # S27
 make bench-slack      # S28 (NOT_RUN offline)
+make bench-judge      # S30 (needs JUDGE_URL/JUDGE_MODEL/JUDGE_AUTH)
+# Live, read-only, needs network: s29-b22-live.json, s31-b23-live.json
+#   ./htrcli/bin/htrcli bench run docs/benchmarks/scenarios/<file> \
+#     --transport cdp --allow-network
 ```
 
 Every target needs a Chrome on the CDP port (9555 by default in

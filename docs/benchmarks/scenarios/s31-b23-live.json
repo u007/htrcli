@@ -1,0 +1,47 @@
+{
+	"scenarios": [
+		{
+			"id": "B23",
+			"ref": "S31",
+			"app": "public reference pages (Wikipedia)",
+			"goal": "Compare the same physical constant across two independent live pages with different article structure. Both must carry the value; the two headings must differ, proving the second page is not the first.",
+			"requires_network": true,
+			"deadline_seconds": 120,
+			"steps": [
+				{
+					"note": "source A: speed of light",
+					"argv": ["open", "https://en.wikipedia.org/wiki/Speed_of_light"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "source A carries the constant",
+					"argv": ["eval", "document.body.innerText.includes('299792458')"],
+					"expect": { "stdoutContains": "true" }
+				},
+				{
+					"note": "source A heading",
+					"argv": ["text", "#firstHeading"],
+					"expect": { "stdoutContains": "Speed of light" }
+				},
+				{
+					"note": "source B: the metre, defined by that constant",
+					"argv": ["open", "https://en.wikipedia.org/wiki/Metre"],
+					"expect": { "exit": 0 }
+				},
+				{
+					"note": "source B carries the same constant",
+					"argv": ["eval", "document.body.innerText.includes('299792458')"],
+					"expect": { "stdoutContains": "true" }
+				},
+				{
+					"note": "source B heading differs from source A, so this is a genuine second source",
+					"argv": ["text", "#firstHeading"],
+					"expect": {
+						"stdoutContains": "Metre",
+						"stdoutNotContains": "Speed of light"
+					}
+				}
+			]
+		}
+	]
+}
