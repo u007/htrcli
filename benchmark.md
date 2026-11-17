@@ -43,6 +43,110 @@ so regressions or wins are visible. htrcli is the browser path under test.
 Scoring: PASS = all pass/fail checks met on first attempt. PARTIAL = completed
 with 1 retry/recovery. FAIL = not completed or >2 retries.
 
+## Results (executed 2026-11-16)
+
+Environment: htrcli built from this tree, Chrome 157 on CDP port 9555, all
+fixtures served from `docs/benchmarks/fixtures/`, `--transport cdp`. No network
+except the two live rows. The frozen summary of this run is
+`docs/benchmarks/results-2026-11-16.json`; the per-target report JSONs land in
+the gitignored `docs/benchmarks/results/`, so the frozen file is what is
+committed. Cost is not in these tables at all — no driver supplied token usage,
+and `htrcli` spends none.
+
+One invocation produced every offline row below (`make …` once), so the rows
+and the totals are consistent with each other rather than stitched from reruns.
+
+Reproduce:
+
+```bash
+make htrcli-build
+make bench-smoke bench-office bench-tasks bench-form bench-booking bench-expense \
+     bench-files bench-mail bench-crm bench-messaging bench-tickets bench-leave \
+     bench-social bench-survey bench-finance bench-store bench-research \
+     bench-cart bench-retrieval bench-compare bench-challenge bench-slack
+./htrcli/bin/htrcli bench run docs/benchmarks/scenarios/s29-b22-live.json \
+  --transport cdp --allow-network
+./htrcli/bin/htrcli bench run docs/benchmarks/scenarios/s31-b23-live.json \
+  --transport cdp --allow-network
+make bench-judge   # needs JUDGE_URL / JUDGE_MODEL / JUDGE_AUTH
+```
+
+### Offline suite — 29 rows, 27 PASS
+
+| Scenario | Verdict | Commands | wall_ms |
+|---|---|---|---|
+| S01 | PASS | 7 | 273 |
+| S02 | PASS | 5 | 133 |
+| S03 | PASS | 5 | 227 |
+| S04 | PASS | 7 | 350 |
+| S05 | PASS | 5 | 175 |
+| S06 | PASS | 5 | 183 |
+| S07 | PASS | 9 | 264 |
+| S08 | PASS | 11 | 270 |
+| S09 | PASS | 14 | 273 |
+| S10 | PASS | 17 | 408 |
+| S11 | PASS | 22 | 612 |
+| S12 | PASS | 17 | 576 |
+| S13 | PASS | 22 | 724 |
+| S14 | PASS | 39 | 983 |
+| S15 | PASS | 38 | 1024 |
+| S16 | PASS | 30 | 802 |
+| S17 | PASS | 36 | 998 |
+| S18 | PASS | 49 | 1096 |
+| S19 | PASS | 73 | 1757 |
+| S20 | PASS | 88 | 2806 |
+| S21 | PASS | 81 | 1892 |
+| S22 | PASS | 62 | 1400 |
+| S23 | PASS | 95 | 2105 |
+| S24 | PASS | 32 | 941 |
+| S25 | PASS | 16 | 446 |
+| S26 | PASS | 15 | 480 |
+| S27 | PASS | 11 | 337 |
+| B12 (Slack post) | NOT_RUN | 0 | 0 |
+| B12a (Slack thread) | NOT_RUN | 0 | 0 |
+
+**Totals: 27 PASS, 0 PARTIAL, 0 FAIL, 2 NOT_RUN. 811 commands, 21,535 ms
+wall-clock** — a mean of 30.0 commands and 798 ms per scenario. The two
+NOT_RUN rows require an authenticated Slack workspace, so they are never
+counted as passes. Which make target produced each row, and which scenario
+file it runs, is listed under “Running the benchmark” below.
+
+### Live, read-only (network allowed)
+
+| Scenario | Verdict | Commands | wall_ms | What it did |
+|---|---|---|---|---|
+| B22 (S29) | PASS | 6 | 717 | the same constant on three Wikipedia articles |
+| B23 (S31) | PASS | 6 | 571 | two articles; the second heading is asserted to differ from the first |
+
+Both are read-only and were run on 2026-11-16. Wikipedia content changes, so
+these two rows are not reproducible bit-for-bit; what is reproducible is the
+assertion shape (same value on every source; the headings differ). Neither row
+maps to a browser-use task ID — their task set is encrypted and no correspondence
+is claimed.
+
+### Judged run (real local model)
+
+| Scenario | Verdict | Score | Threshold | Judge |
+|---|---|---|---|---|
+| S30 JUDGE-DEMO | PASS | 100 | 60 | Qwen3-0.6B-Q8_0 (`sha256 9465e63a…b031`) on llama.cpp `llama-server` 0.7.0-dev (commit a469940), temperature 0, `JUDGE_AUTH=none` |
+
+The judge error path is itself exercised: an earlier attempt with the model
+server down reported `judge error: … failed (curl exit 7, HTTP 000)` and FAILED
+the scenario — never a score of 0.
+
+**Scope of this row: plumbing and weighting, not accuracy.** A 0.6B model scoring
+a two-item rubric on a trivial scenario shows the adapter, the JSON contract and
+the weighted arithmetic work end to end. It says nothing about grading quality;
+see “Judge validation” for the one discriminating run (100 vs 50) and the
+standing caveat.
+
+### What these numbers mean, and what they do not
+
+`commands` counts htrcli invocations and `wall_ms` is harness-observed time.
+This is **harness overhead**, not agent competence: no model chose any step in
+the offline rows. Compare the shape with the Browser Use table below, never the
+absolute numbers.
+
 ## Gap sourcing
 
 Likely-gap notes are inferred from htrcli's actual capabilities as documented

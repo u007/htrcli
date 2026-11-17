@@ -1,0 +1,82 @@
+{
+	"date": "2026-11-16",
+	"htrcli": "d054a24 + the results commit",
+	"environment": {
+		"transport": "cdp",
+		"chrome": "157 on CDP port 9555",
+		"fixtures": "docs/benchmarks/fixtures (local, no network)",
+		"source": "one `make bench-smoke … bench-slack` invocation; console summary captured verbatim",
+		"raw_reports": "docs/benchmarks/results/<target>-<pid>.json (gitignored, not committed)"
+	},
+	"offline": {
+		"scenarios": [
+			{ "id": "S01", "verdict": "PASS", "commands": 7, "wall_ms": 273 },
+			{ "id": "S02", "verdict": "PASS", "commands": 5, "wall_ms": 133 },
+			{ "id": "S03", "verdict": "PASS", "commands": 5, "wall_ms": 227 },
+			{ "id": "S04", "verdict": "PASS", "commands": 7, "wall_ms": 350 },
+			{ "id": "S05", "verdict": "PASS", "commands": 5, "wall_ms": 175 },
+			{ "id": "S06", "verdict": "PASS", "commands": 5, "wall_ms": 183 },
+			{ "id": "S07", "verdict": "PASS", "commands": 9, "wall_ms": 264 },
+			{ "id": "S08", "verdict": "PASS", "commands": 11, "wall_ms": 270 },
+			{ "id": "S09", "verdict": "PASS", "commands": 14, "wall_ms": 273 },
+			{ "id": "S10", "verdict": "PASS", "commands": 17, "wall_ms": 408 },
+			{ "id": "S11", "verdict": "PASS", "commands": 22, "wall_ms": 612 },
+			{ "id": "S12", "verdict": "PASS", "commands": 17, "wall_ms": 576 },
+			{ "id": "S13", "verdict": "PASS", "commands": 22, "wall_ms": 724 },
+			{ "id": "S14", "verdict": "PASS", "commands": 39, "wall_ms": 983 },
+			{ "id": "S15", "verdict": "PASS", "commands": 38, "wall_ms": 1024 },
+			{ "id": "S16", "verdict": "PASS", "commands": 30, "wall_ms": 802 },
+			{ "id": "S17", "verdict": "PASS", "commands": 36, "wall_ms": 998 },
+			{ "id": "S18", "verdict": "PASS", "commands": 49, "wall_ms": 1096 },
+			{ "id": "S19", "verdict": "PASS", "commands": 73, "wall_ms": 1757 },
+			{ "id": "S20", "verdict": "PASS", "commands": 88, "wall_ms": 2806 },
+			{ "id": "S21", "verdict": "PASS", "commands": 81, "wall_ms": 1892 },
+			{ "id": "S22", "verdict": "PASS", "commands": 62, "wall_ms": 1400 },
+			{ "id": "S23", "verdict": "PASS", "commands": 95, "wall_ms": 2105 },
+			{ "id": "S24", "verdict": "PASS", "commands": 32, "wall_ms": 941 },
+			{ "id": "S25", "verdict": "PASS", "commands": 16, "wall_ms": 446 },
+			{ "id": "S26", "verdict": "PASS", "commands": 15, "wall_ms": 480 },
+			{ "id": "S27", "verdict": "PASS", "commands": 11, "wall_ms": 337 },
+			{ "id": "B12", "verdict": "NOT_RUN", "commands": 0, "wall_ms": 0, "reason": "requires an authenticated session" },
+			{ "id": "B12a", "verdict": "NOT_RUN", "commands": 0, "wall_ms": 0, "reason": "requires an authenticated session" }
+		],
+		"totals": {
+			"rows": 29,
+			"pass": 27,
+			"partial": 0,
+			"fail": 0,
+			"not_run": 2,
+			"commands": 811,
+			"wall_ms": 21535
+		}
+	},
+	"live": [
+		{
+			"id": "B22",
+			"scenario": "s29-b22-live.json",
+			"verdict": "PASS",
+			"commands": 6,
+			"wall_ms": 717,
+			"note": "requires_network, read-only; three Wikipedia articles"
+		},
+		{
+			"id": "B23",
+			"scenario": "s31-b23-live.json",
+			"verdict": "PASS",
+			"commands": 6,
+			"wall_ms": 571,
+			"note": "requires_network, read-only; two articles, second heading asserted to differ"
+		}
+	],
+	"judge": {
+		"id": "S30",
+		"verdict": "PASS",
+		"score": 100,
+		"pass_score": 60,
+		"model": "Qwen3-0.6B-Q8_0.gguf",
+		"model_sha256": "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+		"runtime": "llama.cpp llama-server 0.7.0-dev (build 1, commit a469940), AppleClang 15, Darwin arm64",
+		"settings": "temperature 0, seed 1, ctx 4096, JUDGE_AUTH=none",
+		"note": "plumbing and weighting check, NOT an accuracy measure"
+	}
+}
