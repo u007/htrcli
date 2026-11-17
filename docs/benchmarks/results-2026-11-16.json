@@ -37,8 +37,20 @@
 			{ "id": "S25", "verdict": "PASS", "commands": 16, "wall_ms": 446 },
 			{ "id": "S26", "verdict": "PASS", "commands": 15, "wall_ms": 480 },
 			{ "id": "S27", "verdict": "PASS", "commands": 11, "wall_ms": 337 },
-			{ "id": "B12", "verdict": "NOT_RUN", "commands": 0, "wall_ms": 0, "reason": "requires an authenticated session" },
-			{ "id": "B12a", "verdict": "NOT_RUN", "commands": 0, "wall_ms": 0, "reason": "requires an authenticated session" }
+			{
+				"id": "B12",
+				"verdict": "NOT_RUN",
+				"commands": 0,
+				"wall_ms": 0,
+				"reason": "requires an authenticated session"
+			},
+			{
+				"id": "B12a",
+				"verdict": "NOT_RUN",
+				"commands": 0,
+				"wall_ms": 0,
+				"reason": "requires an authenticated session"
+			}
 		],
 		"totals": {
 			"rows": 29,
