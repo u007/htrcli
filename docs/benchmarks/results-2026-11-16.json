@@ -80,6 +80,22 @@
 			"note": "requires_network, read-only; two articles, second heading asserted to differ"
 		}
 	],
+	"live_writes": [
+		{
+			"id": "B12",
+			"verdict": "PASS",
+			"workspace": "htrcli1 (T0CJH11BT60), channel #new-channel, private to its creator",
+			"note": "interactive run over the extension transport; no commands/wall_ms metric",
+			"evidence": "message text present in the channel; composer empty after send"
+		},
+		{
+			"id": "B12a",
+			"verdict": "PASS",
+			"workspace": "htrcli1 (T0CJH11BT60)",
+			"note": "interactive run; thread opened from the parent message",
+			"evidence": "reply present in the thread; the channel body does not contain it; the parent shows '1 reply'"
+		}
+	],
 	"judge": {
 		"id": "S30",
 		"verdict": "PASS",

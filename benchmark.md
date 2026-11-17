@@ -124,6 +124,31 @@ assertion shape (same value on every source; the headings differ). Neither row
 maps to a browser-use task ID — their task set is encrypted and no correspondence
 is claimed.
 
+### Live, writes (Slack, throwaway workspace)
+
+Run on 2026-11-16 against a freshly created free workspace (`htrcli1`, team
+`T0CJH11BT60`), channel `#new-channel`, which Slack reports as visible only to
+its creator. These were driven interactively over the extension transport, not
+through `bench run`, so they carry no `commands`/`wall_ms` metric — the evidence
+is the assertions below, each read back from the page.
+
+| Task | Verdict | What was done | Evidence read back |
+|---|---|---|---|
+| B12 Post a message | PASS | typed into the channel composer and sent | message text present in the channel; composer empty afterwards |
+| B12a Reply in a thread | PASS | opened the message's thread and replied there | reply present in the thread panel; the **channel** body does not contain the reply text; the parent shows **"1 reply"** |
+
+The B12a row is the one that matters: a reply that silently posts to the channel
+would fail the `channelHasReplyText: false` assertion, so the check discriminates
+between "threaded" and "not threaded".
+
+The test message and its thread reply were **left in place** in that throwaway
+workspace as the evidence; the channel is private to its creator and no other
+member was invited. There is no repeatable `bench run` scenario for these two:
+`scenarios/s28-slack.json` stays `requires_auth` and therefore `NOT_RUN` offline,
+so a scripted live version would need a second, non-auth scenario file.
+
+
+
 ### Judged run (real local model)
 
 | Scenario | Verdict | Score | Threshold | Judge |
@@ -1158,6 +1183,40 @@ run:
 - Never share a document with anyone but the test account.
 - Never enter payment details (B07) or solve a CAPTCHA.
 - Never type into a cell or field of a production sheet.
+
+#### What the live runs need
+
+No password is needed by the harness. Each run needs a session that is already
+logged in inside a dedicated context, because a context owns its own persistent
+`--user-data-dir`:
+
+```bash
+htrcli --context live-google open https://mail.google.com   # log in once, by hand
+htrcli --context live-slack  open https://app.slack.com
+```
+
+The login then survives across runs and touches no other profile. A 2FA or
+CAPTCHA prompt must be cleared by the account owner at that login; the harness
+never solves one. Tell the driver the context name and confirm the account is
+throwaway or staging — writes are attempted only where they are explicitly
+allowed.
+
+| Runs | What has to exist | Tasks |
+|---|---|---|
+| B02, B03, B04, B05, B06, B08, B10 | one throwaway Google account (Gmail, Calendar, Tasks, Docs, Sheets, Drive) | 7 |
+| B12, B12a | one free Slack workspace (or a Teams/Discord test server) | 2 |
+| B18 | a sandbox or demo banking portal, read-only — never a real bank login | 1 |
+| B07, B09, B11, B13, B15, B16, B17, B19, B20 | a demo tenant you own, with writes allowed per task: booking, expense, CRM, form, social, store, helpdesk, HR, survey | 9 |
+
+That is 19 tasks across the 18 blocked entries (B12/B12a share one entry). The
+other six tasks are already covered: B01 and B14 by live read-only runs, B21–B24
+by their offline proofs plus the B22/B23 live rows.
+
+A Google account plus a Slack workspace unlocks 9 of the 19 and needs no vendor
+sign-up beyond those two. The nine demo-tenant tasks each need a separate
+sign-up that cannot be automated (email verification), which is why they stay
+`NOT_RUN` until someone creates them.
+
 
 ## Notes
 
