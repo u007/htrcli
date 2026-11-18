@@ -14,12 +14,13 @@
 <body>
   <h1>Doc (fixture)</h1>
 
-  <div id="doc-surface" contenteditable="true" role="textbox" aria-label="Document body">
+  <!-- biome-ignore lint/a11y/useSemanticElements: contenteditable rich-text surface has no semantic equivalent -->
+  <div id="doc-surface" contenteditable="true" role="textbox" aria-label="Document body" tabindex="0">
     <h1>Existing heading</h1>
     <p>Existing paragraph.</p>
   </div>
 
-  <button id="share">Share</button>
+  <button id="share" type="button">Share</button>
   <div id="share-state" role="status">not shared</div>
 </body>
 </html>

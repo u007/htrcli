@@ -34,7 +34,7 @@
   <div id="page1" class="page visible">
     <h2>Step 1 — Search</h2>
     <div class="field">
-      <label>Room</label>
+      <label for="room">Room</label>
       <select id="room">
         <option value="">— Select a room —</option>
         <option value="conf-a">Conference Room A</option>
@@ -43,7 +43,7 @@
       </select>
     </div>
     <div class="field">
-      <label>Date <span style="color:#d00">*</span></label>
+      <label for="date-trigger">Date <span style="color:#d00">*</span></label>
       <button id="date-trigger" type="button">Select date</button>
       <div id="popover" hidden>
         <div class="day-grid" id="day-grid">
@@ -56,7 +56,7 @@
       <div id="date-err" class="error">Date is required</div>
     </div>
     <div class="field">
-      <label>Start time <span style="color:#d00">*</span></label>
+      <label for="start-time">Start time <span style="color:#d00">*</span></label>
       <select id="start-time" required>
         <option value="">— Select —</option>
         <option value="09:00">09:00</option>
@@ -67,7 +67,7 @@
       </select>
     </div>
     <div class="nav">
-      <button id="next1">Next</button>
+      <button id="next1" type="button">Next</button>
     </div>
   </div>
 
@@ -91,8 +91,8 @@
     </div>
     <p id="seat-err" class="error">Please select at least one seat</p>
     <div class="nav">
-      <button id="prev2">Back</button>
-      <button id="next2">Continue</button>
+      <button id="prev2" type="button">Back</button>
+      <button id="next2" type="button">Continue</button>
     </div>
   </div>
 
@@ -105,8 +105,8 @@
     <p>Date: <span id="conf-date">—</span></p>
     <p>Time: <span id="conf-time">—</span></p>
     <p>Seats: <span id="conf-seats">—</span></p>
-    <button id="cancel">Cancel booking</button>
-    <button id="new-booking">New booking</button>
+    <button id="cancel" type="button">Cancel booking</button>
+    <button id="new-booking" type="button">New booking</button>
   </div>
 
   <script>

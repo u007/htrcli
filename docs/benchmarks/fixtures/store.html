@@ -216,7 +216,7 @@
       raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return seed();
       parsed = JSON.parse(raw);
-      if (!parsed || parsed.version !== 1) return seed();
+      if (parsed?.version !== 1) return seed();
       return parsed;
     } catch (_e) {
       return seed();
@@ -604,7 +604,7 @@
 
   function confirmCancel() {
     var order = state.cancelTarget ? orderById(state.cancelTarget) : null;
-    if (!order || order.status !== "Processing") {
+    if (order?.status !== "Processing") {
       state.cancelTarget = null;
       render();
       return;

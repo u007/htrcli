@@ -56,6 +56,7 @@
     <li class="task" data-id="t1" data-title="Existing task" data-due="" data-notes="">
       <!-- A DIV acting as a checkbox: the ARIA role, not an <input>. This is
            the shape Google Tasks (and Material UI's button-checkbox) uses. -->
+      <!-- biome-ignore lint/a11y/useSemanticElements: Material-style button-checkbox, deliberately a div -->
       <div role="checkbox" aria-checked="false" class="check" tabindex="0"></div>
       <span class="title">Existing task</span>
     </li>

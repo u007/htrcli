@@ -142,7 +142,7 @@
   };
 
   function money(cents) {
-    return "$" + (cents / 100).toFixed(2);
+    return `$${(cents / 100).toFixed(2)}`;
   }
 
   function el(tag, attrs, text) {
@@ -207,7 +207,7 @@
     var count = t.lines.length;
 
     document.getElementById("cart-count").textContent =
-      count === 1 ? "1 item" : count + " items";
+      count === 1 ? "1 item" : `${count} items`;
     document.getElementById("cart-count").setAttribute("data-count", String(count));
 
     if (count === 0) {
@@ -228,7 +228,7 @@
         type: "number",
         min: "1",
         max: "9",
-        id: "qty-" + line.sku,
+        id: `qty-${line.sku}`,
         "class": "qty-input",
         "data-sku": line.sku
       });
@@ -248,9 +248,9 @@
     fillRows(document.getElementById("summary-rows"), t.lines);
     document.getElementById("subtotal").textContent = money(t.subtotal);
     document.getElementById("discount").textContent =
-      t.discount === 0 ? "$0.00" : "-" + money(t.discount);
+      t.discount === 0 ? "$0.00" : `-${money(t.discount)}`;
     document.getElementById("discount-rate").textContent =
-      t.rate === 0 ? "" : "(" + (t.rate / 100).toFixed(2) + "% off)";
+      t.rate === 0 ? "" : `(${(t.rate / 100).toFixed(2)}% off)`;
     document.getElementById("total").textContent = money(t.total);
 
     // Independent, machine-readable copies of what the page prints. A scenario
@@ -267,7 +267,7 @@
 
   function addToCart(sku) {
     state.cart[sku] = state.cart[sku] ? state.cart[sku] + 1 : 1;
-    addAudit("add " + sku);
+    addAudit(`add ${sku}`);
     render();
   }
 
@@ -277,7 +277,7 @@
     if (!Number.isFinite(n) || n < 1) n = 1;
     if (n > 9) n = 9;
     state.cart[sku] = n;
-    addAudit("qty " + sku + "=" + n);
+    addAudit(`qty ${sku}=${n}`);
     render();
   }
 
@@ -292,13 +292,13 @@
     }
     if (!COUPONS[raw]) {
       state.coupon = null;
-      status.textContent = "Coupon " + raw + " is not valid.";
+      status.textContent = `Coupon ${raw} is not valid.`;
       render();
       return;
     }
     state.coupon = raw;
-    status.textContent = "Coupon " + raw + " applied: " + (COUPONS[raw] / 100).toFixed(0) + "% off";
-    addAudit("coupon " + raw);
+    status.textContent = `Coupon ${raw} applied: ${(COUPONS[raw] / 100).toFixed(0)}% off`;
+    addAudit(`coupon ${raw}`);
     render();
   }
 
@@ -354,7 +354,7 @@
 
   document.addEventListener("input", (event) => {
     var target = event.target;
-    if (!target || !target.classList || !target.classList.contains("qty-input")) return;
+    if (!target?.classList?.contains("qty-input")) return;
     setQty(target.getAttribute("data-sku"), target.value);
   });
 

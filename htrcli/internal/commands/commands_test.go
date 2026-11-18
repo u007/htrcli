@@ -188,3 +188,172 @@ func TestParseAnnotateSelectorsEmpty(t *testing.T) {
 		t.Fatalf("empty string should yield nil, got %+v", got)
 	}
 }
+
+// TestRightClickSendsRightclickAction guards the missing CLI verb: the extension
+// and CDP layers both understand "rightclick", so the command must forward that
+// exact action rather than degrading to a left click.
+func TestRightClickSendsRightclickAction(t *testing.T) {
+	var gotAction, gotSelector string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req api.CommandRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		gotAction = req.Command.Action
+		if req.Command.Target != nil {
+			gotSelector = req.Command.Target.Selector
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(api.ApiResponse{
+			OK:   true,
+			Data: api.CommandResult{ID: "1", Success: true},
+		})
+	}))
+	defer server.Close()
+
+	client = api.NewClient(server.URL, "")
+	tabTarget = "1"
+	transportFlag = "ext"
+	defer func() { client = nil; transportFlag = ""; tabTarget = "" }()
+
+	if err := rightclickCmd.RunE(rightclickCmd, []string{".row"}); err != nil {
+		t.Fatalf("rightclick RunE: %v", err)
+	}
+	if gotAction != "rightclick" {
+		t.Fatalf("action = %q, want %q", gotAction, "rightclick")
+	}
+	if gotSelector != ".row" {
+		t.Fatalf("selector = %q, want %q", gotSelector, ".row")
+	}
+}
+
+// ─── `do` (compound sequence) ───────────────────────────────────────
+
+func TestBuildDoStepsCarriesSelectorsDelaysAndValues(t *testing.T) {
+	steps, err := buildDoSteps([]doStep{
+		{Action: "rightclick", Selector: "tr[data-id=7]"},
+		{Action: "click", Selector: "text=Move", WaitMs: 200},
+		{Action: "fill", Selector: "#to", Value: "a@b.c", DelayMs: 50},
+	})
+	if err != nil {
+		t.Fatalf("buildDoSteps: %v", err)
+	}
+	if len(steps) != 3 {
+		t.Fatalf("steps = %d, want 3", len(steps))
+	}
+	if steps[0]["action"] != "rightclick" {
+		t.Fatalf("step 1 action = %v", steps[0]["action"])
+	}
+	first, ok := steps[0]["target"].(*api.TargetSelector)
+	if !ok || first.Selector != "tr[data-id=7]" {
+		t.Fatalf("step 1 target = %#v", steps[0]["target"])
+	}
+	if steps[1]["waitMs"] != 200 {
+		t.Fatalf("step 2 waitMs = %v, want 200", steps[1]["waitMs"])
+	}
+	second, ok := steps[1]["target"].(*api.TargetSelector)
+	if !ok || second.Text != "Move" {
+		t.Fatalf("step 2 target should carry text= as Text, got %#v", steps[1]["target"])
+	}
+	if steps[2]["value"] != "a@b.c" {
+		t.Fatalf("step 3 value = %v", steps[2]["value"])
+	}
+	if steps[2]["delayMs"] != 50 {
+		t.Fatalf("step 3 delayMs = %v, want 50", steps[2]["delayMs"])
+	}
+}
+
+// The extension reads options.steps[]; an empty value or a nil options map
+// must not appear on the wire, or the content script sees a step that clears
+// a field it was never told about.
+func TestBuildDoStepsMarshalsToTheShapeTheContentScriptReads(t *testing.T) {
+	steps, err := buildDoSteps([]doStep{
+		{Action: "click", Selector: "role=menuitem"},
+	})
+	if err != nil {
+		t.Fatalf("buildDoSteps: %v", err)
+	}
+	raw, err := json.Marshal(map[string]any{"steps": steps})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, `"action":"click"`) {
+		t.Fatalf("payload missing action: %s", got)
+	}
+	if !strings.Contains(got, `"target":{"role":"menuitem"}`) {
+		t.Fatalf("payload target not the role selector: %s", got)
+	}
+	if strings.Contains(got, `"value"`) || strings.Contains(got, `"waitMs"`) {
+		t.Fatalf("payload carries an unset field: %s", got)
+	}
+}
+
+func TestBuildDoStepsRejectsBadInput(t *testing.T) {
+	cases := []struct {
+		name  string
+		steps []doStep
+		want  string
+	}{
+		{"empty", nil, "no steps"},
+		{"empty action", []doStep{{Selector: "#a"}}, `step 1 has no "action"`},
+		{"blank action", []doStep{{Action: "   "}}, `step 1 has no "action"`},
+		{"nested", []doStep{{Action: "click", Selector: "#a"}, {Action: "sequence"}}, "cannot nest"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := buildDoSteps(tc.steps)
+			if err == nil {
+				t.Fatalf("expected an error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %q, want it to contain %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
+func TestDoCmdSendsOneSequenceCommand(t *testing.T) {
+	var gotAction string
+	var gotSteps []any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req api.CommandRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		gotAction = req.Command.Action
+		gotSteps, _ = req.Command.Options["steps"].([]any)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ApiResponse{
+			OK:   true,
+			Data: api.CommandResult{ID: "1", Success: true},
+		})
+	}))
+	defer server.Close()
+
+	client = api.NewClient(server.URL, "")
+	tabTarget = "1"
+	transportFlag = "ext"
+	defer func() { client = nil; transportFlag = ""; tabTarget = "" }()
+
+	err := doCmd.RunE(doCmd, []string{
+		`[{"action":"click","selector":"#open"},{"action":"click","selector":"text=Move","waitMs":150}]`,
+	})
+	if err != nil {
+		t.Fatalf("do RunE: %v", err)
+	}
+	if gotAction != "sequence" {
+		t.Fatalf("action = %q, want sequence", gotAction)
+	}
+	if len(gotSteps) != 2 {
+		t.Fatalf("steps = %d, want 2", len(gotSteps))
+	}
+}
+
+func TestDoCmdRejectsInvalidJSON(t *testing.T) {
+	err := doCmd.RunE(doCmd, []string{`not json`})
+	if err == nil {
+		t.Fatal("expected an error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "invalid steps JSON") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}

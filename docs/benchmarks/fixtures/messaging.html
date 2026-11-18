@@ -32,11 +32,11 @@
 </head>
 <body>
   <nav id="sidebar">
-    <button class="channel" data-channel="general">#general</button>
-    <button class="channel" data-channel="random">#random</button>
-    <button class="channel" data-channel="design">#design</button>
-    <button class="channel dm" data-channel="dm-alice">Alice Chen</button>
-    <button class="channel dm" data-channel="dm-bob">Bob Ortiz</button>
+    <button class="channel" type="button" data-channel="general">#general</button>
+    <button class="channel" type="button" data-channel="random">#random</button>
+    <button class="channel" type="button" data-channel="design">#design</button>
+    <button class="channel dm" type="button" data-channel="dm-alice">Alice Chen</button>
+    <button class="channel dm" type="button" data-channel="dm-bob">Bob Ortiz</button>
   </nav>
 
   <main>
@@ -51,16 +51,18 @@
     <section id="thread-panel" hidden aria-label="Thread">
       <div id="thread-parent"></div>
       <div id="thread-replies"></div>
-      <div id="thread-input" contenteditable="true" role="textbox" aria-label="Reply composer" data-placeholder="Reply in thread"></div>
+      <!-- biome-ignore lint/a11y/useSemanticElements: contenteditable rich-text surface has no semantic equivalent -->
+      <div id="thread-input" contenteditable="true" role="textbox" aria-label="Reply composer" data-placeholder="Reply in thread" tabindex="0"></div>
       <div class="thread-actions">
-        <button id="thread-send">Reply</button>
-        <button id="thread-close">Close</button>
+        <button id="thread-send" type="button">Reply</button>
+        <button id="thread-close" type="button">Close</button>
       </div>
     </section>
     <!-- The composer is contenteditable, like Slack/Teams: `fill` replaces the
          content and Enter sends (Shift+Enter inserts a newline). -->
-    <div id="composer" contenteditable="true" role="textbox" aria-label="Message composer" data-placeholder="Message"></div>
-    <button id="send">Send</button>
+    <!-- biome-ignore lint/a11y/useSemanticElements: contenteditable rich-text surface has no semantic equivalent -->
+    <div id="composer" contenteditable="true" role="textbox" aria-label="Message composer" data-placeholder="Message" tabindex="0"></div>
+    <button id="send" type="button">Send</button>
     <div id="toast" role="status" hidden></div>
   </main>
 

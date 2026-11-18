@@ -15,6 +15,7 @@ import type {
 	CommandResult,
 	PageInfo,
 	RemoteElementInfo,
+	SequenceStep,
 	TargetSelector,
 } from "../types/commands";
 import { AIA_API_KEY } from "../utils/aiaConfig";
@@ -230,6 +231,70 @@ function resolveFrameRoot(options: Command["options"]): Document {
 	return inner;
 }
 
+// ─── Compound (sequence) ───────────────────────────────────────────
+
+/** Resolve after `ms`. Used for the per-step delays of a sequence. */
+function sleep(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Run a list of steps in order, in this one round trip.
+ *
+ * Each step is dispatched through `executeAction`, so it gets the same
+ * actionability waits, CDP relay and frame handling as a single command. The
+ * first failure aborts the run and names the step, because a half-applied
+ * sequence is exactly what callers must not mistake for success.
+ */
+async function handleSequence(raw: unknown): Promise<{
+	count: number;
+	steps: { step: number; action: string; data: unknown }[];
+}> {
+	if (!Array.isArray(raw) || raw.length === 0) {
+		throw new Error('Action "sequence" requires a non-empty "steps" array');
+	}
+
+	const steps: { step: number; action: string; data: unknown }[] = [];
+
+	for (let index = 0; index < raw.length; index += 1) {
+		const step = raw[index] as Partial<SequenceStep> | null | undefined;
+		const label = `sequence step ${index + 1}`;
+		if (!step || typeof step !== "object") {
+			throw new Error(`${label} is not an object`);
+		}
+		if (typeof step.action !== "string" || step.action === "") {
+			throw new Error(`${label} has no "action"`);
+		}
+		if (step.action === "sequence") {
+			throw new Error(`${label}: sequence steps cannot nest`);
+		}
+		if (typeof step.waitMs === "number" && step.waitMs > 0) {
+			await sleep(step.waitMs);
+		}
+
+		let data: unknown;
+		try {
+			data = await executeAction({
+				id: `seq-${index + 1}`,
+				action: step.action,
+				target: step.target,
+				value: step.value,
+				options: step.options,
+			});
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			throw new Error(`${label} (${step.action}) failed: ${reason}`);
+		}
+		steps.push({ step: index + 1, action: step.action, data });
+
+		if (typeof step.delayMs === "number" && step.delayMs > 0) {
+			await sleep(step.delayMs);
+		}
+	}
+
+	return { count: steps.length, steps };
+}
+
 async function executeAction(command: Command): Promise<unknown> {
 	const { action, value, options } = command;
 	const root = resolveFrameRoot(options);
@@ -256,6 +321,10 @@ async function executeAction(command: Command): Promise<unknown> {
 	}
 
 	switch (action) {
+		// ─── Compound ─────────────────────────────────────────────────
+		case "sequence":
+			return handleSequence(options?.steps);
+
 		// ─── Finding / Inspection ─────────────────────────────────────
 		case "find":
 			return handleFind(requireTarget(target, action), options);
@@ -877,6 +946,34 @@ async function handleHover(
 	target: TargetSelector,
 	timeoutMs = 5000,
 ): Promise<void> {
+	// Coordinate target (`xy=`): hover whatever sits under the viewport point.
+	// Nothing is scrolled, because the point is taken as given. Hover is the only
+	// way to reveal controls that render at 0x0 until the pointer enters them
+	// (Drive's per-row ⋮ is the case that motivated this).
+	if (typeof target.x === "number" && typeof target.y === "number") {
+		if (lookupRoot(target) !== document) {
+			throw new Error(
+				"coordinate targets do not support options.frame; target an element inside the frame",
+			);
+		}
+		const at = document.elementFromPoint(target.x, target.y);
+		if (!at) {
+			throw new Error(`nothing at (${target.x}, ${target.y})`);
+		}
+		const coordInit: MouseEventInit = {
+			bubbles: true,
+			cancelable: true,
+			view: window,
+			clientX: target.x,
+			clientY: target.y,
+		};
+		const hoverAt = at as HTMLElement;
+		hoverAt.dispatchEvent(new MouseEvent("mouseover", coordInit));
+		hoverAt.dispatchEvent(new MouseEvent("mouseenter", coordInit));
+		hoverAt.dispatchEvent(new MouseEvent("mousemove", coordInit));
+		return;
+	}
+
 	const element = await waitForScrollableActionableElement(target, {
 		timeoutMs,
 		requireEnabled: false,

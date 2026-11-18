@@ -25,12 +25,13 @@
 
   <!-- A reply box: contenteditable, like Gmail's. It already holds the
        signature, so a scenario can prove that typing does not wipe it. -->
-  <div id="compose-body" contenteditable="true" role="textbox" aria-label="Message body">
+  <!-- biome-ignore lint/a11y/useSemanticElements: contenteditable rich-text surface has no semantic equivalent -->
+  <div id="compose-body" contenteditable="true" role="textbox" aria-label="Message body" tabindex="0">
     <p><br></p>
     <p>-- <br>Sent from my device</p>
   </div>
 
-  <button id="send">Send</button>
+  <button id="send" type="button">Send</button>
   <div id="toast" role="status" hidden>Message sent</div>
 </body>
 </html>

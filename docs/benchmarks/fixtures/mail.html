@@ -29,25 +29,25 @@
       <span class="sender">alice@example.com</span>
       <span class="subject">Quarterly report</span>
       <span class="date">Oct 18</span>
-      <button class="forward" aria-label="Forward Quarterly report">Forward</button>
-      <button class="label" aria-label="Label Quarterly report">Label</button>
-      <button class="archive" aria-label="Archive Quarterly report">Archive</button>
+      <button class="forward" type="button" aria-label="Forward Quarterly report">Forward</button>
+      <button class="label" type="button" aria-label="Label Quarterly report">Label</button>
+      <button class="archive" type="button" aria-label="Archive Quarterly report">Archive</button>
     </div>
     <div class="row" data-idx="2" data-labels="" data-archived="false">
       <span class="sender">bob@example.com</span>
       <span class="subject">Lunch on Friday?</span>
       <span class="date">Oct 17</span>
-      <button class="forward" aria-label="Forward Lunch on Friday?">Forward</button>
-      <button class="label" aria-label="Label Lunch on Friday?">Label</button>
-      <button class="archive" aria-label="Archive Lunch on Friday?">Archive</button>
+      <button class="forward" type="button" aria-label="Forward Lunch on Friday?">Forward</button>
+      <button class="label" type="button" aria-label="Label Lunch on Friday?">Label</button>
+      <button class="archive" type="button" aria-label="Archive Lunch on Friday?">Archive</button>
     </div>
     <div class="row" data-idx="3" data-labels="" data-archived="false">
       <span class="sender">carol@example.com</span>
       <span class="subject">Invoice 2211</span>
       <span class="date">Oct 16</span>
-      <button class="forward" aria-label="Forward Invoice 2211">Forward</button>
-      <button class="label" aria-label="Label Invoice 2211">Label</button>
-      <button class="archive" aria-label="Archive Invoice 2211">Archive</button>
+      <button class="forward" type="button" aria-label="Forward Invoice 2211">Forward</button>
+      <button class="label" type="button" aria-label="Label Invoice 2211">Label</button>
+      <button class="archive" type="button" aria-label="Archive Invoice 2211">Archive</button>
     </div>
   </div>
 
@@ -55,15 +55,16 @@
        client; here the scenario types a note into the contenteditable. -->
   <section id="forward-panel" hidden>
     <input id="forward-to" type="email" aria-label="To">
-    <div id="forward-body" contenteditable="true" role="textbox" aria-label="Add a note"></div>
-    <button id="forward-send">Send</button>
+    <!-- biome-ignore lint/a11y/useSemanticElements: contenteditable rich-text surface has no semantic equivalent -->
+    <div id="forward-body" contenteditable="true" role="textbox" aria-label="Add a note" tabindex="0"></div>
+    <button id="forward-send" type="button">Send</button>
   </section>
 
   <!-- Label menu: a custom popup (NOT a native <select>), like Gmail's. -->
   <div id="label-menu" role="menu" hidden>
     <label><input type="checkbox" aria-label="Important" data-label="Important"> Important</label>
     <label><input type="checkbox" aria-label="Finance" data-label="Finance"> Finance</label>
-    <button id="label-apply">Apply</button>
+    <button id="label-apply" type="button">Apply</button>
   </div>
 
   <ul id="sent-log"></ul>

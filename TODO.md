@@ -217,12 +217,12 @@ The following items cannot be verified offline because they require an authentic
 - [ ] BLOCKED B07 Booking — needs a booking site; the offline room/date/seat/confirmation chain is covered by S10 (`bench-booking`).
 - [ ] BLOCKED B09 Expense report — needs an expense portal; the offline multi-line report (dynamic add-line, receipt upload, total + reference) is covered by S11 (`bench-expense`).
 - [ ] BLOCKED B13 Form filling — needs a real multi-page form (an HR/expense portal would cover it); the offline validation/select/pick/confirmation chain is covered by S09 (`bench-form`).
-- [ ] BLOCKED B02 Reply to email (Gmail) — needs live Gmail auth. `type` append + signature preservation verified offline via S03.
+- [ ] BLOCKED B02 Reply to email (Gmail) — the REPLY is still NOT_RUN. LIVE 2026-11-17: the **send** half was proven from `c00lways@gmail.com` to `james@mercstudio.com` ("Message sent" toast; recipient inbox 72,004 → 72,005). Typing a recipient is a FAIL (harness gap): Gmail's To input sits in a zero-size hidden `table.GS` and collapses back to 0×0 between commands, so the recipient was prefilled via `?view=cm&fs=1&to=…`. `type` append + signature preservation verified offline via S03.
 - [ ] BLOCKED B03 Arrange meeting (Calendar) — needs live Calendar auth. Date/time pickers + guest `pick` verified offline via S04.
 - [ ] BLOCKED B05 Google Docs create/edit/share — needs live Docs auth. Contenteditable `type`/`press` verified offline via S05.
 - [ ] BLOCKED B06 Sheets/Excel data + formula — needs live Sheets auth. Cell entry + grid read-back verified offline via S06.
-- [ ] BLOCKED B08 Forward/label/archive email (Gmail) — needs live Gmail auth.
-- [ ] BLOCKED B10 File management (Drive/OneDrive/Dropbox) — needs cloud drive auth.
+- [ ] BLOCKED B08 Forward/label/archive email (Gmail) — the ARCHIVE half is LIVE PASS 2026-11-17: "November at DeepInfra…" archived, `in:inbox from:deepinfra` = 8 hits without it and `in:anywhere` = 9 with it. Forward and label remain NOT_RUN. This build's archive button is `aria-label="Remove label Inbox from this conversation"`, not "Archive".
+- [ ] BLOCKED B10 File management (Drive/OneDrive/Dropbox) — folder CREATE is LIVE PASS 2026-11-17 (`htrcli-move-test`, `htrcli-move-dest` created and listed); the MOVE is NOT_RUN, blocked by the Drive gaps in the "Live Google writes — harness gaps" section below.
 - [ ] BLOCKED B11 Contact/CRM update — needs a CRM web app.
 - [x] B12/B12a Messaging incl. thread replies (Slack) — **LIVE PASS 2026-11-16** in a throwaway free workspace (`htrcli1`, team `T0CJH11BT60`, channel `#new-channel`, private to its creator). B12: typed into the composer and sent; message text present in the channel and the composer emptied. B12a: opened the message's thread and replied there; the reply is in the thread panel, the channel body does NOT contain it, and the parent shows "1 reply" — so a reply that silently posts to the channel would fail. Driven interactively over the extension transport, so there is no `commands`/`wall_ms` metric for these two. Recorded in `benchmark.md` under "Live, writes".
 - [x] B14 Research & summarize — LIVE RUN PASS (2026-10-28, read-only, `--transport cdp`, no account). Two real encyclopedia pages (`Speed_of_light`, `Avogadro_constant`) read via `wait --selector "table.infobox"` + `extract table "table.infobox"`; figures captured, composed into a summary citing both URLs, and every cited number re-tested against its own source page in page context (`includes('299792458')` → true, `includes('299792459')` → false; `6.02214076` → true, `6.02214077` → false), so the attribution audit discriminates. Prose faithfulness stays unprovable by a browser and the spec says so. Detail in `benchmark.md` (B14 "Live run").
@@ -232,6 +232,42 @@ The following items cannot be verified offline because they require an authentic
 - [ ] BLOCKED B18 Bank/finance portal — needs bank web auth (read-only); the offline read-balance/statement/reconciliation chain plus the read-only audit proof is covered by S22.
 - [ ] BLOCKED B19 HR leave request — needs an HR portal; the offline request/cancel/persistence chain is covered by S19.
 - [ ] BLOCKED B20 Survey/feedback — needs a survey web app; the offline multi-page/required/back-navigation chain is covered by S21.
+
+## Live Google writes — harness gaps found 2026-11-17
+
+Observed while running the Google writes on `c00lways@gmail.com` (Chrome, extension
+transport). Each is a candidate enhancement; none is filed upstream.
+
+- **Zero-size inputs cannot be driven across commands.** Gmail's compose To field
+  (`input.agP.aFw`) is 0×0 inside a hidden `table.GS`. Clicking the visible
+  placeholder focuses it, but it collapses back before the next invocation, so
+  `fill`/`type` always fail. A same-invocation `click`+`type` compound action, or a
+  `type --no-wait` that skips the visibility gate, would fix this and the Gmail/Slack
+  composer family generally.
+- **`rightclick` was missing** — FIXED 2026-11-17: `rightclickCmd` forwards the
+  `rightclick` action (the extension and CDP layers already handled it), covered by
+  `TestRightClickSendsRightclickAction`. Verified live: the Drive row menu opened.
+  The installed extension must be rebuilt for the *hover* half below to take effect.
+- **`hover` rejected `xy=`** — FIXED in code 2026-11-17: `handleHover` hit-tests the
+  point and dispatches `mouseover`/`mouseenter`/`mousemove`, mirroring `handleClick`;
+  covered by two DOM tests (dispatch, and "nothing at (x, y)"). Not yet live: the
+  change is in `src/contentScript`, so it needs `bun run build` + an extension reload.
+- **One command cannot open a menu and click an item in it** — FIXED 2026-11-17:
+  `htrcli do '[{"action":…},{"action":…}]'` sends the whole list as one page round
+  trip (`sequence` action in `src/contentScript/commandExecutor.ts`, `do.go` in the
+  CLI). Steps keep the normal actionable wait and the first failure names itself.
+  Live state: the daemon forwards `sequence` correctly, but the installed extension
+  predates the handler and answers `Unknown action: sequence` — it needs
+  `bun run build` + a reload of the unpacked extension before the Drive move, the
+  Gmail To field and the Slack composer can be re-tested. `--cdp` refuses `do` on
+  purpose: splitting steps across CDP calls is exactly what loses the menu.
+- **Menus render off-viewport.** Drive's file context menu is created at `y=774`
+  with height 233 in a 774-high viewport, so item clicks land outside it. A
+  scroll-into-view, or a click path that ignores position, would help.
+- **Dialog geometry drifts** (Create button at y=478 then y=452), so a coordinate
+  read once goes stale — prefer a selector path for dialog buttons.
+- **`screenshot` 504s when the tab is unfocused** ("screenshot timed out"), so
+  verification-by-image is unavailable on a background tab.
 
 ## External alignment: browser-use BU Bench V2.1 (added 2026-11-15)
 

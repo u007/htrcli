@@ -50,8 +50,8 @@
     <input id="end-date" type="date">
   </div>
   <div class="row">
-    <label>Duration</label>
-    <span id="duration" data-days="">—</span>
+    <label for="duration">Duration</label>
+    <output id="duration" data-days="">—</output>
   </div>
   <div class="row">
     <label for="reason">Reason</label>
@@ -278,7 +278,7 @@
     var button = event.target.closest(".cancel");
     if (!button) return;
     var request = findRequest(button.getAttribute("data-request-id"));
-    if (!request || request.status !== "pending") return;
+    if (request?.status !== "pending") return;
     request.status = "cancelled";
     state.remaining += request.days;
     save();

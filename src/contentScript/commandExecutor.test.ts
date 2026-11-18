@@ -1664,3 +1664,187 @@ describe("snapshot and findAll geometry (DOM)", () => {
 		expect(entries[0].box).toEqual({ x: 0, y: 0, w: 100, h: 50 });
 	});
 });
+
+describe("hover at viewport coordinates (DOM)", () => {
+	afterEach(() => {
+		document.body.innerHTML = "";
+		delete (document as unknown as Record<string, unknown>).elementFromPoint;
+	});
+
+	it("dispatches mouseover and mouseenter on the element under the point", async () => {
+		const el = document.createElement("div");
+		el.id = "hover-target";
+		document.body.appendChild(el);
+		const seen: string[] = [];
+		el.addEventListener("mouseover", () => seen.push("mouseover"));
+		el.addEventListener("mouseenter", () => seen.push("mouseenter"));
+		(document as unknown as Record<string, unknown>).elementFromPoint = () =>
+			el;
+
+		const result = await executeCommand({
+			id: "hx1",
+			action: "hover",
+			target: { x: 10, y: 20 },
+		});
+
+		expect(result.success).toBe(true);
+		expect(seen).toContain("mouseover");
+		expect(seen).toContain("mouseenter");
+	});
+
+	it("fails naming the coordinate when nothing is under the point", async () => {
+		(document as unknown as Record<string, unknown>).elementFromPoint = () =>
+			null;
+
+		const result = await executeCommand({
+			id: "hx2",
+			action: "hover",
+			target: { x: 5, y: 6 },
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/nothing at \(5, 6\)/);
+	});
+});
+
+describe("sequence (compound action)", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	function makeInput(id: string): HTMLInputElement {
+		const el = document.createElement("input");
+		el.id = id;
+		document.body.appendChild(el);
+		return el;
+	}
+
+	it("runs every step in order", async () => {
+		const a = makeInput("seq-a");
+		const b = makeInput("seq-b");
+
+		const result = await executeCommand({
+			id: "sq1",
+			action: "sequence",
+			options: {
+				steps: [
+					{ action: "fill", target: { selector: "#seq-a" }, value: "one" },
+					{ action: "fill", target: { selector: "#seq-b" }, value: "two" },
+				],
+			},
+		});
+
+		expect(result.success).toBe(true);
+		expect(a.value).toBe("one");
+		expect(b.value).toBe("two");
+		const data = result.data as { steps: { step: number }[] };
+		expect(data.steps.map((entry) => entry.step)).toEqual([1, 2]);
+	});
+
+	it("lets a later step act on DOM a previous step created (the menu case)", async () => {
+		const trigger = document.createElement("button");
+		trigger.id = "seq-open";
+		document.body.appendChild(trigger);
+		let clicked = false;
+		trigger.addEventListener("click", () => {
+			const item = document.createElement("div");
+			item.setAttribute("role", "menuitem");
+			item.textContent = "Move";
+			item.addEventListener("click", () => {
+				clicked = true;
+			});
+			document.body.appendChild(item);
+		});
+
+		const result = await executeCommand({
+			id: "sq2",
+			action: "sequence",
+			options: {
+				steps: [
+					{ action: "click", target: { selector: "#seq-open" } },
+					{ action: "click", target: { role: "menuitem" } },
+				],
+			},
+		});
+
+		expect(result.success).toBe(true);
+		expect(clicked).toBe(true);
+	});
+
+	it("stops at the first failing step, names it, and runs nothing after", async () => {
+		const first = makeInput("seq-c");
+		const third = makeInput("seq-d");
+
+		const result = await executeCommand({
+			id: "sq3",
+			action: "sequence",
+			options: {
+				steps: [
+					{ action: "fill", target: { selector: "#seq-c" }, value: "ok" },
+					{
+						action: "fill",
+						target: { selector: "#seq-missing" },
+						value: "x",
+						options: { timeout: 100 },
+					},
+					{ action: "fill", target: { selector: "#seq-d" }, value: "never" },
+				],
+			},
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/step 2 \(fill\) failed/);
+		expect(first.value).toBe("ok");
+		expect(third.value).toBe("");
+	});
+
+	it("rejects an empty step list", async () => {
+		const result = await executeCommand({
+			id: "sq4",
+			action: "sequence",
+			options: { steps: [] },
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/non-empty/);
+	});
+
+	it("rejects a step without an action", async () => {
+		const result = await executeCommand({
+			id: "sq5",
+			action: "sequence",
+			options: { steps: [{ target: { selector: "#seq-x" } }] },
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.error).toMatch(/step 1 has no "action"/);
+	});
+
+	it("honours waitMs before a step", async () => {
+		const target = makeInput("seq-e");
+		const start = Date.now();
+
+		const result = await executeCommand({
+			id: "sq6",
+			action: "sequence",
+			options: {
+				steps: [
+					{
+						action: "fill",
+						target: { selector: "#seq-e" },
+						value: "waited",
+						waitMs: 60,
+					},
+				],
+			},
+		});
+
+		expect(result.success).toBe(true);
+		expect(target.value).toBe("waited");
+		expect(Date.now() - start).toBeGreaterThanOrEqual(50);
+	});
+});

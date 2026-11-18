@@ -92,6 +92,16 @@ var dblclickCmd = &cobra.Command{
 	},
 }
 
+var rightclickCmd = &cobra.Command{
+	Annotations: FrameAwareAnnotations(),
+	Use:         "rightclick <selector>",
+	Short:       "Right-click element (opens the context menu)",
+	Args:        cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runInteract("rightclick", args[0], "")
+	},
+}
+
 var fillCmd = &cobra.Command{
 	Annotations: FrameAwareAnnotations(),
 	Use:         "fill <selector> <value>",
@@ -437,6 +447,7 @@ func init() {
 	dragCmd.Flags().Int("delay", 0, "Delay between moves in ms (0-2000)")
 	rootCmd.AddCommand(clickCmd)
 	rootCmd.AddCommand(dblclickCmd)
+	rootCmd.AddCommand(rightclickCmd)
 	rootCmd.AddCommand(fillCmd)
 	rootCmd.AddCommand(typeCmd)
 	rootCmd.AddCommand(hoverCmd)

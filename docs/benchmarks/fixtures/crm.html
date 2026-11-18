@@ -26,12 +26,12 @@
   <div id="contact-list"></div>
 
   <section id="edit-panel" hidden>
-    <h2 id="edit-name"></h2>
+    <h2 id="edit-name">Contact</h2>
     <label>Phone <input id="phone" type="tel" aria-label="Phone"></label>
     <label>Note <textarea id="note" aria-label="Note"></textarea></label>
-    <label>Tags <span id="tags"></span></label>
+    <label for="tag-input">Tags <span id="tags"></span></label>
     <input id="tag-input" type="text" aria-label="Add tag" placeholder="Type a tag and press Enter">
-    <button id="save">Save</button>
+    <button id="save" type="button">Save</button>
   </section>
 
   <div id="toast" role="status" hidden></div>
@@ -46,7 +46,7 @@
       </select>
     </label>
     <label>Details <textarea id="activity-note" aria-label="Activity details"></textarea></label>
-    <button id="log-activity">Log activity</button>
+    <button id="log-activity" type="button">Log activity</button>
     <ul id="activity-log"></ul>
   </section>
 

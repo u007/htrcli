@@ -147,7 +147,57 @@ member was invited. There is no repeatable `bench run` scenario for these two:
 `scenarios/s28-slack.json` stays `requires_auth` and therefore `NOT_RUN` offline,
 so a scripted live version would need a second, non-auth scenario file.
 
+### Live, writes (Google, personal accounts — 2026-11-17)
 
+Account `c00lways@gmail.com` (Chrome, extension transport, tab 1100668751) writing
+to `james@mercstudio.com` (Firefox, tab 71). Both accounts belong to the user and
+the only recipient was the user's second address, so nothing left their control.
+Driven interactively over the extension transport, not through `bench run`, so
+these rows carry no `commands`/`wall_ms` metric.
+
+| Task | Verdict | What was done | Evidence read back |
+|---|---|---|---|
+| Create a Drive folder (B10 sub-capability) | PASS | New → New folder, named it, confirmed | the folder appears in the My Drive listing |
+| Send a new message (B02 sub-capability) | PASS, caveat | composed a labelled test message and sent it | "Message sent" toast; recipient inbox total moved 72,004 → 72,005; top row is the test subject |
+| B08 archive sub-capability | PASS | opened a promotional newsletter ("November at DeepInfra…") and archived it | `in:inbox from:deepinfra` → 8 hits, the November mail absent; `in:anywhere` → 9, it is present |
+| B10 Drive move | NOT_RUN | could not reach "Move to" (see below) | no move performed; two test folders left behind |
+| Type a recipient into Gmail compose | **FAIL (harness gap)** | `fill`/`type` on the To field | never succeeded — the field is 0×0 except immediately after a click |
+
+**The send caveat is the interesting part.** Gmail renders the recipient field
+inside a zero-size hidden `table.GS` (`input.agP.aFw`, `aria-label="To
+recipients"`, 0×0). Clicking the visible placeholder does focus that input, but it
+collapses back to 0×0 and unfocused before the next htrcli invocation can type, so
+the harness has no way to act on an input that only exists between two commands.
+Recipients were supplied through Gmail's `?view=cm&fs=1&to=…` compose view
+instead; the send, the Sent copy and the delivery were then all real and read back
+from the page. This row is **FAIL, not NOT_RUN** — it was attempted and it failed.
+
+In this Gmail build the archive button's accessible name is `Remove label Inbox
+from this conversation`, not `Archive`; a selector written against an older build
+will not match.
+
+Drive UI move is NOT_RUN for these reasons, each observed directly:
+
+- the file context menu is created in the DOM but positioned at `y=774` with a
+  height of 233 while the viewport is `1151×774`, i.e. entirely below the fold, so
+  every item click lands outside the viewport;
+- the per-row ⋮ (`aria-label="More actions (Alt + A)"`) has a 0×0 rect until the
+  row is hovered — `hover xy=` now supports a coordinate target, but that fix lives
+  in `src/contentScript` and needs an extension rebuild before it helps live;
+- `rightclick` was absent from the CLI (`rightclickCmd` added 2026-11-17); with it
+  the row menu does open, but its `Organise` submenu collapses between invocations
+  and renders at `y=844` in a 774-high viewport, so the move still needs a compound
+  "open menu, then click item" action — which now exists (`htrcli do`, see
+  "What these numbers mean") but needs the extension reloaded before it can be used,
+  so the move stays NOT_RUN rather than being claimed;
+- the new-folder dialog's Create button moves between openings (y=478, then
+  y=452), so a coordinate read once goes stale;
+- Drive's `c` then `f` shortcut did not open the dialog;
+- `screenshot` returns `504 screenshot timed out` whenever the Chrome tab is not
+  the focused one.
+
+Left in place: folders `htrcli-move-test` and `htrcli-move-dest` at My Drive root.
+They are the only residue from this run and are safe to delete by hand.
 
 ### Judged run (real local model)
 
@@ -171,6 +221,13 @@ standing caveat.
 This is **harness overhead**, not agent competence: no model chose any step in
 the offline rows. Compare the shape with the Browser Use table below, never the
 absolute numbers.
+
+A compound `do '[…]'` run counts as **one** command however many steps it carries,
+because it is one page round trip and one harness decision. That is deliberate:
+the metric is meant to price what the caller had to decide, and "open the menu,
+then click Move" is a single intent even when it is two interactions. Steps are
+visible inside the invocation's own output, so a `do` step count is never hidden
+from a reader who wants it.
 
 ## Gap sourcing
 

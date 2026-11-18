@@ -130,6 +130,12 @@ export type CommandAction =
 	| "getPageInfo"
 	| "snapshot"
 	| "xpath"
+	// ─── Compound ───────────────────────────────────────────────────
+	/** Run several actions in one round trip, in order. A menu (or submenu)
+	 *  opened by one browser command is dismissed before the next command
+	 *  arrives, so behaviours that need "open menu, then click an item" only
+	 *  work when both interactions travel in one message. See SequenceStep. */
+	| "sequence"
 	// ─── Interaction ────────────────────────────────────────────────
 	| "click"
 	| "dblclick"
@@ -230,6 +236,27 @@ export interface Command {
 	value?: string;
 	/** Additional options specific to the action */
 	options?: Record<string, unknown>;
+}
+
+/** One step of a `sequence` command.
+ *
+ *  Steps run in the page, in order, inside a single round trip. That is the
+ *  whole point: Google Drive's row menu survives across commands, but its
+ *  "Organise" submenu collapses between them, and a Gmail recipient field
+ *  loses focus. Both are one `sequence` away once the two interactions share
+ *  a message.
+ *
+ *  `action` excludes "sequence" — steps do not nest.
+ */
+export interface SequenceStep {
+	action: Exclude<CommandAction, "sequence">;
+	target?: TargetSelector;
+	value?: string;
+	options?: Record<string, unknown>;
+	/** Delay before this step, in ms — lets a transient menu finish opening. */
+	waitMs?: number;
+	/** Delay after this step, in ms. */
+	delayMs?: number;
 }
 
 // ─── Command Result ─────────────────────────────────────────────────

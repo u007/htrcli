@@ -320,7 +320,7 @@
     var button = event.target.closest(".edit");
     if (!button) return;
     var post = findPost(button.getAttribute("data-edit-id"));
-    if (!post || post.state !== "scheduled") return;
+    if (post?.state !== "scheduled") return;
 
     document.getElementById("post-text").value = post.text;
     document.getElementById("audience").value = post.audience;

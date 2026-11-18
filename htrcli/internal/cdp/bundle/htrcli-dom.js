@@ -767,7 +767,7 @@
     if (text) return { key: `t:${text}`, strategy: "text" };
     return { key: null, strategy: "index" };
   }
-  function sleep$1(ms) {
+  function sleep$2(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
   async function collectAll(target, options = {}) {
@@ -841,7 +841,7 @@
         }
         const before = seen.size;
         anyContainer.scrollTop = anyContainer.scrollTop + anyContainer.clientHeight;
-        await sleep$1(stepDelayMs);
+        await sleep$2(stepDelayMs);
         harvest();
         const currentScrollTop = anyContainer.scrollTop;
         const currentHeight = anyContainer.scrollHeight;
@@ -1412,7 +1412,7 @@
     target.dispatchEvent(new KeyboardEvent("keydown", init));
     target.dispatchEvent(new KeyboardEvent("keyup", init));
   }
-  function sleep(ms) {
+  function sleep$1(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
   function settle(previous, options, want) {
@@ -1441,7 +1441,7 @@
       const verdict = settle(previous, options, want);
       if (verdict.done || Date.now() >= deadline) return { options, verdict };
       previous = options;
-      await sleep(POLL_MS);
+      await sleep$1(POLL_MS);
     }
   }
   async function unfilteredOptions(input) {
@@ -1452,7 +1452,7 @@
     for (; ; ) {
       options = comboOptionElements(input).map(textOf);
       if (options.length > 0 || Date.now() >= deadline) break;
-      await sleep(POLL_MS);
+      await sleep$1(POLL_MS);
     }
     pressKey(input, "Escape");
     return options;
@@ -1470,7 +1470,7 @@
           `pick: clicked option ${JSON.stringify(chosen)} but after ${VERIFY_WAIT_MS}ms the combobox shows ${JSON.stringify(shown.text)} (read from ${shown.from}), which does not contain ${JSON.stringify(chosen)}; options were: ${listOptions(options)}`
         );
       }
-      await sleep(POLL_MS);
+      await sleep$1(POLL_MS);
     }
   }
   async function chooseOption(input, want) {
@@ -1908,6 +1908,49 @@
     }
     return inner;
   }
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  async function handleSequence(raw) {
+    if (!Array.isArray(raw) || raw.length === 0) {
+      throw new Error('Action "sequence" requires a non-empty "steps" array');
+    }
+    const steps = [];
+    for (let index = 0; index < raw.length; index += 1) {
+      const step = raw[index];
+      const label = `sequence step ${index + 1}`;
+      if (!step || typeof step !== "object") {
+        throw new Error(`${label} is not an object`);
+      }
+      if (typeof step.action !== "string" || step.action === "") {
+        throw new Error(`${label} has no "action"`);
+      }
+      if (step.action === "sequence") {
+        throw new Error(`${label}: sequence steps cannot nest`);
+      }
+      if (typeof step.waitMs === "number" && step.waitMs > 0) {
+        await sleep(step.waitMs);
+      }
+      let data;
+      try {
+        data = await executeAction({
+          id: `seq-${index + 1}`,
+          action: step.action,
+          target: step.target,
+          value: step.value,
+          options: step.options
+        });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`${label} (${step.action}) failed: ${reason}`);
+      }
+      steps.push({ step: index + 1, action: step.action, data });
+      if (typeof step.delayMs === "number" && step.delayMs > 0) {
+        await sleep(step.delayMs);
+      }
+    }
+    return { count: steps.length, steps };
+  }
   async function executeAction(command) {
     const { action, value, options } = command;
     const root = resolveFrameRoot(options);
@@ -1920,6 +1963,8 @@
       if (relayed) return relayed;
     }
     switch (action) {
+      case "sequence":
+        return handleSequence(options == null ? void 0 : options.steps);
       case "find":
         return handleFind(requireTarget(target, action), options);
       case "findAll":
@@ -2374,6 +2419,29 @@
     dispatchClickSequence(element, x, y, button, count);
   }
   async function handleHover(target, timeoutMs = 5e3) {
+    if (typeof target.x === "number" && typeof target.y === "number") {
+      if (lookupRoot(target) !== document) {
+        throw new Error(
+          "coordinate targets do not support options.frame; target an element inside the frame"
+        );
+      }
+      const at = document.elementFromPoint(target.x, target.y);
+      if (!at) {
+        throw new Error(`nothing at (${target.x}, ${target.y})`);
+      }
+      const coordInit = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: target.x,
+        clientY: target.y
+      };
+      const hoverAt = at;
+      hoverAt.dispatchEvent(new MouseEvent("mouseover", coordInit));
+      hoverAt.dispatchEvent(new MouseEvent("mouseenter", coordInit));
+      hoverAt.dispatchEvent(new MouseEvent("mousemove", coordInit));
+      return;
+    }
     const element = await waitForScrollableActionableElement(target, {
       timeoutMs,
       requireEnabled: false

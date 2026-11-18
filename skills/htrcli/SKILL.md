@@ -61,7 +61,7 @@ each probe costs a round trip.
 
 | Works | Not available over `--cdp` (use `eval` or the extension transport) |
 |---|---|
-| open, find/findAll, snapshot, text/value/attr/html, click/dblclick/rightclick, fill, type, select, check/uncheck, clear, press/keydown/keyup, mouse*, drag, upload, eval, screenshot (incl. `--annotate`), tabs list/get/new/close (Chrome only), **pick**, **fill-form**, **--frame**, console read/watch, network read/watch/wait, **emulate** (viewport, color-scheme, user-agent), **cdp** (raw DevTools method), **scroll**, **back/forward**, **printpdf**, **dialog handle** (foreground waiter, see Dialog handling) | dialog list (no buffer survives between `--cdp` commands), fetch, network mock/block/unmock, trace export |
+| open, find/findAll, snapshot, text/value/attr/html, click/dblclick/rightclick, fill, type, select, check/uncheck, clear, press/keydown/keyup, mouse*, drag, upload, eval, screenshot (incl. `--annotate`), tabs list/get/new/close (Chrome only), **pick**, **fill-form**, **--frame**, console read/watch, network read/watch/wait, **emulate** (viewport, color-scheme, user-agent), **cdp** (raw DevTools method), **scroll**, **back/forward**, **printpdf**, **dialog handle** (foreground waiter, see Dialog handling) | dialog list (no buffer survives between `--cdp` commands), fetch, network mock/block/unmock, trace export, **`do`** (needs one page round trip; steps cannot be split across CDP calls) |
 
 ### Filling forms: verb per widget
 
@@ -369,15 +369,18 @@ with `--ref` to mint refs for every match.
 ```bash
 htrcli click "#submit"                   # Click element
 htrcli dblclick ".row:first-child"       # Double-click
+htrcli rightclick "tr[data-id=7]"        # Right-click (opens the context menu)
 htrcli fill  "input[name=email]" "user@test.com"   # Clear and fill
 htrcli type  "input[name=email]" " more text"      # Append, doesn't clear
 htrcli hover ".menu-trigger"
+htrcli hover "xy=676,514"                # Hover a viewport point (reveals hover-only controls)
 htrcli select "select#country" "us"
 htrcli check   "#terms"                  # Check a checkbox
 htrcli uncheck "#newsletter"             # Uncheck a checkbox
 htrcli clear   "input[name=email]"       # Clear an input
 htrcli press   Enter                     # Press a key (keyDown + keyUp)
 htrcli scroll  down 300                  # Scroll direction + pixels
+htrcli do '[{"action":"click","selector":"#open"},{"action":"click","selector":"text=Move"}]'  # Several steps, one round trip
 
 # Low-level keyboard primitives (stateless — caller tracks hold)
 htrcli keydown Shift                     # Key down only (hold)
@@ -409,6 +412,29 @@ Control+a–z, Alt+a–z, Shift+a–z, Meta+a–z.
 command payload, so `fill "#q" ""` fails with `requires a "value"`. To empty a
 field, use `clear` — it also dispatches `input`/`change`, so a live filter or
 validation re-runs.
+
+### Compound actions (`do`)
+
+A menu opened by one command is dismissed before the next command arrives, and a
+focused field loses focus. So "open this, then click that" cannot be done with two
+invocations — send the whole list as one page round trip instead:
+
+```bash
+htrcli do '[{"action":"rightclick","selector":"tr[data-id=7]"},{"action":"click","selector":"text=Move","waitMs":300}]'
+htrcli do '[{"action":"click","selector":"#open"},{"action":"fill","selector":"#to","value":"a@b.c"},{"action":"pressKey","value":"Enter"}]'
+```
+
+Steps take `action` (required), `selector` (same prefixes as the single verbs,
+including `xy=` and `@eN`), `value`, `options` (e.g. `{"timeout":2000}`), `waitMs`
+(delay before) and `delayMs` (delay after). Each step keeps the normal
+actionable-wait, so a menu that opens in 300 ms is still clicked correctly; use
+`waitMs` only when there is nothing to wait on.
+
+The first failing step aborts the run and names itself —
+`sequence step 2 (click) failed: ...` — so a partial run is never silent. Steps do
+not nest, and `--cdp` is refused: the value of the feature is one round trip,
+which per-command CDP calls cannot give. Count it as **one** command in a benchmark
+however many steps it carries.
 
 ### Viewport coordinates (`xy=`)
 

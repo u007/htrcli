@@ -463,7 +463,7 @@ async function addStep(
 	data: Partial<RecordingStep>,
 	tabId: number,
 ): Promise<RecordingStep | null> {
-	if (!currentSession || !currentSession.isRecording) {
+	if (!currentSession?.isRecording) {
 		return null;
 	}
 
