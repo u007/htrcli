@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { getBrowserType } from "./browserType";
+import { __setDebuggerImplForTests } from "./debuggerManager";
 import {
+	__setEvalTimeoutForTests,
 	getConnectionMode,
 	isPermanentError,
 	startNativeHost,
@@ -321,6 +323,10 @@ describe("uploadFiles routing", () => {
 			return;
 		}
 		fake.debugger = {
+			onEvent: {
+				addListener: () => {},
+				removeListener: () => {},
+			},
 			attach: async () => {
 				debuggerCalls.push("attach");
 			},
@@ -356,9 +362,13 @@ describe("uploadFiles routing", () => {
 	beforeEach(() => {
 		createdPorts.length = 0;
 		currentPort = null;
+		// The shared manager keeps module-global refcounts; reset them so one
+		// test's attach cannot leak into the next.
+		__setDebuggerImplForTests(null);
 		installFakeChrome();
 		forwarded = [];
 		debuggerCalls = [];
+		__setEvalTimeoutForTests(30000);
 		startNativeHost();
 		getPort().emit({ type: "ping" });
 	});
@@ -398,6 +408,39 @@ describe("uploadFiles routing", () => {
 		expect(forwarded).toEqual([]);
 		expect(debuggerCalls).toContain("DOM.setFileInputFiles");
 		expect(resultFor("u2")?.success).toBe(true);
+	});
+
+	it("debuggerEval times out, replies with an error, and detaches exactly once", async () => {
+		installTabs(true);
+		__setEvalTimeoutForTests(5);
+		const fake = (globalThis as { chrome?: Record<string, unknown> }).chrome;
+		const dbg = fake?.debugger as {
+			sendCommand: (target: unknown, method: string) => Promise<unknown>;
+		};
+		dbg.sendCommand = (_target: unknown, method: string) => {
+			debuggerCalls.push(method);
+			// Runtime.evaluate never settles: the protocol timeout does not bound
+			// awaitPromise, so the JS-side race must release the attach.
+			if (method === "Runtime.evaluate") return new Promise(() => {});
+			return Promise.resolve({});
+		};
+
+		getPort().emit({
+			type: "command",
+			tabId: 5,
+			payload: {
+				id: "e1",
+				action: "evaluate",
+				value: "await new Promise(() => {})",
+			},
+		});
+		await new Promise((resolve) => setTimeout(resolve, 30));
+
+		expect(debuggerCalls.filter((c) => c === "attach")).toHaveLength(1);
+		expect(debuggerCalls.filter((c) => c === "detach")).toHaveLength(1);
+		const result = resultFor("e1");
+		expect(result?.success).toBe(false);
+		expect(result?.error).toContain("timed out");
 	});
 
 	it("Chrome refuses host paths into an options.frame", async () => {

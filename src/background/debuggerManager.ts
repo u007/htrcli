@@ -1,9 +1,10 @@
 /**
  * Refcounted chrome.debugger attach + shared onEvent fan-out. The single
- * attach/detach path for long-lived capture features (network + dialogs) so
- * two features can capture the same tab through one real attach. Follows the
- * project rule that a debugger attach is never held permanently: callers
- * (bounded capture windows) balance every attachShared with a detachShared.
+ * attach/detach path for every feature that needs the debugger — network and
+ * dialog capture, trusted input, upload, and eval — so two features can share
+ * one real attach. Follows the project rule that a debugger attach is never
+ * held permanently: callers (bounded command or capture windows) balance every
+ * attachShared with a detachShared.
  */
 
 type EventCb = (
@@ -64,6 +65,41 @@ function ensureSharedListener(): void {
 	sharedListenerAttached = true;
 }
 
+const STALE_ATTACH = /another debugger is already attached/i;
+
+/**
+ * Attach, recovering from an attach this extension itself left behind.
+ *
+ * A command the caller abandons (client timeout, closed tab) can leave a real
+ * attach with no refcount, and every later command then fails with "Another
+ * debugger is already attached" until the tab is reloaded. `chrome.debugger`
+ * detach only releases *our* session — it cannot release the user's DevTools —
+ * so detaching and retrying once is safe: if somebody else holds the tab, the
+ * retry fails with the same error, which the caller still gets verbatim.
+ */
+async function attachWithStaleRecovery(tabId: number): Promise<void> {
+	try {
+		await impl().attach({ tabId }, "1.3");
+		return;
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		if (!STALE_ATTACH.test(message)) {
+			throw err;
+		}
+	}
+	try {
+		await impl().detach({ tabId });
+	} catch (err) {
+		// Benign: nothing of ours is held (the tab closed, or the attach was
+		// never ours). Logged so it is never a silent swallow.
+		console.warn(
+			"[HTR NControl] stale debugger detach failed:",
+			err instanceof Error ? err.message : err,
+		);
+	}
+	await impl().attach({ tabId }, "1.3");
+}
+
 // Attach the debugger to a tab, refcounted: the real attach happens only on
 // the first holder. Throws verbatim if the real attach fails (DevTools open /
 // another client attached) rather than silently continuing.
@@ -90,11 +126,17 @@ export async function attachShared(tabId: number): Promise<void> {
 	// Reserve before awaiting so a concurrent caller sees the hold.
 	refcounts.set(tabId, 1);
 	const inflight = (async () => {
-		ensureSharedListener();
 		try {
-			await impl().attach({ tabId }, "1.3");
+			ensureSharedListener();
+			await attachWithStaleRecovery(tabId);
 		} catch (err) {
 			refcounts.delete(tabId);
+			// The caller reports the error to the CLI; this is the only trace it
+			// leaves in the extension console, so it must not be silent.
+			console.warn(
+				"[HTR NControl] debugger attach failed:",
+				err instanceof Error ? err.message : err,
+			);
 			throw err;
 		}
 	})();

@@ -1,19 +1,21 @@
 ---
 type: Guide
 title: Driving htrcli from an agent host
-description: How an agent host drives the browser through the htrcli daemon API. Covers the transport role, the snapshot-decide-act-observe loop, the action set, events, and remote setup.
+description: How an agent host drives the browser through the htrcli daemon API. Covers the transport role (extension is the default; the CLI uses `--cdp` only for a fresh session), the snapshot-decide-act-observe loop, the action set, events, and remote setup.
 resource: htrcli/internal/host/server.go; src/contentScript/commandExecutor.ts; src/background/nativeHost.ts
 tags:
   - agent
   - api
   - automation
   - guide
-timestamp: 2026-11-02T06:49:01Z
+timestamp: 2026-11-18T15:58:27Z
 ---
 
 # Driving htrcli from an agent host
 
 htrcli is a transport. It moves JSON commands from an agent host to the browser extension and returns the JSON results. No model runs in htrcli or in the extension. The agent host decides what to do. The reference host is the `browser_run` tool in ocode.
+
+This page documents the extension API. For choosing between the extension and `--cdp` on the command line, see [htrcli transport choice](concepts/htrcli-transport-policy.md): the extension is the default, and `--cdp` is only for a fresh, isolated or headless session — never for a login-gated site.
 
 ## Who does what
 
@@ -159,4 +161,5 @@ The host can run on another machine. Keep the daemon where the browser is.
 - `uploadFiles` with `options.frame` on Chrome takes `filesData` only. Host paths are rejected.
 - The `screenshot` content action is a placeholder that returns `screenshot_requested`. Use `GET /api/screenshot`.
 - The daemon rejects the `dialog` event kind with `400 unknown event kind`. Dialog events are not available through this API.
-- The CLI verbs `pick` and `--frame` remain CDP-only on the command line. The extension actions above are reachable only through the raw command route.
+- `select` sets the `<select>` element's `value` only. A label that is not an option value selects nothing, silently; read the value back to confirm. For a combobox that is not a native `<select>`, prefer the `pick` action (it opens the widget, types the query, clicks the best option and verifies); if `pick` fails, click the input, type the query, then click the option.
+- The CLI verbs `pick`, `fill-form`, and `--frame` are CDP-only. The extension actions above are reachable only through the raw command route.

@@ -18,8 +18,22 @@
     Home: { key: "Home", code: "Home", windowsVirtualKeyCode: 36 },
     End: { key: "End", code: "End", windowsVirtualKeyCode: 35 },
     PageUp: { key: "PageUp", code: "PageUp", windowsVirtualKeyCode: 33 },
-    PageDown: { key: "PageDown", code: "PageDown", windowsVirtualKeyCode: 34 }
+    PageDown: { key: "PageDown", code: "PageDown", windowsVirtualKeyCode: 34 },
+    // Bare modifiers resolve so `keydown Shift` / `keyup Shift` can hold them.
+    Shift: { key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16 },
+    Control: { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17 },
+    Ctrl: { key: "Ctrl", code: "ControlLeft", windowsVirtualKeyCode: 17 },
+    Alt: { key: "Alt", code: "AltLeft", windowsVirtualKeyCode: 18 },
+    Meta: { key: "Meta", code: "MetaLeft", windowsVirtualKeyCode: 91 },
+    Cmd: { key: "Cmd", code: "MetaLeft", windowsVirtualKeyCode: 91 }
   };
+  for (let n = 1; n <= 12; n += 1) {
+    NAMED_KEYS[`F${n}`] = {
+      key: `F${n}`,
+      code: `F${n}`,
+      windowsVirtualKeyCode: 111 + n
+    };
+  }
   const SYMBOL_KEYS = {
     " ": { code: "Space", windowsVirtualKeyCode: 32 },
     "`": { code: "Backquote", windowsVirtualKeyCode: 192 },
@@ -57,6 +71,29 @@
     "(": { code: "Digit9", windowsVirtualKeyCode: 57 },
     ")": { code: "Digit0", windowsVirtualKeyCode: 48 }
   };
+  const SHIFTED_CHARS = /* @__PURE__ */ new Map([
+    ["1", "!"],
+    ["2", "@"],
+    ["3", "#"],
+    ["4", "$"],
+    ["5", "%"],
+    ["6", "^"],
+    ["7", "&"],
+    ["8", "*"],
+    ["9", "("],
+    ["0", ")"],
+    ["-", "_"],
+    ["=", "+"],
+    ["[", "{"],
+    ["]", "}"],
+    ["\\", "|"],
+    [";", ":"],
+    ["'", '"'],
+    [",", "<"],
+    [".", ">"],
+    ["/", "?"],
+    ["`", "~"]
+  ]);
   function digitDescriptor(digit) {
     const vk = digit.charCodeAt(0);
     return {
@@ -125,6 +162,86 @@
       }
     }
     throw new Error(`resolveKey: unknown key "${key}"`);
+  }
+  const MODIFIER_BITS = {
+    Alt: 1,
+    Control: 2,
+    Meta: 4,
+    Shift: 8
+  };
+  const MODIFIER_ALIASES = {
+    alt: "Alt",
+    option: "Alt",
+    control: "Control",
+    ctrl: "Control",
+    meta: "Meta",
+    cmd: "Meta",
+    command: "Meta",
+    shift: "Shift"
+  };
+  function requiresShift(descriptor) {
+    if (descriptor.key.length !== 1) return false;
+    if (/^[A-Z]$/.test(descriptor.key)) return true;
+    return descriptor.key in SHIFTED_SYMBOL_KEYS;
+  }
+  function resolveKeySpec(spec) {
+    if (!spec || typeof spec !== "string") {
+      throw new Error(
+        `resolveKeySpec: empty or non-string key (got ${JSON.stringify(spec)})`
+      );
+    }
+    if (spec === "+") {
+      const descriptor2 = resolveKey("+");
+      return { descriptor: descriptor2, modifiers: MODIFIER_BITS.Shift };
+    }
+    const plusKey = spec.endsWith("++");
+    const body = plusKey ? spec.slice(0, -2) : spec;
+    const parts = body === "" ? [] : body.split("+");
+    if (!plusKey && parts.length === 1) {
+      const descriptor2 = resolveKey(spec);
+      return {
+        descriptor: descriptor2,
+        modifiers: requiresShift(descriptor2) ? MODIFIER_BITS.Shift : 0
+      };
+    }
+    const keyPart = plusKey ? "+" : parts[parts.length - 1].trim();
+    if (keyPart === "") {
+      throw new Error(`resolveKeySpec: "${spec}" names no key after "+"`);
+    }
+    let modifiers = 0;
+    let shiftOnly = true;
+    const modifierParts = plusKey ? parts : parts.slice(0, -1);
+    for (const raw of modifierParts) {
+      const modifier = MODIFIER_ALIASES[raw.trim().toLowerCase()];
+      if (!modifier) {
+        throw new Error(`resolveKeySpec: unknown modifier "${raw}" in "${spec}"`);
+      }
+      modifiers |= MODIFIER_BITS[modifier];
+      if (modifier !== "Shift") {
+        shiftOnly = false;
+      }
+    }
+    let descriptor = resolveKey(keyPart);
+    if (descriptor.text !== void 0 && (modifiers & MODIFIER_BITS.Shift) !== 0) {
+      let shifted;
+      if (/^[a-z]$/.test(descriptor.key)) {
+        shifted = descriptor.key.toUpperCase();
+      } else {
+        shifted = SHIFTED_CHARS.get(descriptor.key);
+      }
+      if (shifted !== void 0) {
+        descriptor = { ...descriptor, key: shifted, text: shifted };
+      }
+    }
+    if (!shiftOnly) {
+      if (descriptor.key.length === 1) {
+        descriptor = { ...descriptor, text: void 0, isPrintable: false };
+      }
+    }
+    if (modifiers === 0 && requiresShift(descriptor)) {
+      modifiers = MODIFIER_BITS.Shift;
+    }
+    return { descriptor, modifiers };
   }
   function dispatchClickSequence(element, x, y, button, count) {
     const eventInit = {
@@ -472,7 +589,39 @@
         results.push(el);
       }
     }
-    return results;
+    return innermostMatches(results).map(nearestRendered);
+  }
+  function hasRenderableBox(element) {
+    const view = element.ownerDocument.defaultView;
+    if (!view) return false;
+    const style = view.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+  function nearestRendered(element) {
+    if (hasRenderableBox(element)) return element;
+    const doc = element.ownerDocument;
+    for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
+      if (parent === doc.body || parent === doc.documentElement) break;
+      if (hasRenderableBox(parent)) return parent;
+    }
+    return element;
+  }
+  function innermostMatches(elements) {
+    if (elements.length < 2) {
+      return elements;
+    }
+    const matched = new Set(elements);
+    const matchedAncestors = /* @__PURE__ */ new Set();
+    for (const element of elements) {
+      for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
+        if (matched.has(parent)) {
+          matchedAncestors.add(parent);
+        }
+      }
+    }
+    return elements.filter((element) => !matchedAncestors.has(element));
   }
   function matchText(content, pattern, mode, caseSensitive) {
     const a = caseSensitive ? content : content.toLowerCase();
@@ -2784,20 +2933,27 @@
     }
     return pickOption(element, want);
   }
+  function keyEventInit(spec) {
+    const { descriptor, modifiers } = resolveKeySpec(spec);
+    return {
+      bubbles: true,
+      key: descriptor.key,
+      code: descriptor.code,
+      keyCode: descriptor.windowsVirtualKeyCode,
+      which: descriptor.windowsVirtualKeyCode,
+      ctrlKey: (modifiers & MODIFIER_BITS.Control) !== 0,
+      altKey: (modifiers & MODIFIER_BITS.Alt) !== 0,
+      metaKey: (modifiers & MODIFIER_BITS.Meta) !== 0,
+      shiftKey: (modifiers & MODIFIER_BITS.Shift) !== 0
+    };
+  }
   async function handlePressKey(target, key, timeoutMs = 5e3, root) {
     const element = target ? await waitForActionableElement(target, {
       timeoutMs,
       requireEnabled: true
     }) : root.activeElement ?? root.body;
     element.focus();
-    const descriptor = resolveKey(key);
-    const keyInit = {
-      bubbles: true,
-      key: descriptor.key,
-      code: descriptor.code,
-      keyCode: descriptor.windowsVirtualKeyCode,
-      which: descriptor.windowsVirtualKeyCode
-    };
+    const keyInit = keyEventInit(key);
     const keyDownEvent = new KeyboardEvent("keydown", keyInit);
     const keyUpEvent = new KeyboardEvent("keyup", keyInit);
     element.dispatchEvent(keyDownEvent);
@@ -2809,16 +2965,7 @@
       requireEnabled: true
     }) : root.activeElement ?? root.body;
     element.focus();
-    const descriptor = resolveKey(key);
-    element.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        bubbles: true,
-        key: descriptor.key,
-        code: descriptor.code,
-        keyCode: descriptor.windowsVirtualKeyCode,
-        which: descriptor.windowsVirtualKeyCode
-      })
-    );
+    element.dispatchEvent(new KeyboardEvent("keydown", keyEventInit(key)));
   }
   async function handleKeyUp(target, key, timeoutMs = 5e3, root) {
     const element = target ? await waitForActionableElement(target, {
@@ -2826,16 +2973,7 @@
       requireEnabled: true
     }) : root.activeElement ?? root.body;
     element.focus();
-    const descriptor = resolveKey(key);
-    element.dispatchEvent(
-      new KeyboardEvent("keyup", {
-        bubbles: true,
-        key: descriptor.key,
-        code: descriptor.code,
-        keyCode: descriptor.windowsVirtualKeyCode,
-        which: descriptor.windowsVirtualKeyCode
-      })
-    );
+    element.dispatchEvent(new KeyboardEvent("keyup", keyEventInit(key)));
   }
   function resolveSyntheticCoordinateTarget(x, y) {
     if (typeof document.elementFromPoint !== "function") {

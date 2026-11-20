@@ -1,7 +1,7 @@
 {
 	"name": "htrncontrol",
 	"displayName": "HTR NControl",
-	"version": "0.5.8",
+	"version": "0.5.9",
 	"author": "Ahren Stevens-Taylor <ahren@mercstudio.com>, James Tan <james.tan@aims-research.com>",
 	"description": "Create step-by-step documentation by recording browser interactions with screenshots",
 	"type": "module",
@@ -20,6 +20,7 @@
 		"dev": "vite",
 		"build": "bun check . && vite build && bun run cdp-bundle:build",
 		"cdp-bundle:build": "vite build --config vite.cdp.config.ts",
+		"cdp-bundle:check": "bun scripts/check-cdp-bundle.ts",
 		"preview": "vite preview",
 		"check": "biome check .",
 		"check:fix": "biome check --write .",

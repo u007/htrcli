@@ -261,6 +261,50 @@ transport). Each is a candidate enhancement; none is filed upstream.
   `bun run build` + a reload of the unpacked extension before the Drive move, the
   Gmail To field and the Slack composer can be re-tested. `--cdp` refuses `do` on
   purpose: splitting steps across CDP calls is exactly what loses the menu.
+- **`text=` used to click the page, not the label** — FIXED 2026-11-18.
+  `findByText` returned every element whose text *contains* the string, in
+  document order, so the first match was `<html>`/`<body>`/the list wrapper and
+  `click "text=Organise"` clicked the wrapper's centre — dismissing the very menu
+  the item lived in. That is why Drive's `Organise` submenu never opened. Text
+  matches are now narrowed to the innermost element (`innermostMatches` in
+  `src/contentScript/elementFinder.ts`), which keeps the container when the text
+  is split across children. Three tests in `elementFinder.test.ts` failed before
+  the fix. Needs an extension reload to take effect in the browser.
+- **An abandoned CDP command poisons the tab** — FIXED 2026-11-18. A command the
+  caller gives up on (client timeout) could leave a real `chrome.debugger`
+  attach behind, and every later command then failed with "Another debugger is
+  already attached to the tab" until the tab was reloaded — reproduced live. Two
+  changes: `attachShared` now detaches and retries once when the browser reports
+  that error (`attachWithStaleRecovery`, safe because `detach` can only release
+  our own session, never the user's DevTools), and `eval` goes through the same
+  refcounted path with a 30 s bound raced in JS around the round trip (the
+  protocol's `Runtime.evaluate` timeout does not cover an awaited promise), so an
+  unsettled promise can no longer hold the attach open.
+- **Modifier combos and function keys did not exist** — FIXED 2026-11-18.
+  `press "Control+a"`, `F1`–`F12` and bare `Shift`/`Control` all failed with
+  `resolveKey: unknown key`. `resolveKeySpec` (`src/utils/keyMap.ts`) now parses
+  `Ctrl`/`Control`, `Alt`/`Option`, `Shift`, `Meta`/`Cmd`/`Command`, carries the CDP
+  modifier bitmask on the one key event, and sets the modifier booleans on the
+  synthetic path; Ctrl/Alt/Meta combinations insert no text while `Shift+a` types
+  "A". F1–F12 and bare modifiers are in the key table. The new keyMap, CDP and DOM
+  tests failed before the change and pass now.
+- **The CDP `press` path dropped `code`/keycode on single characters** — FIXED
+  2026-11-18. A live probe showed `Ctrl+a` arriving at the page as `key=a code=`
+  with no keycode, and `F5`/bare `Shift` unresolvable: Go's `parseKey` carried the
+  modifier bits but the payload table held only named keys. `keyParams`
+  (`htrcli/internal/cdp/input.go`) now emits `code` + `windowsVirtualKeyCode` for
+  letters, digits and punctuation, uppercases `Shift+a`, sends no text for
+  Ctrl/Alt/Meta combos, and `namedKeys` gained F1–F12 plus the bare modifiers.
+  Verified live on CDP: `Control+a` → `code=KeyA ctrl=true` and no inserted text,
+  `Shift+a` typed "A", `Shift+Tab` moved focus backwards. Named keys keep their
+  text under modifiers, so `Ctrl+Enter` still sends "\r".
+- **A rebuild breaks the running extension until it is reloaded.** Vite writes
+  hashed entry names (`assets/index.ts-loader-<hash>.js`) and empties the output
+  dir, so the extension Chrome already holds asks for a file that no longer
+  exists: every new injection fails with `Could not load file:
+  'assets/index.ts-loader-<old>.js'`, and a navigation or `reload` of a tab kills
+  the content script that was still working. `bun run build` → reload the unpacked
+  extension at chrome://extensions → then verify, in that order.
 - **Menus render off-viewport.** Drive's file context menu is created at `y=774`
   with height 233 in a 774-high viewport, so item clicks land outside it. A
   scroll-into-view, or a click path that ignores position, would help.
@@ -378,3 +422,13 @@ regression test that failed beforehand (or, where noted, a real-Chromium check).
 
 - **Toolbar-icon show/hide is not automated.** The two-view panel itself is covered (SSR structure in `src/sidepanel/SidePanel.test.tsx`, persistence/navigation in `tabState.test.ts`, and a live headless-Chromium CDP check of tab switching). Chrome's toggle is registered (`sidePanel.getPanelBehavior()` → `{openPanelOnActionClick:true}`) and the Firefox click path is unit-tested (`firefox/src/sidebarToggle.test.ts`, asserts the listener is registered and `sidebarAction.toggle()` is called synchronously). What remains unexecuted is the real browser gesture: Chrome 156 ignores `--load-extension` and the extension UI is browser chrome, so an actual icon click cannot be scripted, and this host cannot run `web-ext`/GUI automation. A manual Firefox 159 check (load `firefox/build`, click the icon twice, confirm the sidebar opens then closes) is still required before release.
 - The Firefox `sidebar_action` launcher button the browser adds itself is separate from the extension's `action` button; confirm a click on the launcher does not double-toggle alongside our `action.onClicked` handler.
+
+## Review follow-ups (2026-11-19)
+
+- [x] Suppress the control status line for htrcli `--cdp` captures — `htrcli/internal/cdp/statusbar.go` hides the `htrncontrol-control-status` host around `Screenshot` (`nav.go`), `ScreenshotFullPage` (`screenshot.go`) and the screencast (`screencast.go`), using a DOM-held depth counter so overlapping processes cannot restore early. Best effort: an eval failure is logged and the capture still runs. Covered by `statusbar_test.go` (from review-changes: 2026-11-19).
+- [x] Live-check the extension-side control bar: the two-frame paint barrier and the 5 s watchdog have unit tests only; no real command+screenshot timing run (from review-changes: 2026-11-19). **DONE 2026-11-19** — disposable Chrome for Testing (Playwright's Chromium 1255) with the built unpacked extension; the suppress ack measured 25–31 ms (two frames), and a simulated leaked hold (`true,true,false`) re-rendered visible after 5.2 s.
+- [x] Live-check the extension/CDP suppression overlap on an extension-loaded Chrome: run an extension command while a `--cdp screenshot` runs (and a screenshot during a screencast), then confirm the depth returns to 0 and the bar is visible afterwards. The extension's `setControlStatusSuppressed` and the Go hold both write the host's `display` (from review-changes: 2026-11-19). **DONE 2026-11-19** — the screenshot during an active command left `display=""` and no `shot` hold; during a screencast it left `record="1"`, released the `shot` hold, and kept the bar hidden until `record stop`, which released `record`; a second `record start` re-acquired `record="1"`, proving no stale hold blocked it.
+- [x] Leaked CDP hold: a killed `htrcli` process leaves `data-htrncontrol-suppress-depth` > 0, so later CDP restores only decrement and never restore until the page reloads. The extension's render still corrects `display` on its next command. Fix direction: a timestamped hold or an event-driven refresh rendered by the content script (from review-changes: 2026-11-19). **FIXED 2026-11-19** — split into `shot` (60 s TTL) and `record` (6 h TTL) counters pruned on the next hide; the restore drops the inline override and dispatches `htrncontrol:control-status-refresh`, and the content script re-renders. The screencast now cleans up on a fresh session before closing the capture socket, because a timed-out read poisons the gorilla websocket; a 2 s deadline bounds the hide/restore calls.
+- [x] `htrcli record stop` fails to encode with ffmpeg 9: `Unrecognized option 'vsync'` (exit 8). **FIXED 2026-11-19** — `media.EncodeArgs` now uses `-fps_mode vfr` (the `-vsync` spelling was removed in ffmpeg 9; `-fps_mode` exists since 5.1 and the project requires ≥6). `TestEncodeArgs` asserts the new flag and rejects `-vsync`. Proven against ffmpeg 9.0.2: the new argv encoded 3 PNG frames to H.264 (4 frames, 0.36 s) with exit 0; the old argv exited 8 with `Unrecognized option 'vsync'`. The recorder was not re-run end-to-end with frames after the fix.
+- [x] Live-proof scope: the 2026-11-19 CDP run used one tab in a disposable Chrome for Testing. **EXTENDED 2026-11-19** — the current `firefox/build` loaded as a temporary add-on with `web-ext run` connected to the running daemon; an extension `attr` command read the status host, and an extension screenshot taken within the 1.5 s grace had white top rows (no amber), proving the capture suppression on Firefox through native messaging. Remaining gap: the Chrome daemon path could not be re-run because the installed Chrome extension is stale (its hashed content-script loader `assets/index.ts-loader-Cvkada1Y.js` 404s) and its minimized window returns `image readback failed`; reload the unpacked extension and repeat the Firefox sequence on Chrome.
+- [ ] Go-side TTL pruning is unit-only: the JS scripts run in the page, so the Go tests assert their contents and ordering but cannot execute the 60 s `shot` prune or the 6 h `record` prune. A crashed recorder leaves `record` > 0 for up to 6 h; the extension's `render()` corrects `display`, but a later screenshot's restore will not clear the inline override until the prune. A live time-travel test or an injectable TTL would close it.

@@ -171,6 +171,9 @@ func ScreenshotFullPage(s *Session) ([]byte, error) {
 			"scale":  1.0,
 		},
 	}
+	hideControlStatusBar(s, holdShot)
+	defer restoreControlStatusBar(s, holdShot)
+
 	if err := s.Call("Page.captureScreenshot", params, &res); err != nil {
 		return nil, err
 	}

@@ -98,6 +98,21 @@ func (s *Session) Call(method string, params any, result any) error {
 	}
 }
 
+// CallDeadline is Call bounded by timeout. A timeout leaves the session
+// usable: the read deadline is cleared before returning. Callers that hit the
+// timeout should still report it, because the page may be gone.
+func (s *Session) CallDeadline(timeout time.Duration, method string, params any, result any) error {
+	if err := s.conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return fmt.Errorf("%s: set read deadline: %w", method, err)
+	}
+	defer func() {
+		// intentionally not logged: clearing a deadline after a read cannot
+		// meaningfully fail, and a stale deadline is cleared by the next call.
+		_ = s.conn.SetReadDeadline(time.Time{})
+	}()
+	return s.Call(method, params, result)
+}
+
 // WaitEvent returns the params of the next event named name, checking events
 // buffered during earlier Calls first, then reading the socket until timeout.
 func (s *Session) WaitEvent(name string, timeout time.Duration) (json.RawMessage, error) {

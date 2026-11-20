@@ -33,10 +33,13 @@ func TestEncodeArgs(t *testing.T) {
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"-f concat", "-safe 0", "-i /tmp/frames.txt",
-		"-vsync vfr", "-pix_fmt yuv420p", "/tmp/out.mp4",
+		"-fps_mode vfr", "-pix_fmt yuv420p", "/tmp/out.mp4",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("expected args to contain %q, got %q", want, joined)
 		}
+	}
+	if strings.Contains(joined, "-vsync") {
+		t.Errorf("args must not use the ffmpeg-9-removed -vsync, got %q", joined)
 	}
 }

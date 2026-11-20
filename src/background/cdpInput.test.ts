@@ -80,6 +80,26 @@ describe("CDP input dispatch — event sequence construction", () => {
 		expect(calls[1].params.button).toBe("right");
 	});
 
+	it("pressKey Control+a carries the Ctrl modifier bit and inserts no text", async () => {
+		const { send, calls } = recordingSend();
+		await dispatchCdpKey(
+			1,
+			{
+				id: "k3",
+				action: "pressKey",
+				target: { selector: "#i" },
+				value: "Control+a",
+			},
+			{ send, prepare: focusPrepare },
+		);
+		expect(calls[0].params.type).toBe("keyDown");
+		expect(calls[0].params.key).toBe("a");
+		expect(calls[0].params.code).toBe("KeyA");
+		expect(calls[0].params.modifiers).toBe(2);
+		expect(calls[0].params.text).toBeUndefined();
+		expect(calls[1].params.modifiers).toBe(2);
+	});
+
 	it("pressKey Enter dispatches keyDown with text '\\r' then keyUp", async () => {
 		const { send, calls } = recordingSend();
 		await dispatchCdpKey(

@@ -800,7 +800,7 @@ async function handleUploadFiles(
 	}
 
 	try {
-		await chrome.debugger.attach({ tabId }, "1.3");
+		await attachShared(tabId);
 		const send = async (
 			method: string,
 			params: Record<string, unknown>,
@@ -844,16 +844,29 @@ async function handleUploadFiles(
 			err instanceof Error ? err.message : String(err),
 		);
 	} finally {
-		try {
-			await chrome.debugger.detach({ tabId });
-		} catch {
-			// Ignore detach errors — the tab may already be gone.
-		}
+		await detachShared(tabId);
 	}
 }
 
 // Evaluates an async JS expression via Chrome DevTools Protocol.
 // Bypasses executeScript structured-clone issues — CDP returns values natively.
+
+/**
+ * Upper bound on one `eval` round trip. `Runtime.evaluate` awaits the expression's
+ * promise, so an expression that never settles would otherwise hold the debugger
+ * attach open until the tab is reloaded (every later command then fails with
+ * "Another debugger is already attached"). `cdpEvaluate` races the round trip
+ * against this bound — the protocol's own `timeout` does not cover `awaitPromise`
+ * — turning it into a normal error reply and letting the `finally` detach run.
+ */
+const EVAL_TIMEOUT_MS = 30000;
+
+// Test seam: shorten the eval bound so a timeout test need not wait 30 s.
+let evalTimeoutMs = EVAL_TIMEOUT_MS;
+export function __setEvalTimeoutForTests(ms: number): void {
+	evalTimeoutMs = ms;
+}
+
 async function handleDebuggerEval(
 	tabId: number,
 	payload: Command,
@@ -864,12 +877,13 @@ async function handleDebuggerEval(
 		return;
 	}
 	try {
-		await chrome.debugger.attach({ tabId }, "1.3");
+		await attachShared(tabId);
 		try {
 			const value = await cdpEvaluate(
 				(method, params) =>
 					chrome.debugger.sendCommand({ tabId }, method, params),
 				expression,
+				evalTimeoutMs,
 			);
 			sendToNative({
 				type: "command_result",
@@ -877,7 +891,7 @@ async function handleDebuggerEval(
 				payload: { id, success: true, data: value } as CommandResult,
 			});
 		} finally {
-			await chrome.debugger.detach({ tabId });
+			await detachShared(tabId);
 		}
 	} catch (err) {
 		replyError(tabId, id, err instanceof Error ? err.message : String(err));

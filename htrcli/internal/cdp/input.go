@@ -461,27 +461,238 @@ func normalizeDragDelay(delayMs int) int {
 	return delayMs
 }
 
+// CDP modifier bits, as carried on Input.dispatchKeyEvent.
+const (
+	modifierAlt = 1 << iota
+	modifierCtrl
+	modifierMeta
+	modifierShift
+)
+
+// keyDescriptor is the field set one logical key contributes to a CDP key event.
+type keyDescriptor struct {
+	vk        int    // windowsVirtualKeyCode
+	domCode   string // KeyboardEvent.code
+	text      string // character the key produces
+	printable bool   // one character: Ctrl/Alt/Meta suppress its text
+}
+
+// describeKey resolves a named key ("Enter", "F5", "Shift") or a single
+// printable character to its descriptor.
+func describeKey(key string) (keyDescriptor, bool) {
+	if d, ok := namedKeys[key]; ok {
+		return d, true
+	}
+	runes := []rune(key)
+	if len(runes) != 1 {
+		return keyDescriptor{}, false
+	}
+	return describeChar(runes[0])
+}
+
+// describeChar maps a printable ASCII character to its physical key, so a
+// single-character press carries `code` and the VK that apps read — not just
+// `key` and `text`.
+func describeChar(r rune) (keyDescriptor, bool) {
+	switch {
+	case r >= 'a' && r <= 'z':
+		return keyDescriptor{vk: int(r-'a') + 65, domCode: "Key" + strings.ToUpper(string(r)), text: string(r), printable: true}, true
+	case r >= 'A' && r <= 'Z':
+		return keyDescriptor{vk: int(r), domCode: "Key" + string(r), text: string(r), printable: true}, true
+	case r >= '0' && r <= '9':
+		return keyDescriptor{vk: int(r), domCode: "Digit" + string(r), text: string(r), printable: true}, true
+	case r == ' ':
+		return keyDescriptor{vk: 32, domCode: "Space", text: " ", printable: true}, true
+	}
+	if d, ok := punctuationKeys[r]; ok {
+		d.text = string(r)
+		d.printable = true
+		return d, true
+	}
+	if d, ok := shiftedPunctuationKeys[r]; ok {
+		d.text = string(r)
+		d.printable = true
+		return d, true
+	}
+	return keyDescriptor{}, false
+}
+
+var punctuationKeys = map[rune]keyDescriptor{
+	'-':  {vk: 189, domCode: "Minus"},
+	'=':  {vk: 187, domCode: "Equal"},
+	'[':  {vk: 219, domCode: "BracketLeft"},
+	']':  {vk: 221, domCode: "BracketRight"},
+	'\\': {vk: 220, domCode: "Backslash"},
+	';':  {vk: 186, domCode: "Semicolon"},
+	'\'': {vk: 222, domCode: "Quote"},
+	',':  {vk: 188, domCode: "Comma"},
+	'.':  {vk: 190, domCode: "Period"},
+	'/':  {vk: 191, domCode: "Slash"},
+	'`':  {vk: 192, domCode: "Backquote"},
+}
+
+// shiftedPunctuationKeys maps a shifted symbol to the code/VK of the physical
+// key it shares with its unshifted base, mirroring the TS SHIFTED_SYMBOL_KEYS
+// table so `press "!"` carries the same code/VK on both transports.
+var shiftedPunctuationKeys = map[rune]keyDescriptor{
+	'~': {vk: 192, domCode: "Backquote"},
+	'_': {vk: 189, domCode: "Minus"},
+	'+': {vk: 187, domCode: "Equal"},
+	'{': {vk: 219, domCode: "BracketLeft"},
+	'}': {vk: 221, domCode: "BracketRight"},
+	'|': {vk: 220, domCode: "Backslash"},
+	':': {vk: 186, domCode: "Semicolon"},
+	'"': {vk: 222, domCode: "Quote"},
+	'<': {vk: 188, domCode: "Comma"},
+	'>': {vk: 190, domCode: "Period"},
+	'?': {vk: 191, domCode: "Slash"},
+	'!': {vk: 49, domCode: "Digit1"},
+	'@': {vk: 50, domCode: "Digit2"},
+	'#': {vk: 51, domCode: "Digit3"},
+	'$': {vk: 52, domCode: "Digit4"},
+	'%': {vk: 53, domCode: "Digit5"},
+	'^': {vk: 54, domCode: "Digit6"},
+	'&': {vk: 55, domCode: "Digit7"},
+	'*': {vk: 56, domCode: "Digit8"},
+	'(': {vk: 57, domCode: "Digit9"},
+	')': {vk: 48, domCode: "Digit0"},
+}
+
+// shiftedChars maps an unshifted printable character to the character the same
+// physical key produces with Shift held on the US layout the tables model.
+// Letters are handled with strings.ToUpper; digits and punctuation are not.
+var shiftedChars = map[rune]rune{
+	'1': '!', '2': '@', '3': '#', '4': '$', '5': '%',
+	'6': '^', '7': '&', '8': '*', '9': '(', '0': ')',
+	'-': '_', '=': '+', '[': '{', ']': '}', '\\': '|',
+	';': ':', '\'': '"', ',': '<', '.': '>', '/': '?', '`': '~',
+}
+
+// requiresShiftKey reports whether the character is only reachable with Shift
+// held on the US layout: an uppercase letter or a shifted symbol.
+func requiresShiftKey(key string) bool {
+	runes := []rune(key)
+	if len(runes) != 1 {
+		return false
+	}
+	if runes[0] >= 'A' && runes[0] <= 'Z' {
+		return true
+	}
+	_, shifted := shiftedPunctuationKeys[runes[0]]
+	return shifted
+}
+
+// keyParams builds the shared payload for one key event from a key spec's key
+// and modifiers.
+//
+// Shift on a letter produces the uppercase character ("Shift+a" is "A"); a
+// printable character under Ctrl/Alt/Meta produces no character at all, so no
+// text is sent — the shortcut must not insert the letter it was combined with.
+func keyParams(key string, modifiers int) map[string]any {
+	// A character only reachable with Shift must not claim shiftKey:false.
+	if modifiers == 0 && requiresShiftKey(key) {
+		modifiers |= modifierShift
+	}
+	params := map[string]any{"key": key, "modifiers": modifiers}
+	d, known := describeKey(key)
+	if !known {
+		// Unknown single characters keep the old text-only fallback.
+		if len([]rune(key)) == 1 && modifiers&(modifierCtrl|modifierAlt|modifierMeta) == 0 {
+			params["text"] = key
+		}
+		return params
+	}
+	params["windowsVirtualKeyCode"] = d.vk
+	params["code"] = d.domCode
+
+	text := d.text
+	if d.printable {
+		if modifiers&modifierShift != 0 {
+			// Shift+1 is "!", Shift+- is "_": upper-casing a digit is a no-op,
+			// so the shifted table supplies the character for non-letters.
+			shifted := strings.ToUpper(key)
+			if r := []rune(key); len(r) == 1 {
+				if s, ok := shiftedChars[r[0]]; ok {
+					shifted = string(s)
+				}
+			}
+			if len([]rune(shifted)) == 1 {
+				text = shifted
+				params["key"] = shifted
+			}
+		}
+		if modifiers&(modifierCtrl|modifierAlt|modifierMeta) != 0 {
+			text = ""
+		}
+	}
+	if text != "" {
+		params["text"] = text
+	}
+	return params
+}
+
+// validateKeyName rejects a multi-character key name that is not in the table:
+// a typo must not dispatch a garbage event with exit 0. A single unknown rune
+// stays a valid text-only character.
+func validateKeyName(key, keySpec string) error {
+	if _, known := describeKey(key); !known && len([]rune(key)) != 1 {
+		return fmt.Errorf("unknown key %q in %q", key, keySpec)
+	}
+	return nil
+}
+
 // parseKey returns key string and modifiers bitmask from a spec like "Ctrl+Shift+a".
 func parseKey(keySpec string) (string, int, error) {
 	if strings.TrimSpace(keySpec) == "" {
 		return "", 0, fmt.Errorf("key cannot be empty")
 	}
-	parts := strings.Split(keySpec, "+")
-	key := strings.TrimSpace(parts[len(parts)-1])
-	if key == "" {
-		return "", 0, fmt.Errorf("key cannot be empty in %q", keySpec)
+	// "+" is both the separator and a key: a bare "+" is the plus key, and
+	// "Ctrl++" is Ctrl held with it. A lone trailing "+" after a modifier
+	// ("Ctrl+") still names no key and stays an error.
+	if keySpec == "+" {
+		return "+", 0, nil
+	}
+	plusKey := strings.HasSuffix(keySpec, "++")
+	body := keySpec
+	if plusKey {
+		body = strings.TrimSuffix(keySpec, "++")
+	}
+	var parts []string
+	if body != "" {
+		parts = strings.Split(body, "+")
+	}
+	if !plusKey && len(parts) == 1 {
+		key := strings.TrimSpace(parts[0])
+		if err := validateKeyName(key, keySpec); err != nil {
+			return "", 0, err
+		}
+		return key, 0, nil
+	}
+	key := "+"
+	modParts := parts
+	if !plusKey {
+		key = strings.TrimSpace(parts[len(parts)-1])
+		if key == "" {
+			return "", 0, fmt.Errorf("key cannot be empty in %q", keySpec)
+		}
+		modParts = parts[:len(parts)-1]
+	}
+	// A multi-character name that is not in the table is a typo, not a
+	// character: fail loudly instead of dispatching garbage with exit 0.
+	if err := validateKeyName(key, keySpec); err != nil {
+		return "", 0, err
 	}
 	modifiers := 0
-	for _, mod := range parts[:len(parts)-1] {
+	for _, mod := range modParts {
 		switch strings.ToLower(strings.TrimSpace(mod)) {
-		case "alt":
-			modifiers |= 1
+		case "alt", "option":
+			modifiers |= modifierAlt
 		case "ctrl", "control":
-			modifiers |= 2
-		case "meta", "cmd":
-			modifiers |= 4
+			modifiers |= modifierCtrl
+		case "meta", "cmd", "command":
+			modifiers |= modifierMeta
 		case "shift":
-			modifiers |= 8
+			modifiers |= modifierShift
 		default:
 			return "", 0, fmt.Errorf("unknown modifier %q in %q", mod, keySpec)
 		}
@@ -497,16 +708,8 @@ func KeyDown(s *Session, targetID string, keySpec string) error {
 	if err != nil {
 		return err
 	}
-	params := map[string]any{"type": "keyDown", "key": key, "modifiers": modifiers}
-	if named, ok := namedKeys[key]; ok {
-		params["windowsVirtualKeyCode"] = named.code
-		params["code"] = named.domCode
-		if named.text != "" {
-			params["text"] = named.text
-		}
-	} else if len([]rune(key)) == 1 {
-		params["text"] = key
-	}
+	params := keyParams(key, modifiers)
+	params["type"] = "keyDown"
 	if err := s.Call("Input.dispatchKeyEvent", params, nil); err != nil {
 		return fmt.Errorf("dispatch keyDown: %w", err)
 	}
@@ -521,14 +724,9 @@ func KeyUp(s *Session, targetID string, keySpec string) error {
 	if err != nil {
 		return err
 	}
-	params := map[string]any{"type": "keyUp", "key": key, "modifiers": modifiers}
-	if named, ok := namedKeys[key]; ok {
-		params["windowsVirtualKeyCode"] = named.code
-		params["code"] = named.domCode
-		// text only on keyDown, not keyUp
-	} else if len([]rune(key)) == 1 {
-		// no text on keyUp
-	}
+	params := keyParams(key, modifiers)
+	params["type"] = "keyUp"
+	delete(params, "text") // text only on keyDown
 	if err := s.Call("Input.dispatchKeyEvent", params, nil); err != nil {
 		return fmt.Errorf("dispatch keyUp: %w", err)
 	}
@@ -546,40 +744,15 @@ func Press(s *Session, targetID string, keySpec string) error {
 	if err := s.Call("Target.activateTarget", map[string]any{"targetId": targetID}, nil); err != nil {
 		return fmt.Errorf("activating target: %w", err)
 	}
-	parts := strings.Split(keySpec, "+")
-	key := parts[len(parts)-1]
-	modifiers := 0
-	for _, mod := range parts[:len(parts)-1] {
-		switch strings.ToLower(mod) {
-		case "alt":
-			modifiers |= 1
-		case "ctrl", "control":
-			modifiers |= 2
-		case "meta", "cmd":
-			modifiers |= 4
-		case "shift":
-			modifiers |= 8
-		default:
-			return fmt.Errorf("unknown modifier %q in %q", mod, keySpec)
-		}
-	}
-	params := map[string]any{"key": key, "modifiers": modifiers}
-	if named, ok := namedKeys[key]; ok {
-		params["windowsVirtualKeyCode"] = named.code
-		params["code"] = named.domCode
-		if named.text != "" {
-			params["text"] = named.text
-		}
-	} else if len([]rune(key)) == 1 {
-		params["text"] = key
+	key, modifiers, err := parseKey(keySpec)
+	if err != nil {
+		return err
 	}
 	for _, typ := range []string{"keyDown", "keyUp"} {
-		p := map[string]any{"type": typ}
-		for k, v := range params {
-			if typ == "keyUp" && k == "text" {
-				continue // text only on keyDown
-			}
-			p[k] = v
+		p := keyParams(key, modifiers)
+		p["type"] = typ
+		if typ == "keyUp" {
+			delete(p, "text") // text only on keyDown
 		}
 		if err := s.Call("Input.dispatchKeyEvent", p, nil); err != nil {
 			return fmt.Errorf("dispatch %s: %w", typ, err)
@@ -590,23 +763,38 @@ func Press(s *Session, targetID string, keySpec string) error {
 
 // namedKeys mirrors the descriptor table in src/utils/keyMap.ts: virtual
 // keycode, DOM `code`, and — for Enter/Tab — the control-char text that makes
-// char events (form submit, focus move) actually fire.
-var namedKeys = map[string]struct {
-	code    int
-	domCode string
-	text    string
-}{
-	"Enter":      {13, "Enter", "\r"},
-	"Tab":        {9, "Tab", "\t"},
-	"Escape":     {27, "Escape", ""},
-	"Backspace":  {8, "Backspace", ""},
-	"Delete":     {46, "Delete", ""},
-	"ArrowLeft":  {37, "ArrowLeft", ""},
-	"ArrowUp":    {38, "ArrowUp", ""},
-	"ArrowRight": {39, "ArrowRight", ""},
-	"ArrowDown":  {40, "ArrowDown", ""},
-	"Home":       {36, "Home", ""},
-	"End":        {35, "End", ""},
-	"PageUp":     {33, "PageUp", ""},
-	"PageDown":   {34, "PageDown", ""},
+// char events (form submit, focus move) actually fire. F1–F12 and the bare
+// modifier keys are named so "F5" or "Shift" resolves on its own.
+var namedKeys = map[string]keyDescriptor{
+	"Enter":      {vk: 13, domCode: "Enter", text: "\r"},
+	"Tab":        {vk: 9, domCode: "Tab", text: "\t"},
+	"Escape":     {vk: 27, domCode: "Escape"},
+	"Backspace":  {vk: 8, domCode: "Backspace"},
+	"Delete":     {vk: 46, domCode: "Delete"},
+	"ArrowLeft":  {vk: 37, domCode: "ArrowLeft"},
+	"ArrowUp":    {vk: 38, domCode: "ArrowUp"},
+	"ArrowRight": {vk: 39, domCode: "ArrowRight"},
+	"ArrowDown":  {vk: 40, domCode: "ArrowDown"},
+	"Home":       {vk: 36, domCode: "Home"},
+	"End":        {vk: 35, domCode: "End"},
+	"PageUp":     {vk: 33, domCode: "PageUp"},
+	"PageDown":   {vk: 34, domCode: "PageDown"},
+	"F1":         {vk: 112, domCode: "F1"},
+	"F2":         {vk: 113, domCode: "F2"},
+	"F3":         {vk: 114, domCode: "F3"},
+	"F4":         {vk: 115, domCode: "F4"},
+	"F5":         {vk: 116, domCode: "F5"},
+	"F6":         {vk: 117, domCode: "F6"},
+	"F7":         {vk: 118, domCode: "F7"},
+	"F8":         {vk: 119, domCode: "F8"},
+	"F9":         {vk: 120, domCode: "F9"},
+	"F10":        {vk: 121, domCode: "F10"},
+	"F11":        {vk: 122, domCode: "F11"},
+	"F12":        {vk: 123, domCode: "F12"},
+	"Shift":      {vk: 16, domCode: "ShiftLeft"},
+	"Control":    {vk: 17, domCode: "ControlLeft"},
+	"Ctrl":       {vk: 17, domCode: "ControlLeft"},
+	"Alt":        {vk: 18, domCode: "AltLeft"},
+	"Meta":       {vk: 91, domCode: "MetaLeft"},
+	"Cmd":        {vk: 91, domCode: "MetaLeft"},
 }

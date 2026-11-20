@@ -18,7 +18,7 @@
  */
 
 import type { Command, CommandResult } from "../types/commands";
-import { resolveKey } from "../utils/keyMap";
+import { resolveKeySpec } from "../utils/keyMap";
 import { attachShared, detachShared } from "./debuggerManager";
 
 /** Actions dispatched as trusted CDP input on Chrome. */
@@ -383,7 +383,7 @@ export async function dispatchCdpKeyDown(
 	if (typeof value !== "string" || value.length === 0) {
 		throw new Error("keyDown requires a non-empty key value");
 	}
-	const descriptor = resolveKey(value);
+	const { descriptor, modifiers } = resolveKeySpec(value);
 	const prepare = deps.prepare ?? ((c) => defaultPrepare(tabId, c));
 	await prepare({
 		action: "prepareKeys",
@@ -395,6 +395,8 @@ export async function dispatchCdpKeyDown(
 		key: descriptor.key,
 		code: descriptor.code,
 		windowsVirtualKeyCode: descriptor.windowsVirtualKeyCode,
+		// CDP carries modifiers on the event, so a combo is one dispatch.
+		...(modifiers !== 0 ? { modifiers } : {}),
 	};
 	await runWithDebugger(tabId, deps.send, async (send) => {
 		await send("Input.dispatchKeyEvent", {
@@ -415,7 +417,7 @@ export async function dispatchCdpKeyUp(
 	if (typeof value !== "string" || value.length === 0) {
 		throw new Error("keyUp requires a non-empty key value");
 	}
-	const descriptor = resolveKey(value);
+	const { descriptor, modifiers } = resolveKeySpec(value);
 	const prepare = deps.prepare ?? ((c) => defaultPrepare(tabId, c));
 	await prepare({
 		action: "prepareKeys",
@@ -427,6 +429,8 @@ export async function dispatchCdpKeyUp(
 		key: descriptor.key,
 		code: descriptor.code,
 		windowsVirtualKeyCode: descriptor.windowsVirtualKeyCode,
+		// CDP carries modifiers on the event, so a combo is one dispatch.
+		...(modifiers !== 0 ? { modifiers } : {}),
 	};
 	await runWithDebugger(tabId, deps.send, async (send) => {
 		await send("Input.dispatchKeyEvent", {
@@ -451,7 +455,7 @@ export async function dispatchCdpKey(
 	if (typeof value !== "string" || value.length === 0) {
 		throw new Error("pressKey requires a non-empty key value");
 	}
-	const descriptor = resolveKey(value);
+	const { descriptor, modifiers } = resolveKeySpec(value);
 
 	const prepare = deps.prepare ?? ((c) => defaultPrepare(tabId, c));
 	await prepare({
@@ -465,6 +469,8 @@ export async function dispatchCdpKey(
 		key: descriptor.key,
 		code: descriptor.code,
 		windowsVirtualKeyCode: descriptor.windowsVirtualKeyCode,
+		// CDP carries modifiers on the event, so a combo is one dispatch.
+		...(modifiers !== 0 ? { modifiers } : {}),
 	};
 
 	await runWithDebugger(tabId, deps.send, async (send) => {

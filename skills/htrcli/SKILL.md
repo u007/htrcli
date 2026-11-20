@@ -1,6 +1,6 @@
 ---
 name: htrcli
-description: If the agent has a `browser_run` or `browser` tool, use those instead; this skill is for shells without browser tools (the TUI) and for recording, network mocking, contexts and raw commands. HTR NControl CLI (htrcli) usage guide. Read this before running any htrcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select, press, keydown/keyup, mousedown/mouseup/mousemove/drag with xy= viewport coordinates and @eN refs), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, recording video, session recordings (start/stop/list/get/export/delete — works on Chrome and Firefox), network capture/mocking, console watching, dialog handling, and more. Includes a form-filling guide (pick/fill-form/--frame, datepickers, react-select, iframes, submit-and-verify) and the list of what works over --cdp. Use when the user asks to control a browser, interact with a website, fill a form, click something, drag, press keys, extract data, take a screenshot, or automate any browser task via HTR NControl.
+description: If the agent has a `browser_run` or `browser` tool, use those instead; this skill is for shells without browser tools (the TUI) and for recording, network mocking, contexts and raw commands. HTR NControl CLI (htrcli) usage guide. Prefers the extension transport (the user's already logged-in browser); `--cdp` is for fresh, isolated sessions only, never for login-gated sites. Read this before running any htrcli commands. Covers connecting to the HTR NControl server, listing and switching tabs, navigating pages, interacting with elements (click, fill, type, select, press, keydown/keyup, mousedown/mouseup/mousemove/drag with xy= viewport coordinates and @eN refs), extracting text and data (text/html/attr/value/find), taking screenshots, executing JavaScript in the page's main world, managing browser sessions, recording video, session recordings (start/stop/list/get/export/delete — works on Chrome and Firefox), network capture/mocking, console watching, dialog handling, and more. Includes a form-filling guide (pick/fill-form/--frame, datepickers, react-select, iframes, submit-and-verify) and the list of what works over --cdp. Use when the user asks to control a browser, interact with a website, fill a form, click something, drag, press keys, extract data, take a screenshot, or automate any browser task via HTR NControl.
 allowed-tools: Bash(htrcli:*), Bash(go run ./cmd/htrcli:*), Bash(make htrcli-*)
 ---
 
@@ -26,6 +26,33 @@ htrcli (Go) ──CDP──► Chrome DevTools Protocol (:9222)
 The extension transport works with both Chrome and Firefox; CDP transport works
 with Chrome only.
 
+### Transport choice: extension first, `--cdp` only for a fresh session
+
+**Default to the extension transport. Do not add `--cdp` unless the task needs a
+fresh, throwaway browser session.**
+
+- **Anything behind a login uses the extension.** The extension drives the user's
+  own browser, so the cookies, SSO state and MFA-cleared profile are already
+  loaded. Gmail, Slack, CRM, admin consoles, dashboards, any site that shows a
+  "Sign in" page: extension transport, no flag.
+- **Never use `--cdp` for logged-in browsing.** `htrcli browser start` creates a
+  *separate* Chrome profile (`~/.htrcli/chrome-profile/`, or
+  `~/.htrcli/contexts/<name>/` for a context), so a CDP command on a
+  login-gated site lands on a sign-in wall, a consent screen or a CAPTCHA. The
+  agent then has to handle credentials, which it must never do. A login wall on
+  CDP is a sign the transport is wrong, not a step to work around.
+- **Reach for `--cdp` only when you need a fresh session**: a clean profile with
+  no history, cookies or extensions (`htrcli browser start`), headless or CI/cron
+  automation, a page the extension cannot touch (`chrome://`, the Chrome Web
+  Store console), a local `file://` fixture (the content script is injected into
+  `http/https` only), or a scratch context that must not inherit the user's state.
+- "Fresh session" is a **reason**, not a preference. If your reason is habit, or
+  that the task mentioned CDP, use the extension.
+- A CDP profile becomes authenticated only when a **human** signs in to that
+  dedicated profile once (`htrcli browser start` visible, then reuse it
+  headless). That is the bench/CI pattern. It is never a substitute for the
+  user's own signed-in session, and the agent does not log in itself.
+
 An agent host that drives htrcli through the daemon API (ocode's `browser`/`browser_run` tools on a remote host do this): see `docs/agent-host.md` in the htrcli repository and `docs/concepts/browser-agent-tools.md` here.
 
 ## Agent quick rules (read this first; skip the probing)
@@ -34,21 +61,25 @@ Everything you need is in this file. Do **not** run `htrcli --help`, `htrcli <cm
 `strings`/`grep` on the binary, or read htrcli's source: the commands, flags and CDP limits are listed here and
 each probe costs a round trip.
 
-1. **Transport.** If the task says a CDP browser is running (or you started one with `htrcli browser start`),
-   put `--cdp` on **every** command. `health` is an extension-daemon command and says nothing about CDP; skip it.
-2. **Tab.** `--cdp` without `--tab` drives the **first page target**, which may be someone else's tab, and
-   `open` replaces its page. If more than one tab exists, run `htrcli --cdp tabs list` once and pass
-   `--tab <id>` on every command. Never navigate a tab you did not open or were not given.
+1. **Transport = extension unless you need a fresh session.** Plain `htrcli` (no flag) drives the user's
+   logged-in browser. Add `--cdp` **only** for a deliberately fresh/isolated/headless session
+   (`htrcli browser start`, CI/cron, `chrome://` pages, a `file://` fixture); once you choose it, put `--cdp`
+   on **every** command. Never use `--cdp` for a site that needs login — its profile starts logged out, so
+   the command hits a sign-in wall. A login wall on CDP means switch to the extension, not handle credentials.
+   `health` is an extension-daemon command and says nothing about CDP; skip it.
+2. **Tab.** If you are on CDP, `--cdp` without `--tab` drives the **first page target**, which may be someone
+   else's tab, and `open` replaces its page. If more than one tab exists, run `htrcli --cdp tabs list` once
+   and pass `--tab <id>` on every command. Never navigate a tab you did not open or were not given.
 3. **Navigate by clicking, not by URL.** After entering the site, follow its links and buttons the way a user
    would: `find` the link/button, `click` it, then verify the page. Do not `open` a URL you constructed or guessed
    from the site's structure. Use `open` only for the entry URL you were given, or when no on-page path exists
    (and say so). Clicking runs the site's own navigation (SPA routing, referrer, state set along the way); a typed
    URL can 404 or skip steps the site expects.
-4. **Look once, then act.** One `htrcli --cdp snapshot` (or one `eval` that lists
+4. **Look once, then act.** One `htrcli snapshot` (or one `eval` that lists
    `tag/type/name/id/label/required` of every `input,select,textarea,button`) tells you the whole form. Do not
    re-inspect between fields unless the page changed.
 5. **Batch.** Do not issue one tool call per field. Put all steps for a form in **one bash script** (or use
-   `fill-form`, below), finish with a single read-back, and fix only what the read-back shows wrong.
+   `fill-form` on `--cdp`, below), finish with a single read-back, and fix only what the read-back shows wrong.
 6. **Scrolling is automatic.** An element that is rendered but below the fold is scrolled into view before
    `fill`/`click`/`check`/... act. "not visible" now means hidden/collapsed/zero-size (open its step, accordion or
    menu first), not "off screen".
@@ -61,24 +92,28 @@ each probe costs a round trip.
 
 | Works | Not available over `--cdp` (use `eval` or the extension transport) |
 |---|---|
-| open, find/findAll, snapshot, text/value/attr/html, click/dblclick/rightclick, fill, type, select, check/uncheck, clear, press/keydown/keyup, mouse*, drag, upload, eval, screenshot (incl. `--annotate`), tabs list/get/new/close (Chrome only), **pick**, **fill-form**, **--frame**, console read/watch, network read/watch/wait, **emulate** (viewport, color-scheme, user-agent), **cdp** (raw DevTools method), **scroll**, **back/forward**, **printpdf**, **dialog handle** (foreground waiter, see Dialog handling) | dialog list (no buffer survives between `--cdp` commands), fetch, network mock/block/unmock, trace export, **`do`** (needs one page round trip; steps cannot be split across CDP calls) |
+| open, find/findAll, snapshot, text/value/attr/html, click/dblclick/rightclick, fill, type, select, check/uncheck, clear, press/keydown/keyup, mouse*, drag, upload, eval, screenshot (incl. `--annotate`), tabs list/get/new/close (Chrome only), **pick** (CDP only), **fill-form** (CDP only), **--frame** (CDP only), console read/watch, network read/watch/wait, **emulate** (viewport, color-scheme, user-agent), **cdp** (raw DevTools method), **scroll**, **back/forward**, **printpdf**, **dialog handle** (foreground waiter, see Dialog handling) | dialog list (no buffer survives between `--cdp` commands), fetch, network mock/block/unmock, trace export, **`do`** (needs one page round trip; steps cannot be split across CDP calls) |
 
 ### Filling forms: verb per widget
 
 | Widget | Use |
 |---|---|
 | text, email, tel, password, textarea, `type=time` (`18:30`), `type=number` | `fill "<sel>" "<value>"` |
-| native `<select>` | `pick "<sel>" "<option text or value>"` (verifies; plain `select` silently selects nothing for a label it can't match) |
-| custom dropdown / react-select / autocomplete (role=combobox) | `pick "<sel>" "<full option text>"`: opens, types, waits for the options, clicks the best match, and checks the widget shows it. Never `fill`/`click` the tiny input. |
+| native `<select>` | extension: `select "<sel>" "<option value>"` — the option **value**, not its label; a label that differs from the value selects nothing, silently. `--cdp`: `pick "<sel>" "<option text or value>"` (matches a visible label too, and verifies). |
+| custom dropdown / react-select / autocomplete (role=combobox) | `--cdp`: `pick "<sel>" "<full option text>"` opens, types, waits for the options, clicks the best match and verifies. Extension: the CLI has no `pick` verb — `click` the input, `type` the query, `click` the option (`text=<option>`, or a `[role=option]` selector), then read the widget back. (The extension raw command route does expose the `pick` action.) Never `fill` the tiny input. |
 | checkbox / radio | `check "<sel>"` / `uncheck "<sel>"` (idempotent; `click` toggles). Target by `input[value=x]` or `label=...`, not position. |
 | contenteditable (rich text: Gmail reply box, Docs body) | `type "<sel>" "<value>"` — **appends** at the caret end; it never wipes the quoted text or the signature. `fill` **replaces** the whole content (correct for a spreadsheet cell, wrong for a reply box). |
-| JS datepicker text input | `type "<sel>" "03/14/2026"` (trusted keystrokes; `fill` leaves the widget's own state empty and it reverts), in the widget's format; then click elsewhere and read the value back |
+| JS datepicker text input | `type "<sel>" "03/14/2026"` (per-key events; `fill` leaves the widget's own state empty and it reverts), in the widget's format; then click elsewhere and read the value back |
 | calendar popup (grid of day buttons) | click the trigger, click next/prev until the month label matches, click the day |
 | range / colour input | `eval` set `.value` and dispatch `input`+`change` events (bubbles), then read back |
 | file input | `upload "<sel>" /abs/path` (never click it; it opens a native dialog). Only upload files you were told to. |
-| form inside an `<iframe>` (same origin) | add `--frame "<iframe css>"` to find/fill/type/check/select/click/pick/value/text/... or `open` the frame's `src` directly. Cross-origin frames: `open` their `src`. |
+| form inside an `<iframe>` (same origin) | on `--cdp`, add `--frame "<iframe css>"` to find/fill/type/check/select/click/pick/value/text/...; the extension CLI has no `--frame` flag (the raw route supports `options.frame`), so `open` the frame's `src` instead. Cross-origin frames: `open` their `src`. |
 
-**`fill-form`: many fields, one call, with read-back.**
+**`fill-form`: many fields, one call, with read-back (`--cdp` only).**
+
+`fill-form` is implemented only over CDP today. On a logged-in form fill the
+fields one by one with `fill`/`select`/`check`; do **not** switch to `--cdp` to
+reach `fill-form`.
 
 ```bash
 htrcli --cdp fill-form '{
@@ -88,7 +123,7 @@ htrcli --cdp fill-form '{
   "input[value=pro]": true,
   "#terms": true,
   "#resume": "/abs/path/resume.pdf"
-}'            # or: --file fields.json ; add --frame "iframe#contact" for an iframe form
+}'            # or: --file fields.json ; --frame "iframe#contact" (CDP only) for an iframe form
 ```
 
 Values: string/number as written (text, date, time), option text/value for `<select>`, `true`/`false` for
@@ -102,10 +137,10 @@ sanitization, so an empty or partial request cannot pass for a field the fill ne
 **Submit and verify (do this once).** To confirm a submission, start the wait first, then click:
 
 ```bash
-htrcli --cdp network wait --url "*/submit*" --timeout 10000 &
-htrcli --cdp click "button[type=submit]"
+htrcli network wait --url "*/submit*" --timeout 10000 &
+htrcli click "button[type=submit]"
 wait
-htrcli --cdp text "body"     # confirmation text; do not re-click Submit "to be sure"
+htrcli text "body"     # confirmation text; do not re-click Submit "to be sure"
 ```
 
 A submit that does nothing is almost always a validation error: read the page for the message (or
@@ -196,10 +231,17 @@ display, or SSH session), the tray is silently skipped. See
 
 By default `htrcli` drives the browser through the extension. With `--cdp`
 (or `htrcli config set-transport cdp`) it instead talks **directly to Chrome
-over CDP** — no extension and no server required. Use this for:
+over CDP** — no extension and no server required.
 
+**Use CDP for a fresh session only — never for logged-in browsing.** It is a
+separate browser with its own profile, so it starts logged out; a login-gated
+site there is a dead end (see "Transport choice" above). Legitimate reasons:
+
+- **A fresh, isolated session** — no cookies, no history, no user state. This is
+  the main reason: a clean profile per task, or a scratch context.
 - **Browser-restricted pages** the extension can't reach (e.g. Chrome Web Store dev console, `chrome://` URLs).
 - **Headless / background automation** — run Chrome with no window and drive it from a cron job or CI.
+- **Local `file://` fixtures** — the extension's content script only matches `http/https`.
 
 `--cdp` is only supported by commands that explicitly implement CDP;
 unsupported commands fail with `errUnsupportedCDP(...)`. Commands that support
@@ -364,6 +406,15 @@ htrcli click @e3                         # refs also work for mousedown/drag on 
 invocation but not page navigation (the element goes stale). Use `findAll`
 with `--ref` to mint refs for every match.
 
+`text=` matches a substring and resolves the **innermost** element that carries
+it, so `click "text=Move"` clicks the menu item and not the `<html>`/`<body>`/
+list wrapper that also "contains" the text (a wrapper's box is the page, which
+would click its centre and dismiss the menu the item lives in). Text split
+across children (`Mo<span>ve</span>`) still resolves to the container, because
+no single descendant matches on its own. The match is a substring, so `Move`
+also matches `Move to bin`; when a label is ambiguous, reach for a CSS
+selector, `role=`, or `xpath=` instead — there is no exact-text prefix.
+
 ### Interaction commands
 
 ```bash
@@ -385,7 +436,7 @@ htrcli do '[{"action":"click","selector":"#open"},{"action":"click","selector":"
 # Low-level keyboard primitives (stateless — caller tracks hold)
 htrcli keydown Shift                     # Key down only (hold)
 htrcli keyup   Shift                     # Key up to release
-htrcli keydown "Ctrl+a"                  # Modifier + key
+htrcli press   "Control+a"               # Modifier combo (see key names below)
 
 # Low-level mouse primitives (selector, @eN ref, or xy= coordinates)
 htrcli mousedown "#handle"               # Press mouse button down
@@ -405,8 +456,36 @@ errors instead of dispatching at stale coordinates.
 ```
 
 Supported key names: Enter, Tab, Escape, Backspace, Delete, ArrowUp, ArrowDown,
-ArrowLeft, ArrowRight, Home, End, PageUp, PageDown, F1–F12,
-Control+a–z, Alt+a–z, Shift+a–z, Meta+a–z.
+ArrowLeft, ArrowRight, Home, End, PageUp, PageDown, plus any single printable
+ASCII character (`a`, `7`, ` `, `@`).
+
+Modifier combos work: `Control`/`Ctrl`, `Alt`/`Option`, `Shift`, `Meta`/`Cmd`/
+`Command`, joined with `+` and combinable (`Meta+Shift+z`). On Chrome the events
+are trusted CDP input carrying the modifier bitmask, and `Shift+a` inserts `A`.
+On Firefox the synthetic path dispatches only keydown/keyup: a page sees the
+modifier flags, but untrusted events insert no characters, so use `type` to
+enter text.
+
+```bash
+htrcli press "Control+a"          # select all
+htrcli press "Control+c"          # copy
+htrcli press "Shift+Tab"          # focus backwards
+htrcli press "Meta+ArrowLeft"     # line start (macOS)
+htrcli press "Shift+a"            # Chrome/CDP: types "A"; Firefox: key events only
+htrcli press "F5"                 # F1–F12 resolve
+```
+
+On Chrome, a `Control`/`Alt`/`Meta` combination inserts **no** text (the browser
+produces no character for it); `Shift` alone still does. A bare modifier resolves too, so its
+own keydown/keyup can be dispatched — but a modifier is **not remembered between
+calls**: `keydown Shift` then `press "a"` is not the same event as
+`press "Shift+a"`. Use the combo form:
+
+```bash
+htrcli keydown Shift              # dispatch a Shift keydown event
+htrcli press "a"                  # unmodified "a" — Shift is not held across calls
+htrcli keyup Shift                # dispatch a Shift keyup event
+```
 
 `fill` cannot set an **empty** value: the empty string is dropped from the
 command payload, so `fill "#q" ""` fails with `requires a "value"`. To empty a
@@ -992,7 +1071,7 @@ Generates a PDF without a save-as dialog, with backgrounds. Works on both transp
 
 ```bash
 htrcli upload "input[type=file]" /path/to/file.pdf          # selector
-htrcli upload @e3 /path/to/photo.jpg,/path/to/doc.pdf       # ref, multiple files
+htrcli upload @e3 /path/to/photo.jpg,/path/to/doc.pdf       # @eN ref is CDP only
 ```
 
 Sets files on a file input without triggering an OS file-picker dialog.
@@ -1110,8 +1189,8 @@ buffer survives between commands.
 Record the page to video via CDP screencast:
 
 ```bash
-htrcli record start             # start recording
-htrcli record stop              # stop and encode to MP4
+htrcli --cdp record start             # start recording (needs Chrome + CDP)
+htrcli --cdp record stop              # stop and encode to MP4
 ```
 
 Requires ffmpeg ≥ 6 on PATH.
@@ -1236,7 +1315,10 @@ htrcli trace export             # bundle everything into a timestamped zip
 
 ## Browser contexts
 
-Manage isolated browser contexts (separate cookie jars, storage):
+Manage isolated browser contexts (separate cookie jars, storage). A context is a
+**fresh CDP-managed profile** (`~/.htrcli/contexts/<name>`) on its own port — it
+starts empty, so it is the isolation/fresh-session tool, not a way to reach a
+site the user is already signed into. For a logged-in site, use the extension.
 
 ```bash
 htrcli context list             # list named contexts
@@ -1288,11 +1370,17 @@ These recipes were verified against the local fixtures in
 **Run them against a test account only** — a send, an invite, a share or a
 cell edit is a real write.
 
+Every app here is behind a login, so **run these recipes on the extension
+transport: no `--cdp`.** The extension uses the user's signed-in browser; a CDP
+profile would only show a sign-in page. The one exception is opening a local
+fixture: `file://` pages have no content script, so that single `open` needs
+`--cdp`.
+
 Run the fixtures yourself:
 
 ```bash
 make bench-smoke                              # the harness smoke scenario
-htrcli --cdp open "file://$PWD/docs/benchmarks/fixtures/gmail.html"
+htrcli --cdp open "file://$PWD/docs/benchmarks/fixtures/gmail.html"   # file:// needs CDP
 ```
 
 ### Gmail — find emails (B01)
@@ -1302,9 +1390,9 @@ conversations** (37 visible, 50 hidden — 36 of the hidden ones read). Pass
 `--visible` so hidden rows are dropped; no CSS selector can do it.
 
 ```bash
-htrcli --cdp open "https://mail.google.com/mail/u/0/#search/is%3Aunread"
-htrcli --cdp wait --selector "div[role='main']" --timeout 15000
-htrcli --cdp extract list "tr.zA" --visible \
+htrcli open "https://mail.google.com/mail/u/0/#search/is%3Aunread"
+htrcli wait --selector "div[role='main']" --timeout 15000
+htrcli extract list "tr.zA" --visible \
   --fields "sender:span.yP||span.zF,subject:span.bog||span.bqe,date:@td.xW span@title"
 ```
 
@@ -1355,9 +1443,9 @@ and your signature.
 - `fill` **replaces** the whole content — never use it on a reply box.
 
 ```bash
-htrcli --cdp click "div[role='textbox']"          # focus the reply box
-htrcli --cdp type "div[role='textbox']" "Thanks — see the attached."
-htrcli --cdp text "div[role='textbox']"           # READ BACK before sending
+htrcli click "div[role='textbox']"          # focus the reply box
+htrcli type "div[role='textbox']" "Thanks — see the attached."
+htrcli text "div[role='textbox']"           # READ BACK before sending
 ```
 
 Always read the box back before sending. If the text does not contain your
@@ -1372,33 +1460,33 @@ with `type` (the quoted original is contenteditable, so `type` appends), then
 send and confirm the toast:
 
 ```bash
-htrcli --cdp click ".row[data-idx='1'] .forward"
-htrcli --cdp wait --selector "#forward-panel:not([hidden])" --timeout 5000
-htrcli --cdp fill "#forward-to" "dave@example.com"
-htrcli --cdp type "#forward-body" "Numbers look good."
-htrcli --cdp click "#forward-send"
-htrcli --cdp wait --text "Message forwarded" --timeout 5000
-htrcli --cdp --json attr "#sent-log li" "data-to"   # dave@example.com
+htrcli click ".row[data-idx='1'] .forward"
+htrcli wait --selector "#forward-panel:not([hidden])" --timeout 5000
+htrcli fill "#forward-to" "dave@example.com"
+htrcli type "#forward-body" "Numbers look good."
+htrcli click "#forward-send"
+htrcli wait --text "Message forwarded" --timeout 5000
+htrcli --json attr "#sent-log li" "data-to"   # dave@example.com
 ```
 
 **Label.** Gmail's label menu is a custom popup, not a native `<select>`, so
 there is nothing for `select` to set. Tick the checkbox, then apply:
 
 ```bash
-htrcli --cdp click ".row[data-idx='2'] .label"
-htrcli --cdp wait --selector "#label-menu:not([hidden])" --timeout 5000
-htrcli --cdp check "[aria-label='Finance']"
-htrcli --cdp click "#label-apply"
-htrcli --cdp --json attr ".row[data-idx='2']" "data-labels"   # Finance
+htrcli click ".row[data-idx='2'] .label"
+htrcli wait --selector "#label-menu:not([hidden])" --timeout 5000
+htrcli check "[aria-label='Finance']"
+htrcli click "#label-apply"
+htrcli --json attr ".row[data-idx='2']" "data-labels"   # Finance
 ```
 
 **Archive.** Click archive, then prove the row is gone. `wait --gone` is the
 only way to assert absence:
 
 ```bash
-htrcli --cdp click ".row[data-idx='3'] .archive"
-htrcli --cdp wait --selector ".row[data-idx='3']" --gone --timeout 5000
-htrcli --cdp --json attr "#archive-count" "data-count"   # 1
+htrcli click ".row[data-idx='3'] .archive"
+htrcli wait --selector ".row[data-idx='3']" --gone --timeout 5000
+htrcli --json attr "#archive-count" "data-count"   # 1
 ```
 
 A hidden row still matches, so if the app only hides the row the `--gone`
@@ -1409,16 +1497,20 @@ wait times out — that is the signal that the action did not really remove it.
 Date and time fields are **JS datepickers**: `fill` sets the text but leaves
 the widget's own state empty and it reverts. Use `type` and read back.
 
-Guest autocomplete is a combobox: use `pick` with the full option text, never
-`fill` on the small input.
+Guest autocomplete is a combobox. On the extension (no `pick` verb), click the
+input, type the name, click the option that survives the filter, then read the
+widget back. On `--cdp`, `pick` does the same in one step. Never `fill` the
+small input.
 
 ```bash
-htrcli --cdp fill "#title" "Team sync"
-htrcli --cdp type "#date" "10/22/2026"              # widget's own format
-htrcli --cdp type "#time" "09:30"
-htrcli --cdp value "#date"                          # read back
-htrcli --cdp pick "#guest-input" "Dana Example"     # combobox
-htrcli --cdp value "#guest-input"                   # read back
+htrcli fill "#title" "Team sync"
+htrcli type "#date" "10/22/2026"              # widget's own format
+htrcli type "#time" "09:30"
+htrcli value "#date"                          # read back
+htrcli click "#guest-input"                  # combobox: open it first
+htrcli type "#guest-input" "Dana"            # filter the option list
+htrcli click "text=Dana Example"             # the filtered option
+htrcli value "#guest-input"                   # read back
 ```
 
 The day picker is a grid of buttons: click the trigger, click next/prev until
@@ -1434,8 +1526,8 @@ locale, so assert `--json value` (the normalized ISO string), never the
 visible date. Read it back after filling:
 
 ```bash
-htrcli --cdp fill "#start-date" "2026-04-06"
-htrcli --cdp --json value "#start-date"    # "2026-04-06" — or "" if it was rejected
+htrcli fill "#start-date" "2026-04-06"
+htrcli --json value "#start-date"    # "2026-04-06" — or "" if it was rejected
 ```
 
 `<input type="datetime-local">` behaves the same way with the
@@ -1451,11 +1543,11 @@ A survey or checkout wizard is several steps over one model. **There is no
 encodes the state, and read a `<select>` back with `--json value`:
 
 ```bash
-htrcli --cdp check "#role-remote"                          # radio: same verb as a checkbox
-htrcli --cdp wait --selector "#role-remote:checked"        # state, not presence
-htrcli --cdp wait --selector "body[data-submitted='1']"    # any attribute the app exposes
-htrcli --cdp select "#q-team" "51-200"                     # native select: option VALUE
-htrcli --cdp --json value "#q-team"                        # "51-200"
+htrcli check "#role-remote"                          # radio: same verb as a checkbox
+htrcli wait --selector "#role-remote:checked"        # state, not presence
+htrcli wait --selector "body[data-submitted='1']"    # any attribute the app exposes
+htrcli select "#q-team" "51-200"                     # native select: option VALUE
+htrcli --json value "#q-team"                        # "51-200"
 ```
 
 Two traps, both of which make a passing test lie:
@@ -1465,8 +1557,8 @@ Two traps, both of which make a passing test lie:
   `:checked` proves nothing about whether the app restored its state. Read the
   value from the summary/review surface the app builds from its model, after a
   Back/Next round trip made with the app's own buttons:
-  `htrcli --cdp click "#back-3"`, `htrcli --cdp click "#next-2"`, then
-  `htrcli --cdp --json text "#review tr[data-answer=tooling] .v"`. A value there can
+  `htrcli click "#back-3"`, `htrcli click "#next-2"`, then
+  `htrcli --json text "#review tr[data-answer=tooling] .v"`. A value there can
   only come from the model. To check that a `:checked` restore assertion is
   meaningful, break the restore on a scratch copy of the page and confirm the
   assertion fails.
@@ -1484,14 +1576,15 @@ The editing surface is a contenteditable, not an `<input>`: `fill` is not the
 verb. Type into the surface, and use `press` for formatting (headings, lists).
 
 ```bash
-htrcli --cdp click "#doc-surface"                   # focus the document body
-htrcli --cdp type "#doc-surface" "New paragraph."
-htrcli --cdp press "Enter"
-htrcli --cdp text "#doc-surface"                    # read back
+htrcli click "#doc-surface"                   # focus the document body
+htrcli type "#doc-surface" "New paragraph."
+htrcli press "Enter"
+htrcli text "#doc-surface"                    # read back
 ```
 
 Share opens a dialog: fill the people field, then confirm the dialog reports
-the new permission. `pick` is the verb for a share-to combobox.
+the new permission. On `--cdp`, `pick` is the verb for a share-to combobox; on
+the extension, click the field, type the address, and click the matching option.
 
 ### Sheets — data entry and formulas (B06)
 
@@ -1499,17 +1592,17 @@ Cells are contenteditable. `fill` replaces a cell's content (correct for a
 cell); `type` appends (wrong for a cell).
 
 ```bash
-htrcli --cdp click '[data-col="A"][data-row="1"]'
-htrcli --cdp fill '[data-col="A"][data-row="1"]' "Widget"
-htrcli --cdp fill '[data-col="B"][data-row="1"]' "12"
-htrcli --cdp text '[data-col="A"][data-row="1"]'   # read back
+htrcli click '[data-col="A"][data-row="1"]'
+htrcli fill '[data-col="A"][data-row="1"]' "Widget"
+htrcli fill '[data-col="B"][data-row="1"]' "12"
+htrcli text '[data-col="A"][data-row="1"]'   # read back
 ```
 
 Cell navigation is keyboard-driven: `press "Tab"` moves right, `press "Enter"`
 moves down. Read the grid back as a table when you need the values:
 
 ```bash
-htrcli --cdp extract table "#grid"
+htrcli extract table "#grid"
 ```
 
 `extract table` never drops a data row: only a `<thead>` row or an all-`<th>`
@@ -1531,8 +1624,8 @@ Google Tasks has **two ways** to add a task, and they need different verbs.
 it and committed with `Enter`.
 
 ```bash
-htrcli --cdp type "#quick-add" "Send the report 10/22/2026 5pm"
-htrcli --cdp press "Enter"          # commit — the field is not submitted by typing
+htrcli type "#quick-add" "Send the report 10/22/2026 5pm"
+htrcli press "Enter"          # commit — the field is not submitted by typing
 ```
 
 **Full form**: a details panel, and the date is chosen from a **popover grid
@@ -1540,12 +1633,12 @@ of day buttons** — there is no date field to type into. Click the trigger,
 then click the day.
 
 ```bash
-htrcli --cdp click "#show-details"   # reveal the panel
-htrcli --cdp fill "#task-title" "Book the room"
-htrcli --cdp click "#date-trigger"   # open the date popover
-htrcli --cdp click "#day-grid button[data-day='2026-10-23']"
-htrcli --cdp attr "#date-trigger" "data-due"   # read the chosen date back
-htrcli --cdp click "#save"
+htrcli click "#show-details"   # reveal the panel
+htrcli fill "#task-title" "Book the room"
+htrcli click "#date-trigger"   # open the date popover
+htrcli click "#day-grid button[data-day='2026-10-23']"
+htrcli attr "#date-trigger" "data-due"   # read the chosen date back
+htrcli click "#save"
 ```
 
 **The checkbox is an ARIA checkbox**, not an `<input type=checkbox>`: it is a
@@ -1554,9 +1647,9 @@ htrcli --cdp click "#save"
 idempotent — the state ends up as asked either way.
 
 ```bash
-htrcli --cdp check   "#task-list [role=checkbox]"
-htrcli --cdp uncheck "#task-list [role=checkbox]"
-htrcli --cdp attr    "#task-list [role=checkbox]" "aria-checked"   # read back
+htrcli check   "#task-list [role=checkbox]"
+htrcli uncheck "#task-list [role=checkbox]"
+htrcli attr    "#task-list [role=checkbox]" "aria-checked"   # read back
 ```
 
 A task's state usually lives in **attributes**, not in text, so `extract list`
@@ -1567,7 +1660,7 @@ must be told to read attributes:
 # "@.link@href"    a DESCENDANT's attribute (selector@attribute)
 # "[data-due]"     an attribute value — a descendant match, else the item itself
 # ".title"         a descendant's TEXT
-htrcli --cdp extract list "#task-list .task" \
+htrcli extract list "#task-list .task" \
   --fields "title:.title,due:@data-due"
 ```
 
@@ -1593,17 +1686,17 @@ field before filling it. Give each row a stable field (`#amount-1`,
 every row landed.
 
 ```bash
-htrcli --cdp fill "#date-1" "10/22/2026"
-htrcli --cdp select "#category-1" "travel"     # option VALUE, not the label
-htrcli --cdp fill "#amount-1" "125.50"
-htrcli --cdp text "#total-display"             # 125.50
+htrcli fill "#date-1" "10/22/2026"
+htrcli select "#category-1" "travel"     # option VALUE, not the label
+htrcli fill "#amount-1" "125.50"
+htrcli text "#total-display"             # 125.50
 
-htrcli --cdp click "#add-line"
-htrcli --cdp wait --selector "#date-2" --timeout 5000
-htrcli --cdp fill "#date-2" "10/23/2026"
-htrcli --cdp select "#category-2" "meals"
-htrcli --cdp fill "#amount-2" "42.75"
-htrcli --cdp text "#total-display"             # 168.25
+htrcli click "#add-line"
+htrcli wait --selector "#date-2" --timeout 5000
+htrcli fill "#date-2" "10/23/2026"
+htrcli select "#category-2" "meals"
+htrcli fill "#amount-2" "42.75"
+htrcli text "#total-display"             # 168.25
 ```
 
 **Receipt.** `upload` sets the files on a real `<input type=file>` without an
@@ -1613,17 +1706,17 @@ file was attached — a file input that was never set looks identical to one
 that was.
 
 ```bash
-htrcli --cdp upload "#receipt" "/abs/path/receipt.txt"
-htrcli --cdp text "#receipt-name"              # receipt.txt
-htrcli --cdp text "#receipt-size"              # 62
+htrcli upload "#receipt" "/abs/path/receipt.txt"
+htrcli text "#receipt-name"              # receipt.txt
+htrcli text "#receipt-size"              # 62
 ```
 
 Then submit and capture the reference:
 
 ```bash
-htrcli --cdp click "#submit"
-htrcli --cdp --json attr "#confirm" "data-ref" # EXR-700001
-htrcli --cdp --json attr "#confirm" "data-total"  # 168.25
+htrcli click "#submit"
+htrcli --json attr "#confirm" "data-ref" # EXR-700001
+htrcli --json attr "#confirm" "data-total"  # 168.25
 ```
 
 `upload` **replaces** any existing selection. To attach several files, pass a
@@ -1642,8 +1735,8 @@ nothing. Look for the click-based path instead — usually a per-file "Move to"
 menu or a folder `<select>`. Prefer that:
 
 ```bash
-htrcli --cdp select "tr[data-name='report.txt'] select.folder" "projects"
-htrcli --cdp attr  "tr[data-name='report.txt']" "data-folder"   # projects
+htrcli select "tr[data-name='report.txt'] select.folder" "projects"
+htrcli attr  "tr[data-name='report.txt']" "data-folder"   # projects
 ```
 
 **Share is usually a DOM dialog, not a native one.** Click the row's Share
@@ -1651,12 +1744,12 @@ button, wait for the dialog, read the link back with `value` (an `<input>`
 link has no text content), choose the permission, then apply:
 
 ```bash
-htrcli --cdp click "tr[data-name='report.txt'] button.share"
-htrcli --cdp wait --selector "#share-modal.visible" --timeout 5000
-htrcli --cdp --json value "#share-link"          # https://files.example/s/ABC123
-htrcli --cdp select "#share-permission" "edit"   # option VALUE, not the label
-htrcli --cdp click "#share-done"
-htrcli --cdp --json attr "tr[data-name='report.txt']" "data-permission"  # edit
+htrcli click "tr[data-name='report.txt'] button.share"
+htrcli wait --selector "#share-modal.visible" --timeout 5000
+htrcli --json value "#share-link"          # https://files.example/s/ABC123
+htrcli select "#share-permission" "edit"   # option VALUE, not the label
+htrcli click "#share-done"
+htrcli --json attr "tr[data-name='report.txt']" "data-permission"  # edit
 ```
 
 Use `value` for the link, not `text` — reading `text` on an `<input>` returns

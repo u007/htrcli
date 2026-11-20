@@ -38,6 +38,40 @@ describe("cdpEvaluate", () => {
 		expect(expressions).toEqual(["document.title"]);
 	});
 
+	test("forwards the protocol timeout for synchronous loops", async () => {
+		const calls: Record<string, unknown>[] = [];
+		const send: CdpSend = (_method, params) => {
+			calls.push(params);
+			return Promise.resolve({ result: { type: "number", value: 1 } });
+		};
+
+		await cdpEvaluate(send, "1", 30000);
+
+		expect(calls[0].timeout).toBe(30000);
+		expect(calls[0].awaitPromise).toBe(true);
+	});
+
+	test("rejects when the send promise never settles", async () => {
+		// The protocol timeout does not cover `awaitPromise`, so a never-settling
+		// send must be bounded in JS or it holds the debugger attach forever.
+		const send: CdpSend = () => new Promise(() => {});
+		await expect(
+			cdpEvaluate(send, "await new Promise(() => {})", 20),
+		).rejects.toThrow(/timed out after 20ms/);
+	});
+
+	test("omits the timeout when none is asked for", async () => {
+		const calls: Record<string, unknown>[] = [];
+		const send: CdpSend = (_method, params) => {
+			calls.push(params);
+			return Promise.resolve({ result: { type: "number", value: 1 } });
+		};
+
+		await cdpEvaluate(send, "1");
+
+		expect("timeout" in calls[0]).toBe(false);
+	});
+
 	test("multi-statement script retries as async function body", async () => {
 		const { send, expressions } = stubSend([
 			syntaxError,

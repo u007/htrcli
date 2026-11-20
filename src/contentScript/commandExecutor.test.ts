@@ -544,6 +544,29 @@ describe("low-level synthetic input", () => {
 		expect(events[1].keyCode).toBe(13);
 	});
 
+	it("carries the modifier flags of a combo into the synthetic key events", async () => {
+		const input = document.createElement("input");
+		input.id = "combo-target";
+		document.body.appendChild(input);
+		const events: KeyboardEvent[] = [];
+		input.addEventListener("keydown", (event) => events.push(event));
+		input.addEventListener("keyup", (event) => events.push(event));
+
+		await executeCommand({
+			id: "combo",
+			action: "pressKey",
+			target: { selector: "#combo-target" },
+			value: "Control+a",
+		});
+
+		expect(events.map((event) => event.type)).toEqual(["keydown", "keyup"]);
+		expect(events[0].ctrlKey).toBe(true);
+		expect(events[0].shiftKey).toBe(false);
+		expect(events[0].key).toBe("a");
+		expect(events[0].code).toBe("KeyA");
+		expect(events[1].ctrlKey).toBe(true);
+	});
+
 	it("routes coordinate mouseDown, mouseUp, and mouseMove through hit-testing", async () => {
 		const target = document.createElement("button");
 		target.id = "coordinate-target";

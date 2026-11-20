@@ -184,12 +184,13 @@ Drive UI move is NOT_RUN for these reasons, each observed directly:
 - the per-row ⋮ (`aria-label="More actions (Alt + A)"`) has a 0×0 rect until the
   row is hovered — `hover xy=` now supports a coordinate target, but that fix lives
   in `src/contentScript` and needs an extension rebuild before it helps live;
-- `rightclick` was absent from the CLI (`rightclickCmd` added 2026-11-17); with it
-  the row menu does open, but its `Organise` submenu collapses between invocations
-  and renders at `y=844` in a 774-high viewport, so the move still needs a compound
-  "open menu, then click item" action — which now exists (`htrcli do`, see
-  "What these numbers mean") but needs the extension reloaded before it can be used,
-  so the move stays NOT_RUN rather than being claimed;
+- `rightclick` was absent from the CLI (`rightclickCmd` added 2026-11-17). The move
+  path that does work up to the last step is: click the row to select it, click the
+  selection bar's `More actions`, then the `Organise` submenu — but until
+  2026-11-18 `click "text=Organise"` resolved a page wrapper instead of the menu
+  item, so the submenu never opened. `htrcli do` plus the innermost-match fix should
+  carry it in one round trip, and it is still **NOT_RUN** until a reloaded extension
+  lands the folder — claiming it before that would be a guess;
 - the new-folder dialog's Create button moves between openings (y=478, then
   y=452), so a coordinate read once goes stale;
 - Drive's `c` then `f` shortcut did not open the dialog;
@@ -642,11 +643,11 @@ scenarios, not assertions.
   endpoints and of weekends (off-by-one and "business days only" are both
   wrong-but-reasonable), the balance is read-modify-written in both directions
   (a request takes days, a cancellation gives them back), and the result
-  survives a reload — which needs `reload` over `--cdp`, the transport every
-  scenario uses. That last one was a hard stop: `reload` used to answer
-  "reload is not supported over --cdp yet", so no scenario could prove
-  persistence at all. It is now implemented (Page.reload + wait for the load
-  event) and this scenario is its first user. The date fields are native
+  survives a reload — which needs `reload` (it works on both transports; every
+  bench scenario runs over `--cdp`). That last one was a hard stop: `reload`
+  used to answer "reload is not supported over --cdp yet", so no scenario could
+  prove persistence at all. It is now implemented (Page.reload + wait for the
+  load event) and this scenario is its first user. The date fields are native
   `<input type="date">`, matching what real portals use; `fill` sets them and
   the browser normalizes the value, and a malformed string silently becomes
   empty, so the scenario also asserts the normalized value read back.

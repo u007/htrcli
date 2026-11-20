@@ -136,7 +136,9 @@ export type MessageType =
 	// Annotate elements on the page (numbered overlay boxes).
 	| "ANNOTATE_ELEMENTS"
 	// Clear the numbered annotation overlay.
-	| "CLEAR_ANNOTATIONS";
+	| "CLEAR_ANNOTATIONS"
+	// Hide the control status line while the background captures evidence.
+	| "CONTROL_STATUS_SUPPRESS";
 
 // Base message structure
 export interface BaseMessage {
@@ -303,6 +305,13 @@ export interface AnnotateElementsMessage {
 // Clear the numbered annotation overlay.
 export interface ClearAnnotationsMessage {
 	type: "CLEAR_ANNOTATIONS";
+}
+
+// Hide the page-top control status line while the background captures a
+// screenshot or PDF, so it never appears in saved evidence.
+export interface ControlStatusSuppressMessage extends BaseMessage {
+	type: "CONTROL_STATUS_SUPPRESS";
+	suppressed: boolean;
 }
 
 // Connection status message (background → sidepanel)

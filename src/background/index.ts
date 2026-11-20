@@ -30,8 +30,10 @@ import type {
 	StartRecordingMessage,
 	UpdateAnnotationMessage,
 } from "../types/recording";
+import { withControlStatusSuppressed } from "./captureSuppression";
 import { cdpEvaluate } from "./cdpEval";
 import { dispatchCdpInput } from "./cdpInput";
+import { attachShared, detachShared } from "./debuggerManager";
 import {
 	drainTabBuckets,
 	flushPending,
@@ -97,6 +99,13 @@ async function registerNativeTab(
 		browser: getBrowserType(),
 	});
 }
+
+/**
+ * Upper bound on one `CDP_EVAL` round trip. Same rationale as the native-host
+ * eval path: the protocol timeout does not cover `awaitPromise`, so an
+ * unsettled promise would otherwise hold the attach open.
+ */
+const CDP_EVAL_TIMEOUT_MS = 30000;
 
 /**
  * Migrate sessions from chrome.storage.local to IndexedDB (one-time migration)
@@ -213,10 +222,12 @@ async function captureScreenshot(tabId: number): Promise<string | undefined> {
 			return undefined;
 		}
 
-		const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-			format: "png",
-			quality: 90,
-		});
+		const dataUrl = await withControlStatusSuppressed(tabId, () =>
+			chrome.tabs.captureVisibleTab(tab.windowId, {
+				format: "png",
+				quality: 90,
+			}),
+		);
 		return dataUrl;
 	} catch (error) {
 		console.warn("[HTR NControl] Failed to capture screenshot:", error);
@@ -861,28 +872,34 @@ async function captureFullPageScreenshot(
 	const ctx = canvas.getContext("2d");
 	if (!ctx) return { error: "could not get OffscreenCanvas 2D context" };
 
+	let captureError: string | null = null;
 	try {
-		for (const seg of plan.segments) {
-			await chrome.scripting.executeScript({
-				target: { tabId },
-				func: (x: number, y: number) => window.scrollTo(x, y),
-				args: [seg.scrollX, seg.scrollY],
-			});
-			await new Promise((r) => setTimeout(r, CAPTURE_THROTTLE_MS));
+		captureError = await withControlStatusSuppressed(tabId, async () => {
+			for (const seg of plan.segments) {
+				await chrome.scripting.executeScript({
+					target: { tabId },
+					func: (x: number, y: number) => window.scrollTo(x, y),
+					args: [seg.scrollX, seg.scrollY],
+				});
+				await new Promise((r) => setTimeout(r, CAPTURE_THROTTLE_MS));
 
-			const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-				format: "png",
-			});
-			if (!dataUrl) return { error: "captureVisibleTab returned empty" };
+				const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+					format: "png",
+				});
+				if (!dataUrl) return "captureVisibleTab returned empty";
 
-			const bmp = await createImageBitmap(await (await fetch(dataUrl)).blob());
-			ctx.drawImage(
-				bmp,
-				Math.round(seg.scrollX * metrics.dpr),
-				Math.round(seg.scrollY * metrics.dpr),
-			);
-			bmp.close();
-		}
+				const bmp = await createImageBitmap(
+					await (await fetch(dataUrl)).blob(),
+				);
+				ctx.drawImage(
+					bmp,
+					Math.round(seg.scrollX * metrics.dpr),
+					Math.round(seg.scrollY * metrics.dpr),
+				);
+				bmp.close();
+			}
+			return null;
+		});
 	} finally {
 		await chrome.scripting.executeScript({
 			target: { tabId },
@@ -890,6 +907,7 @@ async function captureFullPageScreenshot(
 			args: [metrics.originX, metrics.originY],
 		});
 	}
+	if (captureError) return { error: captureError };
 
 	const blob = await canvas.convertToBlob({ type: "image/png" });
 	return { data: `data:image/png;base64,${await blobToBase64(blob)}` };
@@ -932,9 +950,11 @@ async function captureScreenshotForUpload(
 				if (!tab.active) {
 					await chrome.tabs.update(tabId, { active: true });
 				}
-				const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-					format: "png",
-				});
+				const dataUrl = await withControlStatusSuppressed(tabId, () =>
+					chrome.tabs.captureVisibleTab(tab.windowId, {
+						format: "png",
+					}),
+				);
 				result = dataUrl
 					? { data: dataUrl }
 					: { error: "captureVisibleTab returned empty" };
@@ -1344,20 +1364,22 @@ chrome.runtime.onMessage.addListener(
 							});
 						} else {
 							const target = { tabId: msg.tabId };
-							await chrome.debugger.attach(target, "1.3");
+							await attachShared(msg.tabId);
 							try {
-								await chrome.debugger.sendCommand(target, "Page.enable");
-								const result = (await chrome.debugger.sendCommand(
-									target,
-									"Page.printToPDF",
-									{
-										printBackground: true,
-										preferCSSPageSize: true,
-									},
-								)) as { data: string };
-								sendResponse({ ok: true, data: result.data });
+								await withControlStatusSuppressed(msg.tabId, async () => {
+									await chrome.debugger.sendCommand(target, "Page.enable");
+									const result = (await chrome.debugger.sendCommand(
+										target,
+										"Page.printToPDF",
+										{
+											printBackground: true,
+											preferCSSPageSize: true,
+										},
+									)) as { data: string };
+									sendResponse({ ok: true, data: result.data });
+								});
 							} finally {
-								await chrome.debugger.detach(target);
+								await detachShared(msg.tabId);
 							}
 						}
 					} catch (error) {
@@ -1440,13 +1462,13 @@ chrome.runtime.onMessage.addListener(
 						} else {
 							// Chrome: use CDP Page.navigate for consistency
 							const target = { tabId: msg.tabId };
-							await chrome.debugger.attach(target, "1.3");
+							await attachShared(msg.tabId);
 							try {
 								await chrome.debugger.sendCommand(target, "Page.navigate", {
 									url: msg.url,
 								});
 							} finally {
-								await chrome.debugger.detach(target);
+								await detachShared(msg.tabId);
 							}
 							sendResponse({ ok: true });
 						}
@@ -1491,16 +1513,17 @@ chrome.runtime.onMessage.addListener(
 							return;
 						}
 						const target = { tabId: msg.tabId };
-						await chrome.debugger.attach(target, "1.3");
+						await attachShared(msg.tabId);
 						try {
 							const value = await cdpEvaluate(
 								(method, params) =>
 									chrome.debugger.sendCommand(target, method, params),
 								msg.expression,
+								CDP_EVAL_TIMEOUT_MS,
 							);
 							sendResponse({ ok: true, data: value });
 						} finally {
-							await chrome.debugger.detach(target);
+							await detachShared(msg.tabId);
 						}
 					} catch (error) {
 						console.error("[HTR NControl] CDP_EVAL error:", error);

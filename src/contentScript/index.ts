@@ -10,6 +10,7 @@ import type {
 	AnnotateElementsMessage,
 	ClickEventMessage,
 	ConsoleEntry,
+	ControlStatusSuppressMessage,
 	DialogEntry,
 	EnableRecordingMessage,
 	HighlightElementMessage,
@@ -22,6 +23,13 @@ import {
 	connect as connectRemote,
 	disconnect as disconnectRemote,
 } from "./connectionManager";
+import {
+	hideControlStatus,
+	markControlActive,
+	markControlSettled,
+	refreshControlStatus,
+	setControlStatusSuppressed,
+} from "./controlStatusBar";
 import { findAllElements } from "./elementFinder";
 import type { AnnotationBox } from "./highlighter";
 import {
@@ -172,6 +180,20 @@ function stopRecording(): void {
 // ─── Command Handling ─────────────────────────────────────────────
 
 /**
+ * Resolve after the browser has composited the current style change. A style
+ * write is not painted synchronously, so a capture started on the next tick can
+ * still read a frame that contains the status line.
+ */
+function afterNextPaint(cb: () => void): void {
+	const raf = globalThis.requestAnimationFrame;
+	if (typeof raf !== "function") {
+		cb();
+		return;
+	}
+	raf(() => raf(cb));
+}
+
+/**
  * Handle a remote control command from the background script.
  * Executes the command and sends the result back.
  */
@@ -182,12 +204,24 @@ async function handleCommand(
 	console.info(
 		`[HTR NControl] Executing command: ${command.action} (${command.id})`,
 	);
+	markControlActive();
 
+	const reply = (response: CommandResult): void => {
+		try {
+			sendResponse(response);
+		} catch (error) {
+			// The port can close mid-command; the result is then undeliverable.
+			console.warn("[HTR NControl] sendResponse failed:", error);
+		}
+	};
+
+	let result: CommandResult;
 	try {
-		const result = await executeCommand(command);
+		result = await executeCommand(command);
 
 		// Capture screenshot if requested or if the command was a screenshot request
 		if (command.action === "screenshot" || command.options?.screenshot) {
+			setControlStatusSuppressed(true);
 			try {
 				const screenshotResponse = await chrome.runtime.sendMessage({
 					type: "CAPTURE_SCREENSHOT",
@@ -199,18 +233,25 @@ async function handleCommand(
 			} catch {
 				// Screenshot capture might fail, that's ok
 				console.warn("[HTR NControl] Screenshot capture failed");
+			} finally {
+				setControlStatusSuppressed(false);
 			}
 		}
-
-		sendResponse(result);
 	} catch (error) {
+		markControlSettled(false);
 		console.error("[HTR NControl] Command execution failed:", error);
-		sendResponse({
+		reply({
 			id: command.id,
 			success: false,
 			error: error instanceof Error ? error.message : String(error),
 		});
+		return;
 	}
+
+	// Settle exactly once: sendResponse can throw after the port closed, and the
+	// catch must not then decrement another command's in-flight slot.
+	markControlSettled(result.success);
+	reply(result);
 }
 
 /**
@@ -250,6 +291,7 @@ function disableRemoteControl(): void {
 
 	remoteControlEnabled = false;
 	disconnectRemote();
+	hideControlStatus();
 	console.info("[HTR NControl] Remote control disabled");
 }
 
@@ -265,6 +307,7 @@ function handleMessage(
 		| { type: "ENABLE_REMOTE_CONTROL"; serverUrl?: string }
 		| { type: "DISABLE_REMOTE_CONTROL" }
 		| { type: "GET_CURRENT_TAB_ID" }
+		| ControlStatusSuppressMessage
 		| { type: "DIALOG_POLICY"; policy: unknown },
 	_sender: chrome.runtime.MessageSender,
 	sendResponse: (response?: unknown) => void,
@@ -350,6 +393,19 @@ function handleMessage(
 			sendResponse({ success: true });
 			break;
 
+		case "CONTROL_STATUS_SUPPRESS": {
+			const suppressMsg = message as ControlStatusSuppressMessage;
+			setControlStatusSuppressed(suppressMsg.suppressed);
+			if (!suppressMsg.suppressed) {
+				sendResponse({ success: true });
+				break;
+			}
+			// Let the hide paint before the caller captures, or the capture can
+			// still read the frame that contains the line.
+			afterNextPaint(() => sendResponse({ success: true }));
+			return true;
+		}
+
 		case "EXECUTE_COMMAND": {
 			const cmdMsg = message as { type: "EXECUTE_COMMAND"; command: Command };
 			// Handle command asynchronously
@@ -434,6 +490,10 @@ if (!contentWindow.__htrncontrolInitialized) {
 
 	window.addEventListener("htrncontrol:unhighlight", () => {
 		hideHighlight();
+	});
+
+	window.addEventListener("htrncontrol:control-status-refresh", () => {
+		refreshControlStatus();
 	});
 
 	window.addEventListener("message", handleConsoleCaptureMessage);

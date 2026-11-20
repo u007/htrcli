@@ -50,7 +50,23 @@ const NAMED_KEYS: Record<string, Omit<CdpKeyDescriptor, "isPrintable">> = {
 	End: { key: "End", code: "End", windowsVirtualKeyCode: 35 },
 	PageUp: { key: "PageUp", code: "PageUp", windowsVirtualKeyCode: 33 },
 	PageDown: { key: "PageDown", code: "PageDown", windowsVirtualKeyCode: 34 },
+	// Bare modifiers resolve so `keydown Shift` / `keyup Shift` can hold them.
+	Shift: { key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16 },
+	Control: { key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17 },
+	Ctrl: { key: "Ctrl", code: "ControlLeft", windowsVirtualKeyCode: 17 },
+	Alt: { key: "Alt", code: "AltLeft", windowsVirtualKeyCode: 18 },
+	Meta: { key: "Meta", code: "MetaLeft", windowsVirtualKeyCode: 91 },
+	Cmd: { key: "Cmd", code: "MetaLeft", windowsVirtualKeyCode: 91 },
 };
+
+// F1..F12: VK 112..123, code and key both "Fn".
+for (let n = 1; n <= 12; n += 1) {
+	NAMED_KEYS[`F${n}`] = {
+		key: `F${n}`,
+		code: `F${n}`,
+		windowsVirtualKeyCode: 111 + n,
+	};
+}
 
 /**
  * Unshifted symbol characters → their physical code + VK (US QWERTY layout).
@@ -104,6 +120,36 @@ const SHIFTED_SYMBOL_KEYS: Record<
 	"(": { code: "Digit9", windowsVirtualKeyCode: 57 },
 	")": { code: "Digit0", windowsVirtualKeyCode: 48 },
 };
+
+/**
+ * Unshifted character → the character the same physical key produces with
+ * Shift held on the US layout the tables model. Letters are handled separately
+ * (upper-case); this covers digits and punctuation, where `toUpperCase` is a
+ * no-op and would otherwise emit the wrong character.
+ */
+const SHIFTED_CHARS = new Map<string, string>([
+	["1", "!"],
+	["2", "@"],
+	["3", "#"],
+	["4", "$"],
+	["5", "%"],
+	["6", "^"],
+	["7", "&"],
+	["8", "*"],
+	["9", "("],
+	["0", ")"],
+	["-", "_"],
+	["=", "+"],
+	["[", "{"],
+	["]", "}"],
+	["\\", "|"],
+	[";", ":"],
+	["'", '"'],
+	[",", "<"],
+	[".", ">"],
+	["/", "?"],
+	["`", "~"],
+]);
 
 /** Digits 0-9 → "DigitN" code + matching VK. */
 function digitDescriptor(digit: string): Omit<CdpKeyDescriptor, "isPrintable"> {
@@ -196,4 +242,134 @@ export function resolveKey(key: string): CdpKeyDescriptor {
 	}
 
 	throw new Error(`resolveKey: unknown key "${key}"`);
+}
+
+/** CDP `Input.dispatchKeyEvent` modifier bits. */
+export const MODIFIER_BITS = {
+	Alt: 1,
+	Control: 2,
+	Meta: 4,
+	Shift: 8,
+} as const;
+
+export type ModifierName = keyof typeof MODIFIER_BITS;
+
+const MODIFIER_ALIASES: Record<string, ModifierName> = {
+	alt: "Alt",
+	option: "Alt",
+	control: "Control",
+	ctrl: "Control",
+	meta: "Meta",
+	cmd: "Meta",
+	command: "Meta",
+	shift: "Shift",
+};
+
+export interface ResolvedKeySpec {
+	descriptor: CdpKeyDescriptor;
+	/** Bitmask for CDP `Input.dispatchKeyEvent`; 0 when the spec has no modifiers. */
+	modifiers: number;
+}
+
+/**
+ * True when the character is only reachable with Shift held: an uppercase
+ * letter or a shifted symbol. Used to keep `key` and `shiftKey` consistent.
+ */
+function requiresShift(descriptor: CdpKeyDescriptor): boolean {
+	if (descriptor.key.length !== 1) return false;
+	if (/^[A-Z]$/.test(descriptor.key)) return true;
+	return descriptor.key in SHIFTED_SYMBOL_KEYS;
+}
+
+/**
+ * Resolve a keyboard spec: a plain key ("Enter", "a", "F5") or a modifier combo
+ * ("Control+a", "Shift+Tab", "Meta+Shift+z").
+ *
+ * CDP carries modifiers as a bitmask on the event, so the combination is one
+ * key event with `modifiers` set — not a held key plus a pressed one. Ctrl, Alt
+ * and Meta combinations never insert text (the browser does not produce a
+ * character for them); a Shift-only combination still does, so `Shift+a` types
+ * "A".
+ */
+export function resolveKeySpec(spec: string): ResolvedKeySpec {
+	if (!spec || typeof spec !== "string") {
+		throw new Error(
+			`resolveKeySpec: empty or non-string key (got ${JSON.stringify(spec)})`,
+		);
+	}
+
+	// "+" is both the separator and a key in its own right. A bare "+" is the
+	// plus key; "Ctrl++" is Ctrl held with it. A lone trailing "+" after a
+	// modifier ("Ctrl+") still names no key and stays an error.
+	if (spec === "+") {
+		const descriptor = resolveKey("+");
+		return { descriptor, modifiers: MODIFIER_BITS.Shift };
+	}
+	const plusKey = spec.endsWith("++");
+	const body = plusKey ? spec.slice(0, -2) : spec;
+
+	const parts = body === "" ? [] : body.split("+");
+	if (!plusKey && parts.length === 1) {
+		const descriptor = resolveKey(spec);
+		return {
+			descriptor,
+			modifiers: requiresShift(descriptor) ? MODIFIER_BITS.Shift : 0,
+		};
+	}
+
+	const keyPart = plusKey ? "+" : parts[parts.length - 1].trim();
+	if (keyPart === "") {
+		throw new Error(`resolveKeySpec: "${spec}" names no key after "+"`);
+	}
+
+	let modifiers = 0;
+	let shiftOnly = true;
+	const modifierParts = plusKey ? parts : parts.slice(0, -1);
+	for (const raw of modifierParts) {
+		const modifier = MODIFIER_ALIASES[raw.trim().toLowerCase()];
+		if (!modifier) {
+			throw new Error(`resolveKeySpec: unknown modifier "${raw}" in "${spec}"`);
+		}
+		modifiers |= MODIFIER_BITS[modifier];
+		if (modifier !== "Shift") {
+			shiftOnly = false;
+		}
+	}
+
+	let descriptor = resolveKey(keyPart);
+	// Shift transforms the key and its character regardless of any other
+	// modifier: Ctrl+Shift+a is key "A", not "a", and Shift+1 is "!", not "1".
+	// Ctrl/Alt/Meta then suppress the character without reverting the key.
+	if (
+		descriptor.text !== undefined &&
+		(modifiers & MODIFIER_BITS.Shift) !== 0
+	) {
+		let shifted: string | undefined;
+		if (/^[a-z]$/.test(descriptor.key)) {
+			shifted = descriptor.key.toUpperCase();
+		} else {
+			shifted = SHIFTED_CHARS.get(descriptor.key);
+		}
+		if (shifted !== undefined) {
+			descriptor = { ...descriptor, key: shifted, text: shifted };
+		}
+	}
+	if (!shiftOnly) {
+		// Ctrl/Alt/Meta suppress the character a *single* key would insert.
+		// Named keys keep theirs: Ctrl+Enter still sends "\r", matching Go's
+		// keyParams where only single characters are `printable`.
+		if (descriptor.key.length === 1) {
+			descriptor = { ...descriptor, text: undefined, isPrintable: false };
+		}
+	}
+
+	// A character that only exists with Shift (an uppercase letter or a shifted
+	// symbol) is inconsistent when the event claims shiftKey:false. Derive the
+	// bit when the spec supplied no modifier at all; an explicit spec stays
+	// authoritative.
+	if (modifiers === 0 && requiresShift(descriptor)) {
+		modifiers = MODIFIER_BITS.Shift;
+	}
+
+	return { descriptor, modifiers };
 }

@@ -340,7 +340,77 @@ function findByText(
 		}
 	}
 
-	return results;
+	return innermostMatches(results).map(nearestRendered);
+}
+
+/**
+ * True when an element has a layout box of its own: not display:none or
+ * visibility:hidden, and a non-zero rect. Deliberately ignores viewport
+ * position — an off-screen label is still a valid click target.
+ */
+function hasRenderableBox(element: Element): boolean {
+	const view = element.ownerDocument.defaultView;
+	if (!view) return false;
+	const style = view.getComputedStyle(element);
+	if (style.display === "none" || style.visibility === "hidden") return false;
+	const rect = element.getBoundingClientRect();
+	return rect.width > 0 && rect.height > 0;
+}
+
+/**
+ * A text match can land on an element with no box of its own: an SVG
+ * `<title>`, or a `display:none` duplicate of a visible label. Fall back to the
+ * nearest rendered ancestor so the label is still actionable. When nothing in
+ * the chain is rendered (a menu that is still closed), keep the innermost match
+ * so `wait` can keep polling instead of resolving to `<html>`.
+ */
+function nearestRendered(element: Element): Element {
+	if (hasRenderableBox(element)) return element;
+	const doc = element.ownerDocument;
+	for (
+		let parent = element.parentElement;
+		parent !== null;
+		parent = parent.parentElement
+	) {
+		if (parent === doc.body || parent === doc.documentElement) break;
+		if (hasRenderableBox(parent)) return parent;
+	}
+	return element;
+}
+
+/**
+ * Keep only the innermost matches of a text query.
+ *
+ * Matching is a *contains* test, so every ancestor of the labelled element
+ * matches as well — `<html>`, `<body>`, the list, the row. Document order put
+ * those ancestors first, so `click "text=Move"` clicked the first match's box,
+ * i.e. the page centre, which dismissed the very menu that held the item.
+ * The caller means the element that carries the label, so a matched element is
+ * dropped when one of its own ancestors also matched. Text split across
+ * children (`Mo<span>ve</span>`) still resolves to the container, because no
+ * single descendant matches on its own.
+ */
+function innermostMatches(elements: Element[]): Element[] {
+	if (elements.length < 2) {
+		return elements;
+	}
+
+	const matched = new Set(elements);
+	const matchedAncestors = new Set<Element>();
+
+	for (const element of elements) {
+		for (
+			let parent = element.parentElement;
+			parent !== null;
+			parent = parent.parentElement
+		) {
+			if (matched.has(parent)) {
+				matchedAncestors.add(parent);
+			}
+		}
+	}
+
+	return elements.filter((element) => !matchedAncestors.has(element));
 }
 
 /**

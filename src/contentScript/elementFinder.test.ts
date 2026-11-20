@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import "../test/domSetup";
 import type { TargetSelector } from "../types/commands";
 import {
+	findAllElements,
 	findElement,
 	waitForActionableElement,
 	waitForScrollableActionableElement,
@@ -26,6 +27,61 @@ describe("elementFinder (DOM)", () => {
 		const found = findElement(target);
 		expect(found).not.toBeNull();
 		expect((found as HTMLElement).id).toBe("submit-btn");
+	});
+});
+
+describe("text= targets the labelled element, not an ancestor", () => {
+	beforeEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	afterEach(() => {
+		document.body.innerHTML = "";
+	});
+
+	it("returns the innermost element when its ancestors contain the same text", () => {
+		document.body.innerHTML =
+			'<div id="wrap"><div id="inner"><button id="go">Move</button></div></div>';
+
+		const found = findElement({ text: "Move" });
+
+		expect((found as HTMLElement).id).toBe("go");
+	});
+
+	it("keeps the container when only the container's combined text matches", () => {
+		document.body.innerHTML = '<div id="split">Mo<span>ve</span></div>';
+
+		const found = findElement({ text: "Move" });
+
+		expect((found as HTMLElement).id).toBe("split");
+	});
+
+	it("falls back to the nearest rendered ancestor when the innermost has no box", () => {
+		document.body.innerHTML =
+			'<button id="save">Save<span style="display:none">Save</span></button>';
+
+		const found = findElement({ text: "Save" });
+
+		expect((found as HTMLElement).id).toBe("save");
+	});
+
+	it("keeps the innermost match when nothing in the subtree is rendered", () => {
+		document.body.innerHTML =
+			'<div id="menu" style="display:none"><span id="item">Organise</span></div>';
+
+		const found = findElement({ text: "Organise" });
+
+		// `wait` still needs an element to poll while the menu is closed.
+		expect((found as HTMLElement).id).toBe("item");
+	});
+
+	it("returns every innermost match and none of their ancestors", () => {
+		document.body.innerHTML =
+			'<ul id="menu"><li id="a">Move</li><li id="b">Move to bin</li></ul>';
+
+		const ids = findAllElements({ text: "Move" }).map((el) => el.id);
+
+		expect(ids).toEqual(["a", "b"]);
 	});
 });
 

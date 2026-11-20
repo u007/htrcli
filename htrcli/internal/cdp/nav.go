@@ -122,6 +122,11 @@ func waitForHistoryDocument(s *Session, entryURL, startHref string, timeoutMs in
 
 // Screenshot captures the page as PNG.
 func Screenshot(s *Session) ([]byte, error) {
+	// An adopted Chrome may run the extension; keep its status line out of the
+	// capture, as the extension's own capture paths do.
+	hideControlStatusBar(s, holdShot)
+	defer restoreControlStatusBar(s, holdShot)
+
 	var res struct {
 		Data string `json:"data"`
 	}

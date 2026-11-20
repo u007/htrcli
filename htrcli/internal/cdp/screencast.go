@@ -145,10 +145,15 @@ func BuildConcatList(frames []FrameMeta, defaultDur float64) string {
 	return b.String()
 }
 
+// pageSession is overridable in tests so RunRecorder can be driven against a
+// fake CDP endpoint without a real Chrome.
+var pageSession = PageSession
+
 // RunRecorder opens a JPEG screencast on the target page and writes each frame
 // to framesDir plus a line to the frame manifest, until a signal arrives on
-// stop. Chrome-only (CDP). Stop is delivered by closing the CDP socket, which
-// unblocks the frame read; the deferred stopScreencast is best-effort.
+// stop. Chrome-only (CDP). On stop it cleans up on a fresh session (stop the
+// screencast, release the status-bar hold), then closes the capture socket to
+// unblock the frame read.
 func RunRecorder(port int, targetID, framesDir string, stop <-chan os.Signal) error {
 	if err := os.MkdirAll(framesDir, 0700); err != nil {
 		return fmt.Errorf("creating frames dir: %w", err)
@@ -159,7 +164,7 @@ func RunRecorder(port int, targetID, framesDir string, stop <-chan os.Signal) er
 	}
 	defer manifest.Close()
 
-	s, err := PageSession(port, targetID)
+	s, err := pageSession(port, targetID)
 	if err != nil {
 		return err
 	}
@@ -168,6 +173,20 @@ func RunRecorder(port int, targetID, framesDir string, stop <-chan os.Signal) er
 	if err := s.Call("Page.enable", nil, nil); err != nil {
 		return fmt.Errorf("Page.enable: %w", err)
 	}
+	var stopped atomic.Bool
+	var cleanupDone atomic.Bool
+	// Keep the extension's status line out of the recorded frames.
+	hideControlStatusBar(s, holdRecord)
+	// The stop goroutine restores on its own session; these cover error exits.
+	defer func() {
+		if cleanupDone.Load() {
+			return
+		}
+		if err := s.Call("Page.stopScreencast", nil, nil); err != nil {
+			fmt.Fprintf(os.Stderr, "[htrcli] stopScreencast: %v\n", err)
+		}
+		restoreControlStatusBar(s, holdRecord)
+	}()
 	if err := s.Call("Page.startScreencast", map[string]any{
 		"format":        "jpeg",
 		"quality":       80,
@@ -175,17 +194,23 @@ func RunRecorder(port int, targetID, framesDir string, stop <-chan os.Signal) er
 	}, nil); err != nil {
 		return fmt.Errorf("Page.startScreencast: %w", err)
 	}
-	defer func() {
-		if err := s.Call("Page.stopScreencast", nil, nil); err != nil {
-			// Expected to fail if the socket was already closed by the stop path.
-			fmt.Fprintf(os.Stderr, "[htrcli] stopScreencast (recorder shutdown): %v\n", err)
-		}
-	}()
 
-	var stopped atomic.Bool
 	go func() {
 		<-stop
 		stopped.Store(true)
+		// Clean up on a fresh session: the frame read below is blocked, and a
+		// timed-out read poisons the websocket for further calls.
+		cleanup, err := pageSession(port, targetID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[htrcli] opening recorder cleanup session: %v\n", err)
+		} else {
+			if err := cleanup.Call("Page.stopScreencast", nil, nil); err != nil {
+				fmt.Fprintf(os.Stderr, "[htrcli] stopScreencast: %v\n", err)
+			}
+			restoreControlStatusBar(cleanup, holdRecord)
+			_ = cleanup.Close()
+		}
+		cleanupDone.Store(true)
 		// Unblocks the WaitEvent read below; gorilla permits concurrent Close.
 		if err := s.Close(); err != nil {
 			fmt.Fprintf(os.Stderr, "[htrcli] closing recorder session on stop: %v\n", err)
@@ -197,7 +222,7 @@ func RunRecorder(port int, targetID, framesDir string, stop <-chan os.Signal) er
 		params, err := s.WaitEvent("Page.screencastFrame", 24*time.Hour)
 		if err != nil {
 			if stopped.Load() {
-				return nil // clean stop: socket closed by the stop goroutine
+				return nil // clean stop: cleanup ran on the fresh session
 			}
 			return fmt.Errorf("waiting for screencast frame: %w", err)
 		}

@@ -173,6 +173,114 @@ func TestPressEnterKeyParams(t *testing.T) {
 	}
 }
 
+// A shortcut must still carry `code` and the virtual key code (apps read both),
+// while a printable character under Ctrl/Alt/Meta must produce no text — the
+// shortcut may not insert the letter it was combined with.
+func TestPressCarriesKeyCodeAndSuppressesShortcutText(t *testing.T) {
+	cases := []struct {
+		spec string
+		want map[string]any
+	}{
+		{
+			spec: "Control+a",
+			want: map[string]any{
+				"key": "a", "modifiers": float64(modifierCtrl),
+				"windowsVirtualKeyCode": float64(65), "code": "KeyA",
+			},
+		},
+		{
+			// Shift produces the uppercase character, not the lowercase one.
+			spec: "Shift+a",
+			want: map[string]any{
+				"key": "A", "modifiers": float64(modifierShift),
+				"windowsVirtualKeyCode": float64(65), "code": "KeyA", "text": "A",
+			},
+		},
+		{
+			spec: "F5",
+			want: map[string]any{
+				"key": "F5", "modifiers": float64(0),
+				"windowsVirtualKeyCode": float64(116), "code": "F5",
+			},
+		},
+		{
+			// A bare modifier is its own key, so it can be held.
+			spec: "Shift",
+			want: map[string]any{
+				"key": "Shift", "modifiers": float64(0),
+				"windowsVirtualKeyCode": float64(16), "code": "ShiftLeft",
+			},
+		},
+		{
+			spec: "-",
+			want: map[string]any{
+				"key": "-", "modifiers": float64(0),
+				"windowsVirtualKeyCode": float64(189), "code": "Minus", "text": "-",
+			},
+		},
+		{
+			// Shift+1 is "!" on the US layout; the VK/code stay on the base key.
+			spec: "Shift+1",
+			want: map[string]any{
+				"key": "!", "modifiers": float64(modifierShift),
+				"windowsVirtualKeyCode": float64(49), "code": "Digit1", "text": "!",
+			},
+		},
+		{
+			spec: "Shift+-",
+			want: map[string]any{
+				"key": "_", "modifiers": float64(modifierShift),
+				"windowsVirtualKeyCode": float64(189), "code": "Minus", "text": "_",
+			},
+		},
+		{
+			// Shifted symbols carry their base key's code/VK, like the TS path.
+			spec: "!",
+			want: map[string]any{
+				"key": "!", "modifiers": float64(modifierShift),
+				"windowsVirtualKeyCode": float64(49), "code": "Digit1", "text": "!",
+			},
+		},
+		{
+			spec: "@",
+			want: map[string]any{
+				"key": "@", "modifiers": float64(modifierShift),
+				"windowsVirtualKeyCode": float64(50), "code": "Digit2", "text": "@",
+			},
+		},
+		{
+			spec: ":",
+			want: map[string]any{
+				"key": ":", "modifiers": float64(modifierShift),
+				"windowsVirtualKeyCode": float64(186), "code": "Semicolon", "text": ":",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.spec, func(t *testing.T) {
+			var down map[string]any
+			url := fakeCDP(t, func(m fakeMsg, conn *websocket.Conn) {
+				if m.Method == "Input.dispatchKeyEvent" && down == nil {
+					if err := json.Unmarshal(m.Params, &down); err != nil {
+						t.Errorf("decoding key params: %v", err)
+					}
+				}
+				conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
+			})
+			s, _ := Dial(url)
+			defer s.Close()
+
+			if err := Press(s, "T1", tc.spec); err != nil {
+				t.Fatalf("press %q: %v", tc.spec, err)
+			}
+			tc.want["type"] = "keyDown"
+			if !reflect.DeepEqual(down, tc.want) {
+				t.Errorf("keyDown = %#v, want %#v", down, tc.want)
+			}
+		})
+	}
+}
+
 func TestNavigateWaitsForLoad(t *testing.T) {
 	url := fakeCDP(t, func(m fakeMsg, conn *websocket.Conn) {
 		conn.WriteJSON(map[string]any{"id": m.ID, "result": map[string]any{}})
@@ -465,9 +573,74 @@ func TestDragNormalizationBounds(t *testing.T) {
 }
 
 func TestKeyInputRejectsInvalidSpecs(t *testing.T) {
-	for _, keySpec := range []string{"", "+", "Ctrl+"} {
+	for _, keySpec := range []string{"", "Ctrl+", "Ener"} {
 		if _, _, err := parseKey(keySpec); err == nil {
 			t.Errorf("parseKey(%q) succeeded, want error", keySpec)
+		}
+	}
+}
+
+func TestKeyParamsDerivesShiftForShiftedCharacters(t *testing.T) {
+	cases := []struct {
+		key  string
+		mods int
+		want int
+	}{
+		{"A", 0, modifierShift},
+		{"!", 0, modifierShift},
+		{"A", modifierCtrl, modifierCtrl},
+	}
+	for _, c := range cases {
+		got := keyParams(c.key, c.mods)["modifiers"]
+		if got != c.want {
+			t.Errorf("keyParams(%q, %d) modifiers = %v, want %d", c.key, c.mods, got, c.want)
+		}
+	}
+}
+
+func TestParseKeyAcceptsModifierAliases(t *testing.T) {
+	cases := []struct {
+		spec     string
+		wantKey  string
+		wantMods int
+	}{
+		{"Option+a", "a", modifierAlt},
+		{"Command+a", "a", modifierMeta},
+		{"Alt+a", "a", modifierAlt},
+		{"Cmd+a", "a", modifierMeta},
+	}
+	for _, c := range cases {
+		key, mods, err := parseKey(c.spec)
+		if err != nil {
+			t.Errorf("parseKey(%q) returned error: %v", c.spec, err)
+			continue
+		}
+		if key != c.wantKey || mods != c.wantMods {
+			t.Errorf("parseKey(%q) = (%q, %d), want (%q, %d)", c.spec, key, mods, c.wantKey, c.wantMods)
+		}
+	}
+}
+
+func TestParseKeyAcceptsPlusKey(t *testing.T) {
+	// "+" is both the separator and a key: a bare "+" is the plus key, and
+	// "Ctrl++" is Ctrl held with it.
+	cases := []struct {
+		spec     string
+		wantKey  string
+		wantMods int
+	}{
+		{"+", "+", 0},
+		{"Ctrl++", "+", modifierCtrl},
+		{"Shift++", "+", modifierShift},
+	}
+	for _, c := range cases {
+		key, mods, err := parseKey(c.spec)
+		if err != nil {
+			t.Errorf("parseKey(%q) returned error: %v", c.spec, err)
+			continue
+		}
+		if key != c.wantKey || mods != c.wantMods {
+			t.Errorf("parseKey(%q) = (%q, %d), want (%q, %d)", c.spec, key, mods, c.wantKey, c.wantMods)
 		}
 	}
 }

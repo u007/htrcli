@@ -35,12 +35,16 @@ func FFmpegVersion(ffmpegPath string) (string, error) {
 }
 
 // EncodeArgs returns the ffmpeg arguments for a concat-demuxer encode.
+//
+// `-fps_mode vfr` replaced `-vsync vfr` in ffmpeg 5.1, and ffmpeg 9 removed
+// `-vsync` outright ("Unrecognized option 'vsync'"). The project requires
+// ffmpeg >= 6, so the modern spelling is always available.
 func EncodeArgs(concatListPath, output string) []string {
 	return []string{
 		"-f", "concat",
 		"-safe", "0",
 		"-i", concatListPath,
-		"-vsync", "vfr",
+		"-fps_mode", "vfr",
 		"-pix_fmt", "yuv420p",
 		"-y",
 		output,

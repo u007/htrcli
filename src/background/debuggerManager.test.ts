@@ -128,6 +128,84 @@ describe("attachShared concurrency", () => {
 		expect(state.detachCalls).toBe(1);
 	});
 
+	it("recovers from an attach this extension leaked by detaching and retrying once", async () => {
+		const state = { attachCalls: 0, detachCalls: 0, stale: true };
+		__setDebuggerImplForTests({
+			attach: async () => {
+				state.attachCalls++;
+				if (state.stale) {
+					state.stale = false;
+					throw new Error(
+						"Another debugger is already attached to the tab with id: 7",
+					);
+				}
+			},
+			detach: async () => {
+				state.detachCalls++;
+			},
+			sendCommand: async () => ({}),
+			onEvent: {
+				addListener: () => undefined,
+				removeListener: () => undefined,
+			},
+		});
+
+		// An abandoned command (client timeout) can leave a real attach behind;
+		// without recovery every later command fails until the tab is reloaded.
+		await attachShared(7);
+
+		expect(state.attachCalls).toBe(2);
+		expect(state.detachCalls).toBe(1);
+
+		// The hold is real: one detachShared releases it.
+		await detachShared(7);
+		expect(state.detachCalls).toBe(2);
+	});
+
+	it("a non-stale attach error does not detach", async () => {
+		const state = { attachCalls: 0, detachCalls: 0 };
+		__setDebuggerImplForTests({
+			attach: async () => {
+				state.attachCalls++;
+				throw new Error("Cannot attach to this target");
+			},
+			detach: async () => {
+				state.detachCalls++;
+			},
+			sendCommand: async () => ({}),
+			onEvent: {
+				addListener: () => undefined,
+				removeListener: () => undefined,
+			},
+		});
+
+		await expect(attachShared(7)).rejects.toThrow(/Cannot attach/);
+		expect(state.attachCalls).toBe(1);
+		expect(state.detachCalls).toBe(0);
+	});
+
+	it("recovery retries the attach only once when both attempts fail", async () => {
+		const state = { attachCalls: 0, detachCalls: 0 };
+		__setDebuggerImplForTests({
+			attach: async () => {
+				state.attachCalls++;
+				throw new Error("Another debugger is already attached");
+			},
+			detach: async () => {
+				state.detachCalls++;
+			},
+			sendCommand: async () => ({}),
+			onEvent: {
+				addListener: () => undefined,
+				removeListener: () => undefined,
+			},
+		});
+
+		await expect(attachShared(7)).rejects.toThrow(/already attached/);
+		expect(state.attachCalls).toBe(2);
+		expect(state.detachCalls).toBe(1);
+	});
+
 	it("a failed attach leaves no hold behind", async () => {
 		const state = { attachCalls: 0, detachCalls: 0, fail: true };
 		__setDebuggerImplForTests({
@@ -149,15 +227,17 @@ describe("attachShared concurrency", () => {
 
 		// The refcount must have been rolled back, so the compensating detach a
 		// caller performs in its catch block is a NO-OP rather than a release
-		// of somebody else's hold.
-		await detachShared(7);
-		expect(state.detachCalls).toBe(0);
-
-		// And a later attach must still perform a real attach.
-		state.fail = false;
-		await attachShared(7);
-		expect(state.attachCalls).toBe(2);
+		// of somebody else's hold. The single detach here is the stale-attach
+		// recovery attempt (detach + one retry); detachShared adds none.
 		await detachShared(7);
 		expect(state.detachCalls).toBe(1);
+
+		// And a later attach must still perform a real attach. The two failed
+		// attach calls are the original plus the recovery retry.
+		state.fail = false;
+		await attachShared(7);
+		expect(state.attachCalls).toBe(3);
+		await detachShared(7);
+		expect(state.detachCalls).toBe(2);
 	});
 });

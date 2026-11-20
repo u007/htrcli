@@ -19,7 +19,7 @@ import type {
 	TargetSelector,
 } from "../types/commands";
 import { AIA_API_KEY } from "../utils/aiaConfig";
-import { resolveKey } from "../utils/keyMap";
+import { MODIFIER_BITS, resolveKey, resolveKeySpec } from "../utils/keyMap";
 import { dispatchClickSequence } from "./clickSequence";
 import { collectAll, type TruncationCause } from "./collectList";
 import {
@@ -1511,6 +1511,27 @@ async function handlePick(
 	return pickOption(element, want);
 }
 
+/**
+ * Build a `KeyboardEventInit` from a key spec ("Enter", "Control+a").
+ *
+ * The CDP path carries modifiers as a bitmask; a page reads the booleans, so the
+ * synthetic path has to set them or a shortcut silently degrades to a plain key.
+ */
+function keyEventInit(spec: string): KeyboardEventInit {
+	const { descriptor, modifiers } = resolveKeySpec(spec);
+	return {
+		bubbles: true,
+		key: descriptor.key,
+		code: descriptor.code,
+		keyCode: descriptor.windowsVirtualKeyCode,
+		which: descriptor.windowsVirtualKeyCode,
+		ctrlKey: (modifiers & MODIFIER_BITS.Control) !== 0,
+		altKey: (modifiers & MODIFIER_BITS.Alt) !== 0,
+		metaKey: (modifiers & MODIFIER_BITS.Meta) !== 0,
+		shiftKey: (modifiers & MODIFIER_BITS.Shift) !== 0,
+	};
+}
+
 async function handlePressKey(
 	target: TargetSelector | undefined,
 	key: string,
@@ -1529,17 +1550,9 @@ async function handlePressKey(
 
 	element.focus();
 
-	// Derive the correct `key`/`code`/`windowsVirtualKeyCode` from the descriptor
-	// instead of the old hand-built `"Key" + key` string, which produced wrong
-	// codes for anything that wasn't a single letter (e.g. "Enter" → "KeyEnter").
-	const descriptor = resolveKey(key);
-	const keyInit: KeyboardEventInit = {
-		bubbles: true,
-		key: descriptor.key,
-		code: descriptor.code,
-		keyCode: descriptor.windowsVirtualKeyCode,
-		which: descriptor.windowsVirtualKeyCode,
-	};
+	// One init for both events, so the modifier flags of "Control+a" reach the
+	// page on keydown and keyup alike.
+	const keyInit = keyEventInit(key);
 	const keyDownEvent = new KeyboardEvent("keydown", keyInit);
 	const keyUpEvent = new KeyboardEvent("keyup", keyInit);
 
@@ -1560,16 +1573,7 @@ async function handleKeyDown(
 			})) as HTMLElement)
 		: ((root.activeElement as HTMLElement | null) ?? root.body);
 	element.focus();
-	const descriptor = resolveKey(key);
-	element.dispatchEvent(
-		new KeyboardEvent("keydown", {
-			bubbles: true,
-			key: descriptor.key,
-			code: descriptor.code,
-			keyCode: descriptor.windowsVirtualKeyCode,
-			which: descriptor.windowsVirtualKeyCode,
-		}),
-	);
+	element.dispatchEvent(new KeyboardEvent("keydown", keyEventInit(key)));
 }
 
 async function handleKeyUp(
@@ -1585,16 +1589,7 @@ async function handleKeyUp(
 			})) as HTMLElement)
 		: ((root.activeElement as HTMLElement | null) ?? root.body);
 	element.focus();
-	const descriptor = resolveKey(key);
-	element.dispatchEvent(
-		new KeyboardEvent("keyup", {
-			bubbles: true,
-			key: descriptor.key,
-			code: descriptor.code,
-			keyCode: descriptor.windowsVirtualKeyCode,
-			which: descriptor.windowsVirtualKeyCode,
-		}),
-	);
+	element.dispatchEvent(new KeyboardEvent("keyup", keyEventInit(key)));
 }
 
 /**

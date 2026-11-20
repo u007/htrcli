@@ -9,6 +9,7 @@
  * and detach.
  */
 
+import { attachShared, detachShared } from "./debuggerManager";
 import { matchRule, type NetworkMockRule } from "./networkMockMatch";
 
 interface PausedRequest {
@@ -72,6 +73,10 @@ export function decideRequestPaused(
 // ─── Per-tab rule store + debugger lifecycle ───────────────────────────
 
 const rulesByTab = new Map<number, NetworkMockRule[]>();
+// Tabs whose mock holds a shared debugger ref, plus the in-flight arm so two
+// concurrent arms share one attach instead of leaking a refcount.
+const armedTabs = new Set<number>();
+const armPromises = new Map<number, Promise<void>>();
 
 export function getRules(tabId: number): NetworkMockRule[] {
 	return rulesByTab.get(tabId) ?? [];
@@ -110,17 +115,36 @@ function ensureEventListener(): void {
 async function armFetch(tabId: number): Promise<void> {
 	if (!debuggerAvailable()) return;
 	ensureEventListener();
+	const existing = armPromises.get(tabId);
+	if (existing) {
+		await existing;
+		return;
+	}
 	const target = { tabId };
-	// Attach is idempotent-ish: a second attach throws "Already attached", which
-	// we tolerate so re-arming an already-armed tab is safe.
-	try {
-		await chrome.debugger.attach(target, "1.3");
-	} catch (err) {
-		if (!String(err).includes("Already attached")) {
+	const work = (async () => {
+		// The shared manager owns the refcount, so re-arming does not double-attach
+		// and a concurrent eval can no longer detach a live mock.
+		const newlyAttached = !armedTabs.has(tabId);
+		if (newlyAttached) {
+			await attachShared(tabId);
+			armedTabs.add(tabId);
+		}
+		try {
+			await chrome.debugger.sendCommand(target, "Fetch.enable", {});
+		} catch (err) {
+			if (newlyAttached) {
+				armedTabs.delete(tabId);
+				await detachShared(tabId);
+			}
 			throw err;
 		}
+	})();
+	armPromises.set(tabId, work);
+	try {
+		await work;
+	} finally {
+		armPromises.delete(tabId);
 	}
-	await chrome.debugger.sendCommand(target, "Fetch.enable", {});
 }
 
 async function disarmFetch(tabId: number): Promise<void> {
@@ -128,9 +152,11 @@ async function disarmFetch(tabId: number): Promise<void> {
 	const target = { tabId };
 	try {
 		await chrome.debugger.sendCommand(target, "Fetch.disable", {});
-		await chrome.debugger.detach(target);
 	} catch (err) {
 		console.warn("[HTR NControl] disarmFetch:", err);
+	}
+	if (armedTabs.delete(tabId)) {
+		await detachShared(tabId);
 	}
 }
 
