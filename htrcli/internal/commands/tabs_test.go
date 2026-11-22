@@ -286,3 +286,88 @@ func TestTabsFilterRejectsFirefoxOverCDP(t *testing.T) {
 		t.Fatalf("want firefox-over-CDP rejection, got %v", err)
 	}
 }
+
+// TestTabsListChromeAppendsFirefox pins the Chrome-filtered list: Chrome rows
+// print first, then a labeled Firefox table for the tabs the filter hides.
+func TestTabsListChromeAppendsFirefox(t *testing.T) {
+	td := newTabsDaemon(t, sharedIDTabs, 0)
+	useTabsDaemon(t, td, "chrome")
+
+	var err error
+	out := captureStdout(t, func() {
+		err = tabsListCmd.RunE(tabsListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("tabs list --browser chrome: %v", err)
+	}
+
+	const heading = "Other tabs open in Firefox:"
+	idxHeading := strings.Index(out, heading)
+	if idxHeading < 0 {
+		t.Fatalf("missing %q in output:\n%s", heading, out)
+	}
+	if strings.Count(out, heading) != 1 {
+		t.Fatalf("Firefox section must appear exactly once:\n%s", out)
+	}
+	// Chrome row ("ch2" is unique to Chrome and not a substring of "chrome")
+	// must come before the Firefox section, and the Firefox row after it.
+	if i := strings.Index(out, "ch2"); i < 0 || i > idxHeading {
+		t.Fatalf("chrome row must precede the Firefox section:\n%s", out)
+	}
+	if i := strings.Index(out, "ff"); i < idxHeading {
+		t.Fatalf("firefox row must follow the Firefox section:\n%s", out)
+	}
+}
+
+// TestTabsListFirefoxFilterDoesNotAppendChrome pins the asymmetry: only the
+// Chrome-filtered list widens, so a Firefox filter stays Firefox-only.
+func TestTabsListFirefoxFilterDoesNotAppendChrome(t *testing.T) {
+	td := newTabsDaemon(t, sharedIDTabs, 0)
+	useTabsDaemon(t, td, "firefox")
+
+	var err error
+	out := captureStdout(t, func() {
+		err = tabsListCmd.RunE(tabsListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("tabs list --browser firefox: %v", err)
+	}
+	if strings.Contains(out, "Other tabs open in Firefox:") {
+		t.Fatalf("firefox filter must not append a Firefox section:\n%s", out)
+	}
+	if strings.Contains(out, "ch2") {
+		t.Fatalf("firefox filter must not show chrome rows:\n%s", out)
+	}
+	if !strings.Contains(out, "ff") {
+		t.Fatalf("firefox filter must still show the firefox row:\n%s", out)
+	}
+}
+
+// TestTabsListChromeJSONStaysFiltered pins that --json never widens: the
+// Chrome filter returns only Chrome tabs even though Firefox tabs exist.
+func TestTabsListChromeJSONStaysFiltered(t *testing.T) {
+	td := newTabsDaemon(t, sharedIDTabs, 0)
+	useTabsDaemon(t, td, "chrome")
+	output.JSONOutput = true
+	t.Cleanup(func() { output.JSONOutput = false })
+
+	var err error
+	out := captureStdout(t, func() {
+		err = tabsListCmd.RunE(tabsListCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("tabs list --browser chrome --json: %v", err)
+	}
+	var got []api.TabInfo
+	if jerr := json.Unmarshal([]byte(out), &got); jerr != nil {
+		t.Fatalf("output is not JSON: %v\n%s", jerr, out)
+	}
+	if len(got) != 2 {
+		t.Fatalf("json must stay chrome-only (2 tabs), got %d: %+v", len(got), got)
+	}
+	for _, tab := range got {
+		if tab.Browser != "chrome" {
+			t.Fatalf("json widened to %s: %+v", tab.Browser, got)
+		}
+	}
+}

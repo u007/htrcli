@@ -255,6 +255,7 @@ Uptime: 1h 23m
 
 ```bash
 htrcli tabs list                              # list all connected tabs (Chrome + Firefox)
+htrcli tabs list --browser chrome             # Chrome tabs, then a read-only Firefox table
 htrcli tabs list --browser firefox            # one browser only (strict filter, no fallback)
 htrcli tabs get <id>
 htrcli tabs get <id> --browser chrome         # when the same ID exists in both browsers
@@ -273,8 +274,11 @@ Each browser numbers its own tabs, so the same native tab ID can exist in Chrome
 and Firefox at once. `--tab <id>` without `--browser` resolves ownership to the
 earliest-connected browser that owns it; adding the global `--browser` makes it
 strict (the command fails if the tab is not in that browser). The `tabs`
-subcommands take their own `--browser` filter, which is strict by nature — it
-never widens to the other browser.
+subcommands take their own `--browser` filter, which is strict for routing and
+`--json`. The one display exception is `tabs list --browser chrome`: after the
+Chrome table it prints a separate "Other tabs open in Firefox:" table for the
+Firefox tabs the filter hides, so a Chrome list does not silently hide an open
+Firefox. This widening is human-output only — `--json` stays strictly filtered.
 
 `tabs new` / `tabs close` run in the extension's **background worker** over the
 tab-less `POST /api/background/command` route (see

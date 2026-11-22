@@ -33,41 +33,62 @@ var tabsListCmd = &cobra.Command{
 			return runTabsListCDP()
 		}
 		c := GetClient()
-		tabs, err := c.ListTabs()
+		all, err := c.ListTabs()
 		if err != nil {
 			return err
 		}
-		tabs = filterTabs(tabs, browser)
+		tabs := filterTabs(all, browser)
 
 		if output.JSONOutput {
 			output.PrintJSON(tabs)
 			return nil
 		}
 
-		if len(tabs) == 0 {
+		// A Chrome-filtered list also shows the Firefox tabs in their own table
+		// below, so the filter does not silently hide an open Firefox. Only the
+		// human output widens: --json stays strictly filtered.
+		var other []api.TabInfo
+		if browser == "chrome" {
+			other = filterTabs(all, "firefox")
+		}
+		if len(tabs) == 0 && len(other) == 0 {
 			fmt.Println("No tabs connected")
 			return nil
 		}
-
-		table := output.NewTable("ID", "Browser", "Title", "URL", "Active")
-		for _, t := range tabs {
-			active := "no"
-			if t.Active {
-				active = "yes"
-			}
-			title := t.Title
-			if len(title) > 40 {
-				title = title[:37] + "..."
-			}
-			url := t.URL
-			if len(url) > 40 {
-				url = url[:37] + "..."
-			}
-			table.AddRow(strconv.Itoa(t.ID), browserLabel(t.Browser), title, url, active)
+		if len(tabs) > 0 {
+			fmt.Print(tabsTable(tabs))
 		}
-		fmt.Print(table)
+		if len(other) > 0 {
+			if len(tabs) > 0 {
+				fmt.Println()
+			}
+			fmt.Println("Other tabs open in Firefox:")
+			fmt.Print(tabsTable(other))
+		}
 		return nil
 	},
+}
+
+// tabsTable renders tabs as the ID/Browser/Title/URL/Active table used by
+// tabs list, both for the filtered list and the extra Firefox section.
+func tabsTable(tabs []api.TabInfo) string {
+	table := output.NewTable("ID", "Browser", "Title", "URL", "Active")
+	for _, t := range tabs {
+		active := "no"
+		if t.Active {
+			active = "yes"
+		}
+		title := t.Title
+		if len(title) > 40 {
+			title = title[:37] + "..."
+		}
+		url := t.URL
+		if len(url) > 40 {
+			url = url[:37] + "..."
+		}
+		table.AddRow(strconv.Itoa(t.ID), browserLabel(t.Browser), title, url, active)
+	}
+	return table.String()
 }
 
 var tabsGetCmd = &cobra.Command{
@@ -337,7 +358,8 @@ func runTabsCloseCDP(id string) error {
 
 func init() {
 	tabsCmd.PersistentFlags().StringVar(&tabsBrowser, "browser", "",
-		"limit tabs commands to one browser (chrome|firefox); omit for all browsers")
+		"limit tabs commands to one browser (chrome|firefox); omit for all browsers "+
+			"(tabs list --browser chrome also shows the Firefox tabs below)")
 	tabsCmd.AddCommand(tabsListCmd)
 	tabsCmd.AddCommand(tabsGetCmd)
 	tabsCmd.AddCommand(tabsNewCmd)

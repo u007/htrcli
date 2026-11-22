@@ -983,6 +983,7 @@ A host without `Element.checkVisibility` (Chrome <105, Firefox <125) makes
 
 ```bash
 htrcli tabs list                           # list all connected tabs (Chrome and Firefox)
+htrcli tabs list --browser chrome          # Chrome tabs, then a read-only Firefox table
 htrcli tabs list --browser firefox         # only Firefox tabs (chrome|firefox)
 htrcli tabs get 123                        # get info for a tab
 htrcli tabs get 123 --browser chrome       # same, when the ID also exists in another browser
@@ -998,7 +999,9 @@ htrcli --tab 123 click "input[name=q]"
 `--browser` on the `tabs` subcommands is a strict filter: it never falls back
 to the other browser, and it is separate from the global `--browser` hint used
 by tab-less commands. Pass it after `tabs`, e.g. `htrcli tabs list --browser
-firefox`.
+firefox`. The one display exception is `tabs list --browser chrome`: after the
+Chrome table it prints a separate "Other tabs open in Firefox:" table for the
+Firefox tabs the filter hides. `--json` stays strictly filtered.
 
 - `tabs new <url>` opens the tab from the extension's background worker, so no
   connected page is needed. With `--browser`, only that browser answers and the
@@ -1922,7 +1925,7 @@ after the page loads.
 | `htrcli config show` | Show current config |
 | `htrcli install` | Register as native messaging host |
 | `htrcli serve` | Start native messaging daemon (:3845) |
-| `htrcli tabs list [--browser chrome\|firefox]` | List connected tabs, optionally one browser |
+| `htrcli tabs list [--browser chrome\|firefox]` | List connected tabs, optionally one browser (`--browser chrome` also appends a Firefox table) |
 | `htrcli tabs get <id> [--browser chrome\|firefox]` | Get tab info |
 | `htrcli tabs new <url> [--browser chrome\|firefox]` | Open a URL in a new tab; prints its ID and browser |
 | `htrcli tabs close <id> [--browser chrome\|firefox]` | Close a tab |
